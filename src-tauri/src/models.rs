@@ -160,7 +160,17 @@ pub enum TranscriptStatus {
 pub struct AppStatus {
     pub session_status: SessionStatus,
     pub has_api_key: bool,
+    pub api_key_source: Option<ApiKeySource>,
+    pub api_key_fingerprint: Option<String>,
     pub transcript_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ApiKeySource {
+    Environment,
+    Keychain,
+    Memory,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

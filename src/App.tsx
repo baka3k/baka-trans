@@ -33,6 +33,7 @@ import {
 import { mergeTranscriptDelta, renderTranscript } from "./transcript";
 import type {
   AppErrorPayload,
+  ApiKeySource,
   AudioDeviceInfo,
   AudioDevices,
   AudioOutputChannel,
@@ -70,6 +71,16 @@ const channelOptions: Array<{ value: AudioOutputChannel; label: string }> = [
 const routingStorageKey = "baka-trans-routing-profile-v1";
 const activeSessionStatuses: SessionStatus[] = ["listening", "translating", "speaking"];
 
+interface AudioLineRow {
+  id: string;
+  label: string;
+  detail: string;
+  state: string;
+  leftLevel: number;
+  rightLevel: number;
+  disabled?: boolean;
+}
+
 interface RoutingProfile {
   inputDeviceId: string;
   outputDeviceId: string;
@@ -96,6 +107,8 @@ export default function App() {
   const [fallbackEnabled, setFallbackEnabled] = useState(false);
   const [status, setStatus] = useState<SessionStatus>("idle");
   const [apiKeyStored, setApiKeyStored] = useState(false);
+  const [apiKeySource, setApiKeySource] = useState<ApiKeySource | null>(null);
+  const [apiKeyFingerprint, setApiKeyFingerprint] = useState("");
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [error, setError] = useState<AppErrorPayload | null>(null);
   const [boundaryFeedback, setBoundaryFeedback] = useState("");
@@ -132,7 +145,42 @@ export default function App() {
   const canTestAudio = status === "idle" && !busy;
   const inputSignalPercent = Math.round(level.peak * 100);
   const inputSignalLabel =
-    inputSignalPercent > 3 ? `${inputSignalPercent}% peak` : status === "idle" ? "Idle" : "No signal";
+    inputSignalPercent > 3
+      ? `${inputSignalPercent}% peak`
+      : status === "idle"
+        ? "Idle"
+        : "No signal";
+  const translationOutLevel = status === "speaking" ? 78 : 0;
+  const monitorOutLevel = monitorOriginalAudio && canForceBoundary ? inputSignalPercent : 0;
+  const audioLineRows: AudioLineRow[] = [
+    {
+      id: "input",
+      label: "Input",
+      detail: selectedInput?.name ?? "No input",
+      state: inputSignalPercent > 3 ? "signal" : canForceBoundary ? "listening" : "idle",
+      leftLevel: inputSignalPercent,
+      rightLevel: inputSignalPercent,
+      disabled: !selectedInput,
+    },
+    {
+      id: "translation",
+      label: "Translated out",
+      detail: formatRoute(selectedOutput, translationOutputChannel),
+      state: status === "speaking" ? "speaking" : canForceBoundary ? "armed" : "idle",
+      leftLevel: channelLevel(translationOutputChannel, "left", translationOutLevel),
+      rightLevel: channelLevel(translationOutputChannel, "right", translationOutLevel),
+      disabled: !selectedOutput,
+    },
+    {
+      id: "monitor",
+      label: "Original out",
+      detail: monitorOriginalAudio ? formatRoute(selectedMonitorOutput, monitorOutputChannel) : "Off",
+      state: monitorOriginalAudio ? (monitorOutLevel > 3 ? "signal" : "armed") : "off",
+      leftLevel: channelLevel(monitorOutputChannel, "left", monitorOutLevel),
+      rightLevel: channelLevel(monitorOutputChannel, "right", monitorOutLevel),
+      disabled: !monitorOriginalAudio || !selectedMonitorOutput,
+    },
+  ];
   const readinessLabel = canStart
     ? "Ready"
     : status === "idle"
@@ -226,6 +274,8 @@ export default function App() {
       setDevices(deviceList);
       setStatus(appStatus.sessionStatus);
       setApiKeyStored(stored);
+      setApiKeySource(appStatus.apiKeySource ?? null);
+      setApiKeyFingerprint(appStatus.apiKeyFingerprint ?? "");
       const storedRouting = readRoutingProfile();
       setInputDeviceId(resolveStoredDevice(deviceList.inputs, storedRouting?.inputDeviceId));
       setOutputDeviceId(resolveStoredDevice(deviceList.outputs, storedRouting?.outputDeviceId));
@@ -251,8 +301,13 @@ export default function App() {
       const stored = await hasApiKey();
       setApiKeyStored(stored);
       if (stored) {
+        const appStatus = await getAppStatus();
+        setApiKeySource(appStatus.apiKeySource ?? null);
+        setApiKeyFingerprint(appStatus.apiKeyFingerprint ?? "");
         setApiKeyDraft("");
       } else {
+        setApiKeySource(null);
+        setApiKeyFingerprint("");
         setError({
           code: "missing_api_key",
           message: "The API key was saved, but the app could not read it back.",
@@ -589,6 +644,7 @@ export default function App() {
               <span style={{ width: `${Math.round(level.rms * 100)}%` }} />
             </div>
           </div>
+          <AudioLineMonitor rows={audioLineRows} />
           <div className="meter-row">
             <Volume2 size={17} />
             <button
@@ -648,6 +704,14 @@ export default function App() {
             <button onClick={saveKey} disabled={apiKeyDraft.trim().length === 0 || busy}>
               <Save size={17} /> Save
             </button>
+          </div>
+          <div className={`key-status ${apiKeyStored ? "ok" : "warn"}`}>
+            <KeyRound size={14} />
+            <span>
+              {apiKeyStored
+                ? `Using ${labelApiKeySource(apiKeySource)} key ${apiKeyFingerprint || ""}`
+                : "No OpenAI API key available"}
+            </span>
           </div>
           <div className="setup-list">
             <div>
@@ -812,6 +876,36 @@ function RoutingSummary({
   );
 }
 
+function AudioLineMonitor({ rows }: { rows: AudioLineRow[] }) {
+  return (
+    <div className="line-monitor" aria-label="Audio line monitor">
+      {rows.map((row) => (
+        <div className={`line-row ${row.disabled ? "disabled" : ""}`} key={row.id}>
+          <div className="line-meta">
+            <strong>{row.label}</strong>
+            <span>{row.detail}</span>
+          </div>
+          <span className={`line-state state-${row.state}`}>{row.state}</span>
+          <ChannelLane side="L" value={row.leftLevel} />
+          <ChannelLane side="R" value={row.rightLevel} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ChannelLane({ side, value }: { side: "L" | "R"; value: number }) {
+  const normalized = Math.max(0, Math.min(100, Math.round(value)));
+  return (
+    <div className={`channel-lane ${normalized > 3 ? "active" : ""}`}>
+      <span>{side}</span>
+      <div>
+        <i style={{ width: `${normalized}%` }} />
+      </div>
+    </div>
+  );
+}
+
 function InlineWarning({ text }: { text: string }) {
   return (
     <div className="inline-warning">
@@ -890,6 +984,17 @@ function sameDeviceName(left?: AudioDeviceInfo, right?: AudioDeviceInfo) {
   );
 }
 
+function channelLevel(
+  outputChannel: AudioOutputChannel,
+  side: "left" | "right",
+  value: number,
+) {
+  if (outputChannel === "all") {
+    return value;
+  }
+  return outputChannel === side ? value : 0;
+}
+
 function readRoutingProfile(): RoutingProfile | null {
   try {
     const raw = window.localStorage.getItem(routingStorageKey);
@@ -933,6 +1038,19 @@ function channelLabel(outputChannel: AudioOutputChannel) {
       return "right";
     case "all":
       return "both ears";
+  }
+}
+
+function labelApiKeySource(source: ApiKeySource | null) {
+  switch (source) {
+    case "environment":
+      return "env";
+    case "keychain":
+      return "Keychain";
+    case "memory":
+      return "memory";
+    default:
+      return "unknown";
   }
 }
 

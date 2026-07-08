@@ -38,9 +38,12 @@ impl AppState {
     }
 
     pub fn app_status(&self) -> AppResult<AppStatus> {
+        let api_key = security::api_key_status();
         Ok(AppStatus {
             session_status: self.status()?,
-            has_api_key: security::has_api_key(),
+            has_api_key: api_key.is_some(),
+            api_key_source: api_key.as_ref().map(|info| info.source),
+            api_key_fingerprint: api_key.map(|info| info.fingerprint),
             transcript_count: self.transcript.lock().map_err(lock_error)?.len(),
         })
     }
