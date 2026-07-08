@@ -17,10 +17,13 @@ Build a lightweight macOS desktop app that captures Microsoft Teams meeting audi
 - `docs/development-rules.md` is absent, so no additional project-local development rules were found.
 - The repository currently contains only `note.md`, so the first implementation phase must scaffold the app.
 - `mind_mcp` was reachable, but its graph-RAG query failed with an internal backend error. `graph_mcp` semantic results pointed to an unrelated indexed project, so local `note.md` is the project source of truth.
+- 2026-07-08 Phase 07 update: `mind_mcp` and `graph_mcp` returned unrelated indexed corpus results for the manual sentence-boundary fallback request. Local plan files, `src-tauri/src/ai.rs`, `src-tauri/src/session.rs`, and `src/App.tsx` are the implementation source of truth.
+- 2026-07-08 Source signal update: `mind_mcp` had no matching project collection and `graph_mcp` returned unrelated indexed data. Local code shows `src-tauri/src/audio.rs` already emits `audio-level` with `rms` and `peak`, while `src/App.tsx` renders a basic meter. The new scope should refine this into an explicit live source-signal indicator rather than duplicating capture logic.
 
 ## Official API Notes
 
 - OpenAI Realtime Translation supports a dedicated `/v1/realtime/translations` endpoint and `gpt-realtime-translate` for interpreter-style live speech translation.
+- OpenAI Realtime WebSocket audio uses `input_audio_buffer.append` for base64 audio chunks. `input_audio_buffer.commit` forces the current input buffer into a conversation item and clears it; with server VAD the server normally commits automatically, while disabling VAD requires manual commit and response creation.
 - OpenAI Realtime Transcription recommends `gpt-realtime-whisper` for low-latency live transcript deltas, while standard Audio API transcription models are better for non-streaming file or chunk workflows.
 - OpenAI Text-to-Speech docs recommend `gpt-4o-mini-tts` for intelligent realtime TTS, with `tts-1` and `tts-1-hd` as older alternatives.
 - Current OpenAI model docs list GPT-5.5 as the flagship model and GPT-5.4 mini/nano as lower-latency/lower-cost choices. For this app, the main path should avoid a text model in the hot loop when the dedicated translation session can produce translated audio directly.
@@ -29,6 +32,7 @@ References:
 
 - https://developers.openai.com/api/docs/guides/realtime-translation
 - https://developers.openai.com/api/docs/guides/realtime-transcription
+- https://developers.openai.com/api/reference/resources/realtime/client-events/
 - https://developers.openai.com/api/docs/guides/realtime-websocket
 - https://developers.openai.com/api/docs/guides/text-to-speech
 - https://developers.openai.com/api/docs/models
@@ -112,6 +116,14 @@ Transcript item:
 - status: `partial`, `final`, `error`
 - latency metrics when available
 
+Source audio signal state:
+
+- selected input device ID
+- latest peak and RMS
+- last signal event timestamp
+- stream state: `waiting`, `receiving`, `silent`, `stale`, `error`
+- optional chunk counter or sequence number for diagnostics
+
 Session status:
 
 - `idle`
@@ -160,6 +172,18 @@ Session status:
    - Persist routing choices and validate feedback-risk combinations before session start.
    - See `phase-06-audio-routing-profile.md`.
 
+7. Manual utterance boundary fallback
+   - Add a visible session button and keyboard shortcut that lets the user force the current audio buffer to be translated when the remote speaker talks continuously and automatic turn detection does not close the sentence.
+   - Route the control through the Rust session state to the realtime WebSocket writer as a manual boundary/commit command.
+   - Track committed/ignored/error states so the fallback is usable under meeting pressure.
+   - See `phase-07-manual-utterance-boundary.md`.
+
+8. Source audio signal indicator
+   - Promote the existing `audio-level` event into a clear "source audio is arriving" signal in the Audio routing area.
+   - Track event freshness so the UI can distinguish no data, silent data, active signal, stale stream, and capture error.
+   - Keep the backend change limited to metadata only if the current `rms` and `peak` event is insufficient.
+   - See `phase-08-source-audio-signal-indicator.md`.
+
 ## Acceptance Criteria
 
 - The user can select source/target languages, input device, and output device.
@@ -170,6 +194,9 @@ Session status:
 - The translated audio plays only to the selected headphones/output device.
 - The UI shows live source and translated transcripts with session status.
 - Start, Stop, Pause, and Resume work without leaving orphaned audio streams or sockets.
+- During an active session, the user can manually force the current spoken segment to translate when automatic sentence/turn detection stalls.
+- The UI clearly indicates when the selected meeting source is actively delivering audio data into the app, even before translation output appears.
+- The source signal indicator distinguishes a healthy but silent stream from a stream that has stopped sending events.
 - Transcript export works as plain text and Markdown.
 - API key is stored in Keychain or loaded from development environment variables only.
 - Raw audio is not stored unless a future explicit setting is added.
@@ -177,8 +204,11 @@ Session status:
 ## Verification Strategy
 
 - Unit tests for config validation, transcript reducer/state transitions, event parsing, and retry policy.
+- Unit tests for manual boundary command routing, empty-buffer handling, debounce behavior, and UI disabled states.
+- Unit tests for source signal state transitions: waiting, receiving, silent, stale, and error.
 - Rust integration checks for device enumeration and audio format conversion.
 - Manual macOS validation with BlackHole 2ch and Teams audio routing.
+- Manual validation that the source indicator changes when Teams/fixture audio is routed into BlackHole, goes silent when audio stops, and turns stale when capture events stop.
 - Realtime API smoke test with a short local audio fixture before live meeting tests.
 - Two-hour soak test with synthetic or looped audio before packaging.
 - Frontend verification at small and normal desktop window sizes.
@@ -191,6 +221,9 @@ Session status:
 - Simultaneous capture/playback can create feedback if the selected input receives output audio.
 - Original-audio monitoring can duplicate Teams audio or create echo unless the selected input, translated output, and monitor output are validated together.
 - API quota/network errors can interrupt meetings unless retry and fallback paths are explicit.
+- Manual boundary commits can produce duplicate, truncated, or empty translations if they race with server VAD or are pressed too often.
+- Realtime translation may require additional response triggering depending on selected turn-detection mode; this must be verified against the active API event contract.
+- A low level meter alone can mislead users during silence, so freshness and selected-device matching must be visible enough to prove the audio path is connected.
 
 ## Out of Scope for MVP
 

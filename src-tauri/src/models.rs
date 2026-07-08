@@ -82,6 +82,39 @@ pub struct SessionConfig {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+pub enum ManualBoundaryReason {
+    UserButton,
+    KeyboardShortcut,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManualBoundaryRequest {
+    pub reason: ManualBoundaryReason,
+    pub requested_at_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ManualBoundaryStatus {
+    Idle,
+    Pending,
+    Committed,
+    IgnoredEmptyBuffer,
+    RateLimited,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManualBoundaryEvent {
+    pub status: ManualBoundaryStatus,
+    pub message: String,
+    pub committed_at_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum SessionStatus {
     Idle,
     Starting,

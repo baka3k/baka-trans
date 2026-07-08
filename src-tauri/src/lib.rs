@@ -7,8 +7,8 @@ mod security;
 mod session;
 
 use commands::{
-    export_transcript, get_app_status, has_api_key, list_audio_devices, pause_session,
-    play_test_tone, resume_session, save_api_key, start_session, stop_session,
+    export_transcript, force_translate_boundary, get_app_status, has_api_key, list_audio_devices,
+    pause_session, play_test_tone, resume_session, save_api_key, start_session, stop_session,
 };
 use session::AppState;
 
@@ -23,6 +23,7 @@ pub fn run() {
             pause_session,
             resume_session,
             stop_session,
+            force_translate_boundary,
             save_api_key,
             has_api_key,
             export_transcript,

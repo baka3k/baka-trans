@@ -1,8 +1,10 @@
 import { listen } from "@tauri-apps/api/event";
 import {
+  Activity,
   AlertTriangle,
   Check,
   Download,
+  FileText,
   Headphones,
   KeyRound,
   Mic,
@@ -10,12 +12,14 @@ import {
   Play,
   RefreshCw,
   Save,
+  Send,
   Square,
   Volume2,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   exportTranscript,
+  forceTranslateBoundary,
   getAppStatus,
   hasApiKey,
   listAudioDevices,
@@ -33,6 +37,8 @@ import type {
   AudioDevices,
   AudioLevelEvent,
   Language,
+  ManualBoundaryEvent,
+  ManualBoundaryReason,
   SessionConfig,
   SessionStatus,
   TranscriptItem,
@@ -56,6 +62,7 @@ const styles: Array<{ value: TranslationStyle; label: string }> = [
 
 const voices = ["marin", "cedar", "coral", "verse", "alloy", "nova"];
 const routingStorageKey = "baka-trans-routing-profile-v1";
+const activeSessionStatuses: SessionStatus[] = ["listening", "translating", "speaking"];
 
 interface RoutingProfile {
   inputDeviceId: string;
@@ -80,6 +87,7 @@ export default function App() {
   const [apiKeyStored, setApiKeyStored] = useState(false);
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [error, setError] = useState<AppErrorPayload | null>(null);
+  const [boundaryFeedback, setBoundaryFeedback] = useState("");
   const [level, setLevel] = useState(0);
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
   const [busy, setBusy] = useState(false);
@@ -102,9 +110,15 @@ export default function App() {
     outputDeviceId.length > 0 &&
     (!monitorOriginalAudio || monitorOutputDeviceId.length > 0) &&
     apiKeyStored;
-  const canPause = ["listening", "translating", "speaking"].includes(status);
+  const canForceBoundary = activeSessionStatuses.includes(status);
+  const canPause = canForceBoundary;
   const canResume = status === "paused";
   const canStop = status !== "idle" && status !== "stopping";
+  const readinessLabel = canStart
+    ? "Ready"
+    : status === "idle"
+      ? "Setup needed"
+      : labelStatus(status);
 
   const config: SessionConfig = useMemo(
     () => ({
@@ -139,6 +153,9 @@ export default function App() {
       listen<TranscriptItem>("transcript-update", (event) => {
         setTranscript((items) => mergeTranscriptDelta(items, event.payload));
       }),
+      listen<ManualBoundaryEvent>("manual-boundary-status", (event) => {
+        setBoundaryFeedback(event.payload.message);
+      }),
       listen<AudioLevelEvent>("audio-level", (event) => {
         setLevel(Math.max(0, Math.min(1, event.payload.peak)));
       }),
@@ -153,6 +170,19 @@ export default function App() {
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ block: "end" });
   }, [transcript]);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (!event.metaKey || event.key !== "Enter" || !canForceBoundary || busy) {
+        return;
+      }
+      event.preventDefault();
+      void requestBoundary("keyboard_shortcut");
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [busy, canForceBoundary]);
 
   async function hydrate() {
     setBusy(true);
@@ -184,8 +214,16 @@ export default function App() {
     setError(null);
     try {
       await saveApiKey(apiKeyDraft);
-      setApiKeyDraft("");
-      setApiKeyStored(true);
+      const stored = await hasApiKey();
+      setApiKeyStored(stored);
+      if (stored) {
+        setApiKeyDraft("");
+      } else {
+        setError({
+          code: "missing_api_key",
+          message: "The API key was saved, but the app could not read it back.",
+        });
+      }
     } catch (cause) {
       setError(normalizeError(cause));
     } finally {
@@ -198,6 +236,22 @@ export default function App() {
     setError(null);
     try {
       await command();
+    } catch (cause) {
+      const normalized = normalizeError(cause);
+      if (normalized.code === "missing_api_key") {
+        setApiKeyStored(false);
+      }
+      setError(normalized);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function requestBoundary(reason: ManualBoundaryReason) {
+    setBusy(true);
+    setError(null);
+    try {
+      await forceTranslateBoundary(reason);
     } catch (cause) {
       setError(normalizeError(cause));
     } finally {
@@ -258,24 +312,35 @@ export default function App() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div>
-          <h1>Baka Trans</h1>
-          <div className="status-row">
-            <span className={`status-dot status-${status}`} />
-            <span>{labelStatus(status)}</span>
-            {apiKeyStored ? (
-              <span className="status-chip ok">
-                <Check size={14} /> Key stored
-              </span>
-            ) : (
-              <span className="status-chip warn">
-                <KeyRound size={14} /> Key needed
-              </span>
-            )}
+        <div className="brand-lockup">
+          <div className="brand-mark" aria-hidden="true">
+            <Activity size={22} />
+          </div>
+          <div>
+            <h1>Baka Trans</h1>
+            <div className="status-row">
+              <span className={`status-dot status-${status}`} />
+              <span>{labelStatus(status)}</span>
+              {apiKeyStored ? (
+                <span className="status-chip ok">
+                  <Check size={14} /> Key stored
+                </span>
+              ) : (
+                <span className="status-chip warn">
+                  <KeyRound size={14} /> Key needed
+                </span>
+              )}
+            </div>
           </div>
         </div>
         <div className="top-actions">
-          <button className="icon-button" onClick={hydrate} disabled={busy} title="Refresh devices">
+          <button
+            className="icon-button"
+            onClick={hydrate}
+            disabled={busy}
+            title="Refresh devices"
+            aria-label="Refresh devices"
+          >
             <RefreshCw size={18} />
           </button>
           <button
@@ -283,6 +348,7 @@ export default function App() {
             onClick={() => void doExport("text")}
             disabled={transcript.length === 0}
             title="Export text"
+            aria-label="Export text"
           >
             <Download size={18} />
           </button>
@@ -291,15 +357,19 @@ export default function App() {
             onClick={() => void doExport("markdown")}
             disabled={transcript.length === 0}
             title="Export Markdown"
+            aria-label="Export Markdown"
           >
-            MD
+            <span className="button-text">MD</span>
           </button>
         </div>
       </header>
 
       <section className="control-grid">
         <div className="panel controls-panel">
-          <div className="section-title">Session</div>
+          <div className="panel-header">
+            <h2>Session</h2>
+            <span className={`panel-state ${canStart ? "ok" : ""}`}>{readinessLabel}</span>
+          </div>
           <div className="field-grid two">
             <SelectField
               label="Source"
@@ -348,7 +418,17 @@ export default function App() {
             <button onClick={() => runCommand(stopSession)} disabled={!canStop || busy}>
               <Square size={18} /> Stop
             </button>
+            <button
+              className="boundary-button"
+              onClick={() => requestBoundary("user_button")}
+              disabled={!canForceBoundary || busy}
+              title="Translate now"
+            >
+              <Send size={18} /> Translate now
+            </button>
           </div>
+
+          {boundaryFeedback ? <div className="boundary-feedback">{boundaryFeedback}</div> : null}
 
           <label className="toggle-row">
             <input
@@ -361,7 +441,9 @@ export default function App() {
         </div>
 
         <div className="panel devices-panel">
-          <div className="section-title">Audio routing</div>
+          <div className="panel-header">
+            <h2>Audio routing</h2>
+          </div>
           <DeviceSelect
             icon={<Mic size={17} />}
             label="Meeting source"
@@ -430,7 +512,9 @@ export default function App() {
         </div>
 
         <div className="panel key-panel">
-          <div className="section-title">Settings</div>
+          <div className="panel-header">
+            <h2>Settings</h2>
+          </div>
           <div className="key-row">
             <input
               type="password"
@@ -442,14 +526,20 @@ export default function App() {
               <Save size={17} /> Save
             </button>
           </div>
-          <ol className="checklist">
-            <li>Install BlackHole 2ch.</li>
-            <li>Set Teams speaker output to BlackHole for translation capture.</li>
-            <li>Use macOS Multi-Output Device or Teams routing if you also need speakers.</li>
-            <li>Select BlackHole as meeting source.</li>
-            <li>Select headphones as translated audio.</li>
-            <li>Enable original monitor only when you want the captured source mirrored locally.</li>
-          </ol>
+          <div className="setup-list">
+            <div>
+              <strong>1. Route</strong>
+              <span>Send meeting audio to BlackHole 2ch.</span>
+            </div>
+            <div>
+              <strong>2. Select</strong>
+              <span>Choose BlackHole as source and headphones as translation output.</span>
+            </div>
+            <div>
+              <strong>3. Monitor</strong>
+              <span>Mirror original audio only when you need local playback.</span>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -462,14 +552,15 @@ export default function App() {
 
       <section className="transcript-panel">
         <div className="transcript-head">
-          <span>Source</span>
-          <span>Translation</span>
+          <span>Original speech</span>
+          <span>Translated speech</span>
         </div>
         <div className="transcript-list">
           {transcript.length === 0 ? (
-            <div className="empty-row">
-              <span />
-              <span />
+            <div className="empty-state">
+              <FileText size={28} />
+              <strong>No transcript yet</strong>
+              <p>Start a session to see original speech and translation side by side.</p>
             </div>
           ) : (
             transcript.map((item) => (

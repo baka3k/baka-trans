@@ -515,7 +515,11 @@ fn refill_output_queue(
 ) {
     while queue.len() < target_frames * 3 {
         match rx.try_recv() {
-            Ok(chunk) => queue.extend(resample_pcm16_chunk(&chunk, REALTIME_SAMPLE_RATE, output_sample_rate)),
+            Ok(chunk) => queue.extend(resample_pcm16_chunk(
+                &chunk,
+                REALTIME_SAMPLE_RATE,
+                output_sample_rate,
+            )),
             Err(_) => break,
         }
     }

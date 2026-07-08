@@ -7,6 +7,8 @@ Depends on: phase 02
 
 Connect captured audio to OpenAI realtime translation, receive translated audio and transcripts, and provide a debug fallback pipeline.
 
+Manual user-controlled utterance boundaries for nonstop speech are planned separately in `phase-07-manual-utterance-boundary.md`, because they require live control messages into the realtime WebSocket loop after the baseline pipeline exists.
+
 ## Primary Path
 
 Use the OpenAI Realtime Translation endpoint:

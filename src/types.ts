@@ -1,6 +1,14 @@
 export type DeviceKind = "input" | "output";
 export type Language = "auto" | "en" | "ja" | "vi";
 export type TranslationStyle = "literal" | "natural" | "technical_meeting_safe";
+export type ManualBoundaryReason = "user_button" | "keyboard_shortcut";
+export type ManualBoundaryStatus =
+  | "idle"
+  | "pending"
+  | "committed"
+  | "ignored_empty_buffer"
+  | "rate_limited"
+  | "error";
 export type SessionStatus =
   | "idle"
   | "starting"
@@ -43,6 +51,17 @@ export interface AppStatus {
   sessionStatus: SessionStatus;
   hasApiKey: boolean;
   transcriptCount: number;
+}
+
+export interface ManualBoundaryRequest {
+  reason: ManualBoundaryReason;
+  requestedAtMs: number;
+}
+
+export interface ManualBoundaryEvent {
+  status: ManualBoundaryStatus;
+  message: string;
+  committedAtMs?: number;
 }
 
 export interface TranscriptItem {

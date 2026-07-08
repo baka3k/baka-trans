@@ -5,7 +5,7 @@
   "identifier": "dev.baka3k.baka-trans",
   "build": {
     "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:11111",
+    "devUrl": "http://localhost:1111",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },

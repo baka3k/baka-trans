@@ -7,7 +7,7 @@ Depends on: phase 03
 
 Build the user-facing workflow for running a translation session during a meeting.
 
-Phase 04 covers the baseline session workflow. Advanced audio route labeling and the optional original-audio monitor control are planned in `phase-06-audio-routing-profile.md`.
+Phase 04 covers the baseline session workflow. Advanced audio route labeling and the optional original-audio monitor control are planned in `phase-06-audio-routing-profile.md`. Manual utterance-boundary controls for forcing translation during nonstop speech are planned in `phase-07-manual-utterance-boundary.md`.
 
 ## Implementation Tasks
 

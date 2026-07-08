@@ -1,18 +1,24 @@
 use crate::audio::{self, CaptureRuntime, PlaybackRuntime};
 use crate::error::{AppError, AppResult};
 use crate::models::{
-    AppStatus, ExportFormat, ExportRequest, ExportedTranscript, SessionConfig, SessionStatus,
-    TranscriptItem, TranscriptStatus,
+    AppStatus, ExportFormat, ExportRequest, ExportedTranscript, ManualBoundaryEvent,
+    ManualBoundaryRequest, ManualBoundaryStatus, SessionConfig, SessionStatus, TranscriptItem,
+    TranscriptStatus,
 };
 use crate::{ai, security};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
+use tokio::sync::mpsc;
+
+const MANUAL_BOUNDARY_DEBOUNCE_MS: u64 = 1_000;
 
 pub struct AppState {
     status: Mutex<SessionStatus>,
     capture: Mutex<Option<CaptureRuntime>>,
     playback: Mutex<Option<PlaybackRuntime>>,
     monitor_playback: Mutex<Option<PlaybackRuntime>>,
+    realtime_control: Mutex<Option<mpsc::Sender<ai::RealtimeControl>>>,
+    last_manual_boundary_request_ms: Mutex<Option<u64>>,
     transcript: Arc<Mutex<Vec<TranscriptItem>>>,
     last_config: Mutex<Option<SessionConfig>>,
 }
@@ -24,6 +30,8 @@ impl AppState {
             capture: Mutex::new(None),
             playback: Mutex::new(None),
             monitor_playback: Mutex::new(None),
+            realtime_control: Mutex::new(None),
+            last_manual_boundary_request_ms: Mutex::new(None),
             transcript: Arc::new(Mutex::new(Vec::new())),
             last_config: Mutex::new(None),
         }
@@ -73,7 +81,26 @@ impl AppState {
         self.set_status(&app, SessionStatus::Starting)?;
         self.transcript.lock().map_err(lock_error)?.clear();
         *self.last_config.lock().map_err(lock_error)? = Some(config.clone());
-        self.start_pipeline(app, config)
+        if let Err(error) = self.start_pipeline(app.clone(), config) {
+            let _ = self.capture.lock().map(|mut capture| *capture = None);
+            let _ = self.playback.lock().map(|mut playback| *playback = None);
+            let _ = self
+                .monitor_playback
+                .lock()
+                .map(|mut monitor_playback| *monitor_playback = None);
+            let _ = self
+                .realtime_control
+                .lock()
+                .map(|mut realtime_control| *realtime_control = None);
+            let _ = self
+                .last_manual_boundary_request_ms
+                .lock()
+                .map(|mut last_request| *last_request = None);
+            let _ = self.set_status(&app, SessionStatus::Idle);
+            return Err(error);
+        }
+
+        Ok(())
     }
 
     pub fn pause_session(&self, app: AppHandle) -> AppResult<()> {
@@ -99,7 +126,9 @@ impl AppState {
         if self.status()? != SessionStatus::Paused {
             return Ok(());
         }
-        if self.playback.lock().map_err(lock_error)?.is_some() {
+        let playback_active = self.playback.lock().map_err(lock_error)?.is_some();
+        let monitor_active = self.monitor_playback.lock().map_err(lock_error)?.is_some();
+        if playback_active || monitor_active {
             return Err(AppError::new(
                 "session_still_pausing",
                 "Wait for the current translation session to finish draining before resuming.",
@@ -116,6 +145,64 @@ impl AppState {
         self.set_status(&app, SessionStatus::Stopping)?;
         *self.capture.lock().map_err(lock_error)? = None;
         Ok(())
+    }
+
+    pub fn force_translate_boundary(
+        &self,
+        app: AppHandle,
+        request: ManualBoundaryRequest,
+    ) -> AppResult<()> {
+        let status = self.status()?;
+        if !matches!(
+            status,
+            SessionStatus::Listening | SessionStatus::Translating | SessionStatus::Speaking
+        ) {
+            return Err(AppError::new(
+                "manual_boundary_inactive",
+                "Start or resume translation before forcing a boundary.",
+            ));
+        }
+
+        let now = now_ms();
+        {
+            let mut last_request = self
+                .last_manual_boundary_request_ms
+                .lock()
+                .map_err(lock_error)?;
+            if last_request
+                .is_some_and(|last| now.saturating_sub(last) < MANUAL_BOUNDARY_DEBOUNCE_MS)
+            {
+                emit_manual_boundary(
+                    &app,
+                    ManualBoundaryStatus::RateLimited,
+                    "Still translating",
+                    None,
+                )?;
+                return Ok(());
+            }
+            *last_request = Some(now);
+        }
+
+        let tx = self
+            .realtime_control
+            .lock()
+            .map_err(lock_error)?
+            .clone()
+            .ok_or_else(|| {
+                AppError::new(
+                    "manual_boundary_unavailable",
+                    "Realtime translation is not ready for manual boundaries.",
+                )
+            })?;
+
+        emit_manual_boundary(&app, ManualBoundaryStatus::Pending, "Boundary sent", None)?;
+        tx.try_send(ai::RealtimeControl::ForceBoundary(request))
+            .map_err(|err| {
+                let error = AppError::new("manual_boundary_send_error", err.to_string());
+                let _ =
+                    emit_manual_boundary(&app, ManualBoundaryStatus::Error, &error.message, None);
+                error
+            })
     }
 
     pub fn export_transcript(&self, request: ExportRequest) -> AppResult<ExportedTranscript> {
@@ -147,10 +234,16 @@ impl AppState {
         let monitor_tx = monitor_playback.as_ref().map(PlaybackRuntime::sender);
         let (capture, audio_rx) =
             audio::start_capture(app.clone(), &config.input_device_id, monitor_tx)?;
+        let (control_tx, control_rx) = mpsc::channel(8);
         let transcript_store = Arc::clone(&self.transcript);
         *self.capture.lock().map_err(lock_error)? = Some(capture);
         *self.playback.lock().map_err(lock_error)? = Some(playback);
         *self.monitor_playback.lock().map_err(lock_error)? = monitor_playback;
+        *self.realtime_control.lock().map_err(lock_error)? = Some(control_tx);
+        *self
+            .last_manual_boundary_request_ms
+            .lock()
+            .map_err(lock_error)? = None;
         self.set_status(&app, SessionStatus::Listening)?;
 
         tauri::async_runtime::spawn(async move {
@@ -159,6 +252,7 @@ impl AppState {
                 config,
                 api_key,
                 audio_rx,
+                control_rx,
                 playback_tx,
                 transcript_store,
             )
@@ -177,6 +271,14 @@ impl AppState {
             .monitor_playback
             .lock()
             .map(|mut monitor_playback| *monitor_playback = None);
+        let _ = self
+            .realtime_control
+            .lock()
+            .map(|mut realtime_control| *realtime_control = None);
+        let _ = self
+            .last_manual_boundary_request_ms
+            .lock()
+            .map(|mut last_request| *last_request = None);
 
         match result {
             Ok(()) => {
@@ -193,6 +295,23 @@ impl AppState {
             }
         }
     }
+}
+
+fn emit_manual_boundary(
+    app: &AppHandle,
+    status: ManualBoundaryStatus,
+    message: impl Into<String>,
+    committed_at_ms: Option<u64>,
+) -> AppResult<()> {
+    app.emit(
+        "manual-boundary-status",
+        ManualBoundaryEvent {
+            status,
+            message: message.into(),
+            committed_at_ms,
+        },
+    )
+    .map_err(|err| AppError::new("event_emit_error", err.to_string()))
 }
 
 fn render_text(items: &[TranscriptItem]) -> String {
@@ -251,4 +370,11 @@ fn render_markdown(items: &[TranscriptItem]) -> String {
 
 fn lock_error<T>(_: std::sync::PoisonError<T>) -> AppError {
     AppError::new("state_lock_error", "Application state lock was poisoned.")
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or_default()
 }

@@ -1,6 +1,9 @@
 use crate::audio;
 use crate::error::AppResult;
-use crate::models::{AppStatus, AudioDevices, ExportRequest, ExportedTranscript, SessionConfig};
+use crate::models::{
+    AppStatus, AudioDevices, ExportRequest, ExportedTranscript, ManualBoundaryRequest,
+    SessionConfig,
+};
 use crate::security;
 use crate::session::AppState;
 use tauri::{AppHandle, State};
@@ -37,6 +40,15 @@ pub fn resume_session(app: AppHandle, state: State<'_, AppState>) -> AppResult<(
 #[tauri::command]
 pub fn stop_session(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
     state.stop_session(app)
+}
+
+#[tauri::command]
+pub fn force_translate_boundary(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    request: ManualBoundaryRequest,
+) -> AppResult<()> {
+    state.force_translate_boundary(app, request)
 }
 
 #[tauri::command]
