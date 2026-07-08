@@ -105,3 +105,19 @@ pub fn play_test_tone(
 ) -> AppResult<()> {
     audio::play_test_tone(&output_device_id, output_channel)
 }
+
+#[tauri::command]
+pub fn start_local_monitor(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    input_device_id: String,
+    output_device_id: String,
+    output_channel: AudioOutputChannel,
+) -> AppResult<()> {
+    state.start_local_monitor(app, &input_device_id, &output_device_id, output_channel)
+}
+
+#[tauri::command]
+pub fn stop_local_monitor(state: State<'_, AppState>) -> AppResult<()> {
+    state.stop_local_monitor()
+}

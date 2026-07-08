@@ -185,6 +185,7 @@ pub fn play_test_tone(output_device_id: &str, output_channel: AudioOutputChannel
 }
 
 pub fn start_playback_with_channel(
+    app: AppHandle,
     output_device_id: &str,
     output_channel: AudioOutputChannel,
 ) -> AppResult<PlaybackRuntime> {
@@ -194,7 +195,7 @@ pub fn start_playback_with_channel(
     let device_id = output_device_id.to_string();
 
     let join_handle = thread::spawn(move || {
-        run_playback_thread(device_id, output_channel, audio_rx, stop_rx, ready_tx)
+        run_playback_thread(app, device_id, output_channel, audio_rx, stop_rx, ready_tx)
     });
 
     match ready_rx.recv_timeout(Duration::from_secs(3)) {
@@ -392,6 +393,7 @@ fn run_capture_thread(
 }
 
 fn run_playback_thread(
+    app: AppHandle,
     device_id: String,
     output_channel: AudioOutputChannel,
     audio_rx: std_mpsc::Receiver<Vec<i16>>,
@@ -415,7 +417,15 @@ fn run_playback_thread(
     let channels = supported.channels() as usize;
     let output_sample_rate = supported.sample_rate().0;
     let config: StreamConfig = supported.clone().into();
-    let err_fn = |err| eprintln!("Output stream error: {err}");
+    let err_fn = move |err| {
+        let _ = app.emit(
+            "app-error",
+            AppError::new(
+                "audio_playback_error",
+                format!("Output stream error: {err}"),
+            ),
+        );
+    };
 
     let stream = match supported.sample_format() {
         SampleFormat::F32 => {

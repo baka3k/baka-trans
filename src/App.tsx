@@ -26,7 +26,9 @@ import {
   playTestTone,
   resumeSession,
   saveApiKey,
+  startLocalMonitor,
   startSession,
+  stopLocalMonitor,
   stopSession,
   testApiKey,
 } from "./api";
@@ -43,6 +45,7 @@ import type {
   ManualBoundaryReason,
   SessionConfig,
   SessionStatus,
+  TranslatedAudioLevelEvent,
   TranscriptItem,
 } from "./types";
 
@@ -103,10 +106,12 @@ export default function App() {
   const [keyTestMessage, setKeyTestMessage] = useState("");
   const [boundaryFeedback, setBoundaryFeedback] = useState("");
   const [level, setLevel] = useState({ peak: 0, rms: 0 });
+  const [translatedLevel, setTranslatedLevel] = useState({ peak: 0, rms: 0, sampleCount: 0 });
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
   const [busy, setBusy] = useState(false);
   const [testingKey, setTestingKey] = useState(false);
   const [testingTone, setTestingTone] = useState<"translation" | "monitor" | null>(null);
+  const [localMonitorActive, setLocalMonitorActive] = useState(false);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -125,6 +130,7 @@ export default function App() {
 
   const canStart =
     (status === "idle" || status === "error") &&
+    !localMonitorActive &&
     inputDeviceId.length > 0 &&
     outputDeviceId.length > 0 &&
     (!monitorOriginalAudio || monitorOutputDeviceId.length > 0);
@@ -132,22 +138,37 @@ export default function App() {
   const canPause = canForceBoundary;
   const canResume = status === "paused";
   const canStop = status !== "idle" && status !== "stopping";
-  const canTestAudio = status === "idle" && !busy;
+  const canTestAudio = status === "idle" && !busy && !localMonitorActive;
+  const canToggleLocalMonitor =
+    status === "idle" &&
+    !busy &&
+    (localMonitorActive || (inputDeviceId.length > 0 && outputDeviceId.length > 0));
   const inputSignalPercent = Math.round(level.peak * 100);
   const inputSignalLabel =
     inputSignalPercent > 3
       ? `${inputSignalPercent}% peak`
+      : localMonitorActive
+        ? "Monitoring"
       : status === "idle"
         ? "Idle"
         : "No signal";
-  const translationOutLevel = status === "speaking" ? 78 : 0;
+  const translationOutLevel = localMonitorActive
+    ? inputSignalPercent
+    : Math.round(translatedLevel.peak * 100);
   const monitorOutLevel = monitorOriginalAudio && canForceBoundary ? inputSignalPercent : 0;
   const audioLineRows: AudioLineRow[] = [
     {
       id: "input",
       label: "Input",
       detail: selectedInput?.name ?? "No input",
-      state: inputSignalPercent > 3 ? "signal" : canForceBoundary ? "listening" : "idle",
+      state:
+        inputSignalPercent > 3
+          ? "signal"
+          : localMonitorActive
+            ? "listening"
+            : canForceBoundary
+              ? "listening"
+              : "idle",
       leftLevel: inputSignalPercent,
       rightLevel: inputSignalPercent,
       disabled: !selectedInput,
@@ -156,7 +177,15 @@ export default function App() {
       id: "translation",
       label: "Translated out",
       detail: formatRoute(selectedOutput, translationOutputChannel),
-      state: status === "speaking" ? "speaking" : canForceBoundary ? "armed" : "idle",
+      state: localMonitorActive
+        ? translationOutLevel > 3
+          ? "signal"
+          : "armed"
+        : status === "speaking"
+          ? "speaking"
+          : canForceBoundary
+            ? "armed"
+            : "idle",
       leftLevel: channelLevel(translationOutputChannel, "left", translationOutLevel),
       rightLevel: channelLevel(translationOutputChannel, "right", translationOutLevel),
       disabled: !selectedOutput,
@@ -212,6 +241,7 @@ export default function App() {
         setStatus(event.payload);
         if (event.payload === "idle") {
           setLevel({ peak: 0, rms: 0 });
+          setTranslatedLevel({ peak: 0, rms: 0, sampleCount: 0 });
         }
       }),
       listen<TranscriptItem>("transcript-update", (event) => {
@@ -224,6 +254,13 @@ export default function App() {
         setLevel({
           peak: Math.max(0, Math.min(1, event.payload.peak)),
           rms: Math.max(0, Math.min(1, event.payload.rms)),
+        });
+      }),
+      listen<TranslatedAudioLevelEvent>("translated-audio-level", (event) => {
+        setTranslatedLevel({
+          peak: Math.max(0, Math.min(1, event.payload.peak)),
+          rms: Math.max(0, Math.min(1, event.payload.rms)),
+          sampleCount: event.payload.sampleCount,
         });
       }),
       listen<AppErrorPayload>("app-error", (event) => setError(event.payload)),
@@ -366,6 +403,26 @@ export default function App() {
     }
   }
 
+  async function toggleLocalMonitor() {
+    setBusy(true);
+    setError(null);
+    try {
+      if (localMonitorActive) {
+        await stopLocalMonitor();
+        setLocalMonitorActive(false);
+        setLevel({ peak: 0, rms: 0 });
+        return;
+      }
+      await startLocalMonitor(inputDeviceId, outputDeviceId, translationOutputChannel);
+      setLocalMonitorActive(true);
+    } catch (cause) {
+      setLocalMonitorActive(false);
+      setError(normalizeError(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function doExport(format: "text" | "markdown") {
     const localContent = renderTranscript(transcript, format);
     try {
@@ -503,265 +560,293 @@ export default function App() {
         </div>
       </header>
 
-      <section className="control-grid">
-        <div className="panel controls-panel">
-          <div className="panel-header">
-            <h2>Session</h2>
-            <span className={`panel-state ${canStart ? "ok" : ""}`}>{readinessLabel}</span>
-          </div>
-          <div className="field-grid two">
-            <SelectField
-              label="Source"
-              value={sourceLanguage}
-              onChange={(value) => setSourceLanguage(value as Language)}
-              options={languages}
-            />
-            <SelectField
-              label="Target"
-              value={targetLanguage}
-              onChange={(value) => setTargetLanguage(value as Language)}
-              options={targetLanguages}
-            />
-          </div>
+      <div className="workspace-layout">
+        <aside className="settings-column" aria-label="Session settings">
+          <section className="control-grid">
+            <div className="panel controls-panel">
+              <div className="panel-header">
+                <h2>Session</h2>
+                <span className={`panel-state ${canStart ? "ok" : ""}`}>{readinessLabel}</span>
+              </div>
+              <div className="field-grid two">
+                <SelectField
+                  label="Source"
+                  value={sourceLanguage}
+                  onChange={(value) => setSourceLanguage(value as Language)}
+                  options={languages}
+                />
+                <SelectField
+                  label="Target"
+                  value={targetLanguage}
+                  onChange={(value) => setTargetLanguage(value as Language)}
+                  options={targetLanguages}
+                />
+              </div>
 
-          {sourceLanguage === targetLanguage && sourceLanguage !== "auto" ? (
-            <InlineWarning text="Source and target languages match." />
-          ) : null}
+              {sourceLanguage === targetLanguage && sourceLanguage !== "auto" ? (
+                <InlineWarning text="Source and target languages match." />
+              ) : null}
 
-          <div className="button-row">
-            <button
-              className="primary"
-              onClick={() => runCommand(() => startSession(config))}
-              disabled={!canStart || busy}
-            >
-              <Play size={18} /> Start
-            </button>
-            <button onClick={() => runCommand(pauseSession)} disabled={!canPause || busy}>
-              <Pause size={18} /> Pause
-            </button>
-            <button onClick={() => runCommand(resumeSession)} disabled={!canResume || busy}>
-              <Play size={18} /> Resume
-            </button>
-            <button onClick={() => runCommand(stopSession)} disabled={!canStop || busy}>
-              <Square size={18} /> Stop
-            </button>
-            <button
-              className="boundary-button"
-              onClick={() => requestBoundary("user_button")}
-              disabled={!canForceBoundary || busy}
-              title="Translate now"
-            >
-              <Send size={18} /> Translate now
-            </button>
-          </div>
+              <div className="button-row">
+                <button
+                  className="primary"
+                  onClick={() => runCommand(() => startSession(config))}
+                  disabled={!canStart || busy}
+                >
+                  <Play size={18} /> Start
+                </button>
+                <button onClick={() => runCommand(pauseSession)} disabled={!canPause || busy}>
+                  <Pause size={18} /> Pause
+                </button>
+                <button onClick={() => runCommand(resumeSession)} disabled={!canResume || busy}>
+                  <Play size={18} /> Resume
+                </button>
+                <button onClick={() => runCommand(stopSession)} disabled={!canStop || busy}>
+                  <Square size={18} /> Stop
+                </button>
+                <button
+                  className="boundary-button"
+                  onClick={() => requestBoundary("user_button")}
+                  disabled={!canForceBoundary || busy}
+                  title="Translate now"
+                >
+                  <Send size={18} /> Translate now
+                </button>
+              </div>
 
-          {boundaryFeedback ? <div className="boundary-feedback">{boundaryFeedback}</div> : null}
+              {boundaryFeedback ? <div className="boundary-feedback">{boundaryFeedback}</div> : null}
 
-          <label className="toggle-row">
-            <input
-              type="checkbox"
-              checked={fallbackEnabled}
-              onChange={(event) => setFallbackEnabled(event.currentTarget.checked)}
-            />
-            <span>Fallback chain</span>
-          </label>
-        </div>
-
-        <div className="panel devices-panel">
-          <div className="panel-header">
-            <h2>Audio routing</h2>
-          </div>
-          <DeviceSelect
-            icon={<Mic size={17} />}
-            label="Meeting source"
-            description="Captured and sent for translation."
-            devices={devices.inputs}
-            value={inputDeviceId}
-            onChange={updateInputDevice}
-          />
-          <DeviceSelect
-            icon={<Headphones size={17} />}
-            label="Translated audio"
-            description="Private translated speech playback."
-            devices={devices.outputs}
-            value={outputDeviceId}
-            onChange={updateOutputDevice}
-          />
-          <SelectField
-            label="Translated channel"
-            value={translationOutputChannel}
-            onChange={(value) => updateTranslationOutputChannel(value as AudioOutputChannel)}
-            options={channelOptions}
-          />
-          <label className="toggle-row no-margin">
-            <input
-              type="checkbox"
-              checked={monitorOriginalAudio}
-              onChange={(event) => updateMonitorEnabled(event.currentTarget.checked)}
-            />
-            <span>Original audio monitor</span>
-          </label>
-          <DeviceSelect
-            icon={<Volume2 size={17} />}
-            label="Monitor output"
-            description="Optional original meeting audio playback."
-            devices={devices.outputs}
-            value={monitorOutputDeviceId}
-            onChange={updateMonitorOutputDevice}
-            disabled={!monitorOriginalAudio}
-          />
-          <SelectField
-            label="Original channel"
-            value={monitorOutputChannel}
-            onChange={(value) => updateMonitorOutputChannel(value as AudioOutputChannel)}
-            options={channelOptions}
-            disabled={!monitorOriginalAudio}
-          />
-          <div className="signal-card">
-            <div>
-              <span>Input signal</span>
-              <strong>{inputSignalLabel}</strong>
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={fallbackEnabled}
+                  onChange={(event) => setFallbackEnabled(event.currentTarget.checked)}
+                />
+                <span>Fallback chain</span>
+              </label>
             </div>
-            <div
-              className="meter"
-              aria-label="Input signal peak"
-              aria-valuemax={100}
-              aria-valuemin={0}
-              aria-valuenow={inputSignalPercent}
-              role="progressbar"
-            >
-              <div style={{ width: `${inputSignalPercent}%` }} />
-              <span style={{ width: `${Math.round(level.rms * 100)}%` }} />
-            </div>
-          </div>
-          <AudioLineMonitor rows={audioLineRows} />
-          <div className="meter-row">
-            <Volume2 size={17} />
-            <button
-              className="small-button"
-              onClick={() =>
-                outputDeviceId &&
-                testTone("translation", outputDeviceId, translationOutputChannel)
-              }
-              disabled={!outputDeviceId || !canTestAudio || testingTone === "translation"}
-            >
-              {testingTone === "translation" ? "Testing" : "Test translated"}
-            </button>
-          </div>
-          <div className="button-row compact">
-            <button
-              className="small-button"
-              onClick={() =>
-                monitorOutputDeviceId &&
-                testTone("monitor", monitorOutputDeviceId, monitorOutputChannel)
-              }
-              disabled={
-                !monitorOriginalAudio ||
-                !monitorOutputDeviceId ||
-                !canTestAudio ||
-                testingTone === "monitor"
-              }
-            >
-              {testingTone === "monitor" ? "Testing" : "Test original"}
-            </button>
-            {lastRefreshedAt ? (
-              <span className="refresh-note">Refreshed {formatClock(lastRefreshedAt)}</span>
-            ) : null}
-          </div>
-          <RoutingSummary
-            input={selectedInput}
-            output={selectedOutput}
-            outputChannel={translationOutputChannel}
-            monitor={monitorOriginalAudio ? selectedMonitorOutput : undefined}
-            monitorChannel={monitorOutputChannel}
-          />
-          {routingWarnings.map((warning) => (
-            <InlineWarning text={warning} key={warning} />
-          ))}
-        </div>
 
-        <div className="panel key-panel">
-          <div className="panel-header">
-            <h2>Settings</h2>
-          </div>
-          <div className="key-row">
-            <input
-              type="password"
-              value={apiKeyDraft}
-              placeholder={
-                apiKeyStored ? "Saved key loaded. Paste only to replace." : "OpenAI API key"
-              }
-              onChange={(event) => setApiKeyDraft(event.currentTarget.value)}
-            />
-            <button onClick={saveKey} disabled={apiKeyDraft.trim().length === 0 || busy}>
-              <Save size={17} /> {apiKeyStored ? "Replace" : "Save"}
-            </button>
-          </div>
-          <div className={`key-status ${apiKeyStored ? "ok" : "warn"}`}>
-            <KeyRound size={14} />
-            <span>
-              {apiKeyStored
-                ? `Using ${labelApiKeySource(apiKeySource)} key ${apiKeyFingerprint || ""} automatically`
-                : "No OpenAI API key available"}
-            </span>
-          </div>
-          <div className="key-test-row">
-            <button
-              className="small-button"
-              onClick={testStoredKey}
-              disabled={!apiKeyStored || busy || testingKey}
-            >
-              <Check size={14} /> {testingKey ? "Testing" : "Test key"}
-            </button>
-            {keyTestMessage ? <span>{keyTestMessage}</span> : null}
-          </div>
-          <div className="setup-list">
-            <div>
-              <strong>1. Route</strong>
-              <span>Send meeting audio to BlackHole 2ch.</span>
+            <div className="panel devices-panel">
+              <div className="panel-header">
+                <h2>Audio routing</h2>
+              </div>
+              <DeviceSelect
+                icon={<Mic size={17} />}
+                label="Meeting source"
+                description="Captured and sent for translation."
+                devices={devices.inputs}
+                value={inputDeviceId}
+                onChange={updateInputDevice}
+                disabled={localMonitorActive}
+              />
+              <DeviceSelect
+                icon={<Headphones size={17} />}
+                label="Translated audio"
+                description="Headphones, speakers, or a virtual device used as a Teams microphone."
+                devices={devices.outputs}
+                value={outputDeviceId}
+                onChange={updateOutputDevice}
+                disabled={localMonitorActive}
+              />
+              <SelectField
+                label="Translated channel"
+                value={translationOutputChannel}
+                onChange={(value) => updateTranslationOutputChannel(value as AudioOutputChannel)}
+                options={channelOptions}
+                disabled={localMonitorActive}
+              />
+              <label className="toggle-row no-margin">
+                <input
+                  type="checkbox"
+                  checked={monitorOriginalAudio}
+                  onChange={(event) => updateMonitorEnabled(event.currentTarget.checked)}
+                />
+                <span>Original audio monitor</span>
+              </label>
+              <DeviceSelect
+                icon={<Volume2 size={17} />}
+                label="Monitor output"
+                description="Optional original meeting audio playback."
+                devices={devices.outputs}
+                value={monitorOutputDeviceId}
+                onChange={updateMonitorOutputDevice}
+                disabled={!monitorOriginalAudio}
+              />
+              <SelectField
+                label="Original channel"
+                value={monitorOutputChannel}
+                onChange={(value) => updateMonitorOutputChannel(value as AudioOutputChannel)}
+                options={channelOptions}
+                disabled={!monitorOriginalAudio}
+              />
+              <div className="signal-card">
+                <div>
+                  <span>Input signal</span>
+                  <strong>{inputSignalLabel}</strong>
+                </div>
+                <div
+                  className="meter"
+                  aria-label="Input signal peak"
+                  aria-valuemax={100}
+                  aria-valuemin={0}
+                  aria-valuenow={inputSignalPercent}
+                  role="progressbar"
+                >
+                  <div style={{ width: `${inputSignalPercent}%` }} />
+                  <span style={{ width: `${Math.round(level.rms * 100)}%` }} />
+                </div>
+              </div>
+              <AudioLineMonitor rows={audioLineRows} />
+              <div className="meter-row">
+                <Volume2 size={17} />
+                <button
+                  className="small-button"
+                  onClick={() =>
+                    outputDeviceId &&
+                    testTone("translation", outputDeviceId, translationOutputChannel)
+                  }
+                  disabled={!outputDeviceId || !canTestAudio || testingTone === "translation"}
+                >
+                  {testingTone === "translation" ? "Testing" : "Test translated"}
+                </button>
+              </div>
+              <div className="monitor-test-row">
+                <Mic size={17} />
+                <button
+                  className={localMonitorActive ? "small-button danger" : "small-button"}
+                  onClick={toggleLocalMonitor}
+                  disabled={!canToggleLocalMonitor}
+                >
+                  {localMonitorActive ? "Stop mic monitor" : "Monitor mic to output"}
+                </button>
+                <span>
+                  {localMonitorActive
+                    ? "Live mic is routed to translated audio output."
+                    : "No OpenAI call; tests mic, device, and left/right routing."}
+                </span>
+              </div>
+              <div className="button-row compact">
+                <button
+                  className="small-button"
+                  onClick={() =>
+                    monitorOutputDeviceId &&
+                    testTone("monitor", monitorOutputDeviceId, monitorOutputChannel)
+                  }
+                  disabled={
+                    !monitorOriginalAudio ||
+                    !monitorOutputDeviceId ||
+                    !canTestAudio ||
+                    testingTone === "monitor"
+                  }
+                >
+                  {testingTone === "monitor" ? "Testing" : "Test original"}
+                </button>
+                {lastRefreshedAt ? (
+                  <span className="refresh-note">Refreshed {formatClock(lastRefreshedAt)}</span>
+                ) : null}
+              </div>
+              <RoutingSummary
+                input={selectedInput}
+                output={selectedOutput}
+                outputChannel={translationOutputChannel}
+                monitor={monitorOriginalAudio ? selectedMonitorOutput : undefined}
+                monitorChannel={monitorOutputChannel}
+              />
+              {routingWarnings.map((warning) => (
+                <InlineWarning text={warning} key={warning} />
+              ))}
             </div>
-            <div>
-              <strong>2. Select</strong>
-              <span>Choose BlackHole as source and headphones as translation output.</span>
-            </div>
+
+            <div className="panel key-panel">
+              <div className="panel-header">
+                <h2>Settings</h2>
+              </div>
+              <div className="key-row">
+                <input
+                  type="password"
+                  value={apiKeyDraft}
+                  placeholder={
+                    apiKeyStored ? "Saved key loaded. Paste only to replace." : "OpenAI API key"
+                  }
+                  onChange={(event) => setApiKeyDraft(event.currentTarget.value)}
+                />
+                <button onClick={saveKey} disabled={apiKeyDraft.trim().length === 0 || busy}>
+                  <Save size={17} /> {apiKeyStored ? "Replace" : "Save"}
+                </button>
+              </div>
+              <div className={`key-status ${apiKeyStored ? "ok" : "warn"}`}>
+                <KeyRound size={14} />
+                <span>
+                  {apiKeyStored
+                    ? `Using ${labelApiKeySource(apiKeySource)} key ${apiKeyFingerprint || ""} automatically`
+                    : "No OpenAI API key available"}
+                </span>
+              </div>
+              <div className="key-test-row">
+                <button
+                  className="small-button"
+                  onClick={testStoredKey}
+                  disabled={!apiKeyStored || busy || testingKey}
+                >
+                  <Check size={14} /> {testingKey ? "Testing" : "Test key"}
+                </button>
+                {keyTestMessage ? <span>{keyTestMessage}</span> : null}
+              </div>
+              <div className="setup-list">
+                <div>
+                  <strong>1. Route</strong>
+                  <span>Send meeting audio to BlackHole 2ch.</span>
+                </div>
+                <div>
+                  <strong>2. Select</strong>
+                  <span>Choose BlackHole as source and headphones as translation output.</span>
+                </div>
             <div>
               <strong>3. Split</strong>
               <span>For left/right ears, use one headphone device with opposite channels.</span>
             </div>
+            <div>
+              <strong>4. Teams</strong>
+              <span>Output to BlackHole or Loopback, then select that device as the Teams microphone.</span>
+            </div>
           </div>
         </div>
-      </section>
+          </section>
+        </aside>
 
-      {error ? (
-        <section className="error-bar">
-          <AlertTriangle size={18} />
-          <span>{error.message}</span>
-        </section>
-      ) : null}
+        <section className="translation-column" aria-label="Live translation">
+          {error ? (
+            <section className="error-bar">
+              <AlertTriangle size={18} />
+              <span>{error.message}</span>
+            </section>
+          ) : null}
 
-      <section className="transcript-panel">
-        <div className="transcript-head">
-          <span>Original speech</span>
-          <span>Translated speech</span>
-        </div>
-        <div className="transcript-list">
-          {transcript.length === 0 ? (
-            <div className="empty-state">
-              <FileText size={28} />
-              <strong>No transcript yet</strong>
-              <p>Start a session to see original speech and translation side by side.</p>
+          <section className="transcript-panel">
+            <div className="transcript-head">
+              <span>Original speech</span>
+              <span>Translated speech</span>
             </div>
-          ) : (
-            transcript.map((item) => (
-              <article className={`transcript-row ${item.status}`} key={item.id}>
-                <p>{item.sourceText}</p>
-                <p>{item.translatedText}</p>
-              </article>
-            ))
-          )}
-          <div ref={transcriptEndRef} />
-        </div>
-      </section>
+            <div className="transcript-list">
+              {transcript.length === 0 ? (
+                <div className="empty-state">
+                  <FileText size={28} />
+                  <strong>No transcript yet</strong>
+                  <p>Start a session to see original speech and translation side by side.</p>
+                </div>
+              ) : (
+                transcript.map((item) => (
+                  <article className={`transcript-row ${item.status}`} key={item.id}>
+                    <p>{item.sourceText}</p>
+                    <p>{item.translatedText}</p>
+                  </article>
+                ))
+              )}
+              <div ref={transcriptEndRef} />
+            </div>
+          </section>
+        </section>
+      </div>
     </main>
   );
 }

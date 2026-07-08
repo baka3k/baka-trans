@@ -1,9 +1,9 @@
 use crate::audio::{self, CaptureRuntime, PlaybackRuntime};
 use crate::error::{AppError, AppResult};
 use crate::models::{
-    AppStatus, ExportFormat, ExportRequest, ExportedTranscript, ManualBoundaryEvent,
-    ManualBoundaryRequest, ManualBoundaryStatus, SessionConfig, SessionStatus, TranscriptItem,
-    TranscriptStatus,
+    AppStatus, AudioOutputChannel, ExportFormat, ExportRequest, ExportedTranscript,
+    ManualBoundaryEvent, ManualBoundaryRequest, ManualBoundaryStatus, SessionConfig, SessionStatus,
+    TranscriptItem, TranscriptStatus,
 };
 use crate::{ai, security};
 use std::sync::{Arc, Mutex};
@@ -17,6 +17,8 @@ pub struct AppState {
     capture: Mutex<Option<CaptureRuntime>>,
     playback: Mutex<Option<PlaybackRuntime>>,
     monitor_playback: Mutex<Option<PlaybackRuntime>>,
+    local_monitor_capture: Mutex<Option<CaptureRuntime>>,
+    local_monitor_playback: Mutex<Option<PlaybackRuntime>>,
     realtime_control: Mutex<Option<mpsc::Sender<ai::RealtimeControl>>>,
     last_manual_boundary_request_ms: Mutex<Option<u64>>,
     transcript: Arc<Mutex<Vec<TranscriptItem>>>,
@@ -30,6 +32,8 @@ impl AppState {
             capture: Mutex::new(None),
             playback: Mutex::new(None),
             monitor_playback: Mutex::new(None),
+            local_monitor_capture: Mutex::new(None),
+            local_monitor_playback: Mutex::new(None),
             realtime_control: Mutex::new(None),
             last_manual_boundary_request_ms: Mutex::new(None),
             transcript: Arc::new(Mutex::new(Vec::new())),
@@ -69,6 +73,12 @@ impl AppState {
         if current_status == SessionStatus::Error {
             self.clear_runtime();
         }
+        if self.local_monitor_active()? {
+            return Err(AppError::new(
+                "local_monitor_active",
+                "Stop the mic monitor test before starting translation.",
+            ));
+        }
 
         if config.target_language == config.source_language
             && config.source_language.realtime_code() != "auto"
@@ -107,6 +117,50 @@ impl AppState {
             return Err(error);
         }
 
+        Ok(())
+    }
+
+    pub fn start_local_monitor(
+        &self,
+        app: AppHandle,
+        input_device_id: &str,
+        output_device_id: &str,
+        output_channel: AudioOutputChannel,
+    ) -> AppResult<()> {
+        if self.status()? != SessionStatus::Idle {
+            return Err(AppError::new(
+                "session_busy",
+                "Stop translation before testing live mic monitoring.",
+            ));
+        }
+        if self.local_monitor_active()? {
+            return Ok(());
+        }
+        if input_device_id.trim().is_empty() {
+            return Err(AppError::new(
+                "missing_input_device",
+                "Choose a microphone before starting mic monitor.",
+            ));
+        }
+        if output_device_id.trim().is_empty() {
+            return Err(AppError::new(
+                "missing_output_device",
+                "Choose a speaker or headphones before starting mic monitor.",
+            ));
+        }
+
+        let playback =
+            audio::start_playback_with_channel(app.clone(), output_device_id, output_channel)?;
+        let monitor_tx = Some(playback.sender());
+        let (capture, _audio_rx) = audio::start_capture(app, input_device_id, monitor_tx)?;
+
+        *self.local_monitor_capture.lock().map_err(lock_error)? = Some(capture);
+        *self.local_monitor_playback.lock().map_err(lock_error)? = Some(playback);
+        Ok(())
+    }
+
+    pub fn stop_local_monitor(&self) -> AppResult<()> {
+        self.clear_local_monitor();
         Ok(())
     }
 
@@ -245,12 +299,14 @@ impl AppState {
     fn start_pipeline(&self, app: AppHandle, config: SessionConfig) -> AppResult<()> {
         let api_key = security::load_api_key()?;
         let playback = audio::start_playback_with_channel(
+            app.clone(),
             &config.output_device_id,
             config.translation_output_channel,
         )?;
         let playback_tx = playback.sender();
         let monitor_playback = if config.monitor_original_audio {
             Some(audio::start_playback_with_channel(
+                app.clone(),
                 &config.monitor_output_device_id,
                 config.monitor_output_channel,
             )?)
@@ -329,6 +385,30 @@ impl AppState {
             .last_manual_boundary_request_ms
             .lock()
             .map(|mut last_request| *last_request = None);
+    }
+
+    fn local_monitor_active(&self) -> AppResult<bool> {
+        Ok(self
+            .local_monitor_capture
+            .lock()
+            .map_err(lock_error)?
+            .is_some()
+            || self
+                .local_monitor_playback
+                .lock()
+                .map_err(lock_error)?
+                .is_some())
+    }
+
+    fn clear_local_monitor(&self) {
+        let _ = self
+            .local_monitor_capture
+            .lock()
+            .map(|mut capture| *capture = None);
+        let _ = self
+            .local_monitor_playback
+            .lock()
+            .map(|mut playback| *playback = None);
     }
 }
 

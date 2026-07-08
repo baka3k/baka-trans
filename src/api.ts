@@ -63,3 +63,19 @@ export function exportTranscript(format: "text" | "markdown") {
 export function playTestTone(outputDeviceId: string, outputChannel: AudioOutputChannel) {
   return invoke<void>("play_test_tone", { outputDeviceId, outputChannel });
 }
+
+export function startLocalMonitor(
+  inputDeviceId: string,
+  outputDeviceId: string,
+  outputChannel: AudioOutputChannel,
+) {
+  return invoke<void>("start_local_monitor", {
+    inputDeviceId,
+    outputDeviceId,
+    outputChannel,
+  });
+}
+
+export function stopLocalMonitor() {
+  return invoke<void>("stop_local_monitor");
+}

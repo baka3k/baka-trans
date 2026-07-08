@@ -100,6 +100,12 @@ button.boundary-button {
   color: var(--info);
 }
 
+button.danger {
+  background: var(--danger-soft);
+  border-color: #e9a6ac;
+  color: var(--danger);
+}
+
 select,
 input {
   background: var(--panel);
@@ -135,6 +141,32 @@ button:focus-visible {
   gap: 16px;
   min-height: 100dvh;
   padding: 18px;
+}
+
+.workspace-layout {
+  align-items: start;
+  display: grid;
+  flex: 1;
+  gap: 16px;
+  grid-template-columns: minmax(340px, 420px) minmax(0, 1fr);
+  min-height: 0;
+}
+
+.settings-column {
+  max-height: calc(100dvh - 124px);
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+  position: sticky;
+  top: 18px;
+}
+
+.translation-column {
+  display: grid;
+  gap: 12px;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: calc(100dvh - 124px);
+  min-height: 0;
 }
 
 .topbar {
@@ -262,7 +294,7 @@ h2 {
 .control-grid {
   display: grid;
   gap: 14px;
-  grid-template-columns: minmax(0, 1.08fr) minmax(0, 1.12fr) minmax(280px, 0.84fr);
+  grid-template-columns: 1fr;
 }
 
 .panel {
@@ -375,6 +407,24 @@ h2 {
 .meter-row {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
+}
+
+.monitor-test-row {
+  align-items: center;
+  background: var(--panel-subtle);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 18px minmax(0, 1fr);
+  padding: 9px 10px;
+}
+
+.monitor-test-row span {
+  color: var(--text-muted);
+  font-size: 12px;
+  grid-column: 2;
+  line-height: 1.35;
 }
 
 .meter {
@@ -800,6 +850,22 @@ h2 {
 
   .app-shell {
     padding: 12px;
+  }
+
+  .workspace-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-column {
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+    position: static;
+  }
+
+  .translation-column {
+    height: auto;
+    min-height: 520px;
   }
 
   .topbar {
