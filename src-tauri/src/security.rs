@@ -23,11 +23,11 @@ pub fn save_api_key(api_key: &str) -> AppResult<()> {
 }
 
 pub fn load_api_key() -> AppResult<String> {
-    load_api_key_with_info().map(|info| info.key)
+    load_api_key_info().map(|info| info.key)
 }
 
 pub fn api_key_status() -> Option<ApiKeyInfo> {
-    load_api_key_with_info().ok()
+    load_api_key_info().ok()
 }
 
 pub struct ApiKeyInfo {
@@ -36,7 +36,7 @@ pub struct ApiKeyInfo {
     pub fingerprint: String,
 }
 
-fn load_api_key_with_info() -> AppResult<ApiKeyInfo> {
+pub fn load_api_key_info() -> AppResult<ApiKeyInfo> {
     if let Ok(value) = std::env::var("OPENAI_API_KEY") {
         let trimmed = value.trim();
         if !trimmed.is_empty() {

@@ -59,6 +59,12 @@ export interface AppStatus {
   transcriptCount: number;
 }
 
+export interface ApiKeyTestResult {
+  source: ApiKeySource;
+  fingerprint: string;
+  message: string;
+}
+
 export interface ManualBoundaryRequest {
   reason: ManualBoundaryReason;
   requestedAtMs: number;

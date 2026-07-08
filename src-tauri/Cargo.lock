@@ -112,6 +112,7 @@ dependencies = [
  "cpal",
  "futures-util",
  "keyring",
+ "native-tls",
  "serde",
  "serde_json",
  "tauri",

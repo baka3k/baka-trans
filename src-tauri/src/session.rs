@@ -59,11 +59,15 @@ impl AppState {
     }
 
     pub fn start_session(&self, app: AppHandle, config: SessionConfig) -> AppResult<()> {
-        if self.status()? != SessionStatus::Idle {
+        let current_status = self.status()?;
+        if !matches!(current_status, SessionStatus::Idle | SessionStatus::Error) {
             return Err(AppError::new(
                 "session_busy",
                 "A translation session is already running.",
             ));
+        }
+        if current_status == SessionStatus::Error {
+            self.clear_runtime();
         }
 
         if config.target_language == config.source_language
@@ -142,11 +146,24 @@ impl AppState {
     }
 
     pub fn stop_session(&self, app: AppHandle) -> AppResult<()> {
-        if self.status()? == SessionStatus::Idle {
-            return Ok(());
+        match self.status()? {
+            SessionStatus::Idle => return Ok(()),
+            SessionStatus::Error => {
+                self.clear_runtime();
+                return self.set_status(&app, SessionStatus::Idle);
+            }
+            SessionStatus::Stopping => return Ok(()),
+            _ => {}
         }
         self.set_status(&app, SessionStatus::Stopping)?;
         *self.capture.lock().map_err(lock_error)? = None;
+        let control = self.realtime_control.lock().map_err(lock_error)?.clone();
+        if let Some(control) = control {
+            let _ = control.try_send(ai::RealtimeControl::Stop);
+        } else {
+            self.clear_runtime();
+            self.set_status(&app, SessionStatus::Idle)?;
+        }
         Ok(())
     }
 
@@ -274,6 +291,30 @@ impl AppState {
     }
 
     fn finish_pipeline(&self, app: &AppHandle, result: AppResult<()>) {
+        self.clear_runtime();
+
+        match result {
+            Ok(()) => {
+                let current = self.status().unwrap_or(SessionStatus::Idle);
+                if current == SessionStatus::Stopping {
+                    let _ = self.set_status(app, SessionStatus::Idle);
+                } else if current != SessionStatus::Paused {
+                    let _ = self.set_status(app, SessionStatus::Idle);
+                }
+            }
+            Err(error) => {
+                let current = self.status().unwrap_or(SessionStatus::Idle);
+                if current == SessionStatus::Stopping {
+                    let _ = self.set_status(app, SessionStatus::Idle);
+                } else {
+                    let _ = app.emit("app-error", error);
+                    let _ = self.set_status(app, SessionStatus::Error);
+                }
+            }
+        }
+    }
+
+    fn clear_runtime(&self) {
         let _ = self.capture.lock().map(|mut capture| *capture = None);
         let _ = self.playback.lock().map(|mut playback| *playback = None);
         let _ = self
@@ -288,21 +329,6 @@ impl AppState {
             .last_manual_boundary_request_ms
             .lock()
             .map(|mut last_request| *last_request = None);
-
-        match result {
-            Ok(()) => {
-                let current = self.status().unwrap_or(SessionStatus::Idle);
-                if current == SessionStatus::Stopping {
-                    let _ = self.set_status(app, SessionStatus::Idle);
-                } else if current != SessionStatus::Paused {
-                    let _ = self.set_status(app, SessionStatus::Idle);
-                }
-            }
-            Err(error) => {
-                let _ = app.emit("app-error", error);
-                let _ = self.set_status(app, SessionStatus::Error);
-            }
-        }
     }
 }
 

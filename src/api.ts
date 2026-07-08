@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AppStatus,
+  ApiKeyTestResult,
   AudioOutputChannel,
   AudioDevices,
   ExportedTranscript,
@@ -47,6 +48,10 @@ export function saveApiKey(apiKey: string) {
 
 export function hasApiKey() {
   return invoke<boolean>("has_api_key");
+}
+
+export function testApiKey() {
+  return invoke<ApiKeyTestResult>("test_api_key");
 }
 
 export function exportTranscript(format: "text" | "markdown") {

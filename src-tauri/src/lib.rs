@@ -9,6 +9,7 @@ mod session;
 use commands::{
     export_transcript, force_translate_boundary, get_app_status, has_api_key, list_audio_devices,
     pause_session, play_test_tone, resume_session, save_api_key, start_session, stop_session,
+    test_api_key,
 };
 use session::AppState;
 
@@ -26,6 +27,7 @@ pub fn run() {
             force_translate_boundary,
             save_api_key,
             has_api_key,
+            test_api_key,
             export_transcript,
             play_test_tone
         ])

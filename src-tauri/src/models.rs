@@ -62,18 +62,6 @@ pub enum TranslationStyle {
     TechnicalMeetingSafe,
 }
 
-impl TranslationStyle {
-    pub fn instructions(self) -> &'static str {
-        match self {
-            TranslationStyle::Literal => "Translate speech literally and preserve wording where possible.",
-            TranslationStyle::Natural => "Translate speech naturally for a listener while preserving meaning.",
-            TranslationStyle::TechnicalMeetingSafe => {
-                "Translate for a technical business meeting. Preserve names, product terms, code terms, numbers, and decisions."
-            }
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionConfig {
@@ -163,6 +151,14 @@ pub struct AppStatus {
     pub api_key_source: Option<ApiKeySource>,
     pub api_key_fingerprint: Option<String>,
     pub transcript_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiKeyTestResult {
+    pub source: ApiKeySource,
+    pub fingerprint: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

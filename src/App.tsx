@@ -21,7 +21,6 @@ import {
   exportTranscript,
   forceTranslateBoundary,
   getAppStatus,
-  hasApiKey,
   listAudioDevices,
   pauseSession,
   playTestTone,
@@ -29,6 +28,7 @@ import {
   saveApiKey,
   startSession,
   stopSession,
+  testApiKey,
 } from "./api";
 import { mergeTranscriptDelta, renderTranscript } from "./transcript";
 import type {
@@ -44,7 +44,6 @@ import type {
   SessionConfig,
   SessionStatus,
   TranscriptItem,
-  TranslationStyle,
 } from "./types";
 
 const languages: Array<{ value: Language; label: string }> = [
@@ -56,13 +55,6 @@ const languages: Array<{ value: Language; label: string }> = [
 
 const targetLanguages = languages.filter((language) => language.value !== "auto");
 
-const styles: Array<{ value: TranslationStyle; label: string }> = [
-  { value: "literal", label: "Literal" },
-  { value: "natural", label: "Natural" },
-  { value: "technical_meeting_safe", label: "Technical" },
-];
-
-const voices = ["marin", "cedar", "coral", "verse", "alloy", "nova"];
 const channelOptions: Array<{ value: AudioOutputChannel; label: string }> = [
   { value: "all", label: "Both ears" },
   { value: "left", label: "Left ear" },
@@ -94,8 +86,6 @@ export default function App() {
   const [devices, setDevices] = useState<AudioDevices>({ inputs: [], outputs: [] });
   const [sourceLanguage, setSourceLanguage] = useState<Language>("auto");
   const [targetLanguage, setTargetLanguage] = useState<Language>("en");
-  const [translationStyle, setTranslationStyle] =
-    useState<TranslationStyle>("technical_meeting_safe");
   const [inputDeviceId, setInputDeviceId] = useState("");
   const [outputDeviceId, setOutputDeviceId] = useState("");
   const [translationOutputChannel, setTranslationOutputChannel] =
@@ -103,7 +93,6 @@ export default function App() {
   const [monitorOutputDeviceId, setMonitorOutputDeviceId] = useState("");
   const [monitorOutputChannel, setMonitorOutputChannel] = useState<AudioOutputChannel>("all");
   const [monitorOriginalAudio, setMonitorOriginalAudio] = useState(false);
-  const [voiceId, setVoiceId] = useState("marin");
   const [fallbackEnabled, setFallbackEnabled] = useState(false);
   const [status, setStatus] = useState<SessionStatus>("idle");
   const [apiKeyStored, setApiKeyStored] = useState(false);
@@ -111,10 +100,12 @@ export default function App() {
   const [apiKeyFingerprint, setApiKeyFingerprint] = useState("");
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [error, setError] = useState<AppErrorPayload | null>(null);
+  const [keyTestMessage, setKeyTestMessage] = useState("");
   const [boundaryFeedback, setBoundaryFeedback] = useState("");
   const [level, setLevel] = useState({ peak: 0, rms: 0 });
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
   const [busy, setBusy] = useState(false);
+  const [testingKey, setTestingKey] = useState(false);
   const [testingTone, setTestingTone] = useState<"translation" | "monitor" | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
@@ -133,11 +124,10 @@ export default function App() {
   );
 
   const canStart =
-    status === "idle" &&
+    (status === "idle" || status === "error") &&
     inputDeviceId.length > 0 &&
     outputDeviceId.length > 0 &&
-    (!monitorOriginalAudio || monitorOutputDeviceId.length > 0) &&
-    apiKeyStored;
+    (!monitorOriginalAudio || monitorOutputDeviceId.length > 0);
   const canForceBoundary = activeSessionStatuses.includes(status);
   const canPause = canForceBoundary;
   const canResume = status === "paused";
@@ -191,14 +181,14 @@ export default function App() {
     () => ({
       sourceLanguage,
       targetLanguage,
-      translationStyle,
+      translationStyle: "technical_meeting_safe",
       inputDeviceId,
       outputDeviceId,
       translationOutputChannel,
       monitorOutputDeviceId,
       monitorOutputChannel,
       monitorOriginalAudio,
-      voiceId,
+      voiceId: "marin",
       fallbackEnabled,
     }),
     [
@@ -211,8 +201,6 @@ export default function App() {
       sourceLanguage,
       targetLanguage,
       translationOutputChannel,
-      translationStyle,
-      voiceId,
     ],
   );
 
@@ -266,16 +254,11 @@ export default function App() {
   async function hydrate() {
     setBusy(true);
     try {
-      const [deviceList, appStatus, stored] = await Promise.all([
-        listAudioDevices(),
-        getAppStatus(),
-        hasApiKey(),
-      ]);
+      const [deviceList, appStatus] = await Promise.all([listAudioDevices(), getAppStatus()]);
       setDevices(deviceList);
       setStatus(appStatus.sessionStatus);
-      setApiKeyStored(stored);
-      setApiKeySource(appStatus.apiKeySource ?? null);
-      setApiKeyFingerprint(appStatus.apiKeyFingerprint ?? "");
+      applyAppStatus(appStatus);
+      setKeyTestMessage("");
       const storedRouting = readRoutingProfile();
       setInputDeviceId(resolveStoredDevice(deviceList.inputs, storedRouting?.inputDeviceId));
       setOutputDeviceId(resolveStoredDevice(deviceList.outputs, storedRouting?.outputDeviceId));
@@ -298,16 +281,12 @@ export default function App() {
     setError(null);
     try {
       await saveApiKey(apiKeyDraft);
-      const stored = await hasApiKey();
-      setApiKeyStored(stored);
-      if (stored) {
-        const appStatus = await getAppStatus();
-        setApiKeySource(appStatus.apiKeySource ?? null);
-        setApiKeyFingerprint(appStatus.apiKeyFingerprint ?? "");
+      const appStatus = await getAppStatus();
+      applyAppStatus(appStatus);
+      setKeyTestMessage("");
+      if (appStatus.hasApiKey) {
         setApiKeyDraft("");
       } else {
-        setApiKeySource(null);
-        setApiKeyFingerprint("");
         setError({
           code: "missing_api_key",
           message: "The API key was saved, but the app could not read it back.",
@@ -318,6 +297,12 @@ export default function App() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function applyAppStatus(appStatus: Awaited<ReturnType<typeof getAppStatus>>) {
+    setApiKeyStored(appStatus.hasApiKey);
+    setApiKeySource(appStatus.apiKeySource ?? null);
+    setApiKeyFingerprint(appStatus.apiKeyFingerprint ?? "");
   }
 
   async function runCommand(command: () => Promise<void>) {
@@ -333,6 +318,23 @@ export default function App() {
       setError(normalized);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function testStoredKey() {
+    setTestingKey(true);
+    setError(null);
+    setKeyTestMessage("");
+    try {
+      const result = await testApiKey();
+      setApiKeyStored(true);
+      setApiKeySource(result.source);
+      setApiKeyFingerprint(result.fingerprint);
+      setKeyTestMessage(result.message);
+    } catch (cause) {
+      setError(normalizeError(cause));
+    } finally {
+      setTestingKey(false);
     }
   }
 
@@ -520,18 +522,6 @@ export default function App() {
               onChange={(value) => setTargetLanguage(value as Language)}
               options={targetLanguages}
             />
-            <SelectField
-              label="Style"
-              value={translationStyle}
-              onChange={(value) => setTranslationStyle(value as TranslationStyle)}
-              options={styles}
-            />
-            <SelectField
-              label="Voice"
-              value={voiceId}
-              onChange={setVoiceId}
-              options={voices.map((voice) => ({ value: voice, label: voice }))}
-            />
           </div>
 
           {sourceLanguage === targetLanguage && sourceLanguage !== "auto" ? (
@@ -698,20 +688,32 @@ export default function App() {
             <input
               type="password"
               value={apiKeyDraft}
-              placeholder={apiKeyStored ? "Saved in Keychain" : "OpenAI API key"}
+              placeholder={
+                apiKeyStored ? "Saved key loaded. Paste only to replace." : "OpenAI API key"
+              }
               onChange={(event) => setApiKeyDraft(event.currentTarget.value)}
             />
             <button onClick={saveKey} disabled={apiKeyDraft.trim().length === 0 || busy}>
-              <Save size={17} /> Save
+              <Save size={17} /> {apiKeyStored ? "Replace" : "Save"}
             </button>
           </div>
           <div className={`key-status ${apiKeyStored ? "ok" : "warn"}`}>
             <KeyRound size={14} />
             <span>
               {apiKeyStored
-                ? `Using ${labelApiKeySource(apiKeySource)} key ${apiKeyFingerprint || ""}`
+                ? `Using ${labelApiKeySource(apiKeySource)} key ${apiKeyFingerprint || ""} automatically`
                 : "No OpenAI API key available"}
             </span>
+          </div>
+          <div className="key-test-row">
+            <button
+              className="small-button"
+              onClick={testStoredKey}
+              disabled={!apiKeyStored || busy || testingKey}
+            >
+              <Check size={14} /> {testingKey ? "Testing" : "Test key"}
+            </button>
+            {keyTestMessage ? <span>{keyTestMessage}</span> : null}
           </div>
           <div className="setup-list">
             <div>

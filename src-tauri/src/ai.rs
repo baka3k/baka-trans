@@ -7,14 +7,18 @@ use crate::models::{
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use futures_util::{Sink, SinkExt, StreamExt};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::VecDeque;
+use std::io::{Read, Write};
+use std::net::TcpStream;
 use std::sync::{mpsc as std_mpsc, Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::header::{HeaderValue, AUTHORIZATION};
+use tokio_tungstenite::tungstenite::http::Request;
 use tokio_tungstenite::tungstenite::Message;
 use uuid::Uuid;
 
@@ -23,6 +27,17 @@ const REALTIME_TRANSLATION_URL: &str =
 
 pub enum RealtimeControl {
     ForceBoundary(ManualBoundaryRequest),
+    Stop,
+}
+
+pub async fn test_realtime_connection(api_key: &str) -> AppResult<()> {
+    let token = mint_realtime_client_secret(api_key, "vi").await?;
+    let request = realtime_translation_request(&token)?;
+    let (mut socket, _) = connect_async(request)
+        .await
+        .map_err(|err| AppError::new("realtime_connect_error", err.to_string()))?;
+    let _ = socket.close(None).await;
+    Ok(())
 }
 
 pub async fn run_realtime_translation(
@@ -37,17 +52,9 @@ pub async fn run_realtime_translation(
     let mut boundary_state = ManualBoundaryRuntimeState::default();
 
     'session: loop {
-        let mut request = REALTIME_TRANSLATION_URL
-            .into_client_request()
-            .map_err(|err| AppError::new("realtime_request_error", err.to_string()))?;
-        let auth = HeaderValue::from_str(&format!("Bearer {api_key}"))
-            .map_err(|err| AppError::new("realtime_auth_error", err.to_string()))?;
-        request.headers_mut().insert(AUTHORIZATION, auth);
-        request.headers_mut().insert(
-            "OpenAI-Safety-Identifier",
-            HeaderValue::from_static("baka-trans-local-user"),
-        );
-
+        let realtime_token =
+            mint_realtime_client_secret(&api_key, config.target_language.realtime_code()).await?;
+        let request = realtime_translation_request(&realtime_token)?;
         let (socket, _) = connect_async(request)
             .await
             .map_err(|err| AppError::new("realtime_connect_error", err.to_string()))?;
@@ -59,10 +66,8 @@ pub async fn run_realtime_translation(
                 "audio": {
                     "output": {
                         "language": config.target_language.realtime_code(),
-                        "voice": config.voice_id,
                     }
-                },
-                "instructions": config.translation_style.instructions()
+                }
             }
         });
         writer
@@ -106,6 +111,10 @@ pub async fn run_realtime_translation(
                             )
                             .await?;
                         }
+                        Some(RealtimeControl::Stop) => {
+                            let _ = writer.send(Message::Close(None)).await;
+                            break 'session;
+                        }
                         None => {}
                     }
                 }
@@ -147,6 +156,188 @@ pub async fn run_realtime_translation(
     }
 
     Ok(())
+}
+
+#[derive(Deserialize)]
+struct RealtimeClientSecretResponse {
+    value: String,
+}
+
+async fn mint_realtime_client_secret(api_key: &str, target_language: &str) -> AppResult<String> {
+    let api_key = api_key.trim().to_string();
+    let target_language = target_language.to_string();
+    tokio::task::spawn_blocking(move || {
+        mint_realtime_client_secret_blocking(&api_key, &target_language)
+    })
+    .await
+    .map_err(|err| AppError::new("realtime_token_task_error", err.to_string()))?
+}
+
+fn mint_realtime_client_secret_blocking(api_key: &str, target_language: &str) -> AppResult<String> {
+    let body = json!({
+            "session": {
+                "model": "gpt-realtime-translate",
+                "audio": {
+                    "output": {
+                        "language": target_language,
+                    }
+                }
+            }
+    })
+    .to_string();
+    let response = post_json_over_tls(
+        "api.openai.com",
+        "/v1/realtime/translations/client_secrets",
+        api_key,
+        &body,
+    )?;
+
+    if !(200..300).contains(&response.status) {
+        let body = response.body;
+        let message = extract_openai_error_message(&body).unwrap_or(body);
+        return Err(AppError::new("realtime_token_error", message));
+    }
+
+    let token = serde_json::from_str::<RealtimeClientSecretResponse>(&response.body)
+        .map_err(|err| AppError::new("realtime_token_parse_error", err.to_string()))?
+        .value;
+
+    if token.trim().is_empty() {
+        return Err(AppError::new(
+            "realtime_token_error",
+            "OpenAI returned an empty Realtime client secret.",
+        ));
+    }
+
+    Ok(token)
+}
+
+struct HttpResponse {
+    status: u16,
+    body: String,
+}
+
+fn post_json_over_tls(
+    host: &str,
+    path: &str,
+    bearer_token: &str,
+    body: &str,
+) -> AppResult<HttpResponse> {
+    let stream = TcpStream::connect((host, 443))
+        .map_err(|err| AppError::new("realtime_token_connect_error", err.to_string()))?;
+    let connector = native_tls::TlsConnector::new()
+        .map_err(|err| AppError::new("realtime_token_tls_error", err.to_string()))?;
+    let mut stream = connector
+        .connect(host, stream)
+        .map_err(|err| AppError::new("realtime_token_tls_error", err.to_string()))?;
+
+    let request = format!(
+        "POST {path} HTTP/1.1\r\n\
+         Host: {host}\r\n\
+         Authorization: Bearer {bearer_token}\r\n\
+         Content-Type: application/json\r\n\
+         Accept: application/json\r\n\
+         OpenAI-Safety-Identifier: baka-trans-local-user\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n\
+         {body}",
+        body.as_bytes().len()
+    );
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|err| AppError::new("realtime_token_request_error", err.to_string()))?;
+
+    let mut raw = Vec::new();
+    stream
+        .read_to_end(&mut raw)
+        .map_err(|err| AppError::new("realtime_token_response_error", err.to_string()))?;
+    parse_http_response(&raw)
+}
+
+fn parse_http_response(raw: &[u8]) -> AppResult<HttpResponse> {
+    let response = String::from_utf8_lossy(raw);
+    let (headers, body) = response.split_once("\r\n\r\n").ok_or_else(|| {
+        AppError::new(
+            "realtime_token_response_error",
+            "OpenAI returned a malformed HTTP response.",
+        )
+    })?;
+    let status = headers
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|code| code.parse::<u16>().ok())
+        .ok_or_else(|| {
+            AppError::new(
+                "realtime_token_response_error",
+                "OpenAI returned a response without an HTTP status code.",
+            )
+        })?;
+    let body = if headers
+        .to_lowercase()
+        .contains("transfer-encoding: chunked")
+    {
+        decode_chunked_body(body)?
+    } else {
+        body.to_string()
+    };
+
+    Ok(HttpResponse { status, body })
+}
+
+fn decode_chunked_body(body: &str) -> AppResult<String> {
+    let mut remaining = body;
+    let mut decoded = String::new();
+    loop {
+        let Some((size_line, rest)) = remaining.split_once("\r\n") else {
+            return Err(AppError::new(
+                "realtime_token_response_error",
+                "OpenAI returned a malformed chunked response.",
+            ));
+        };
+        let size_hex = size_line.split(';').next().unwrap_or(size_line).trim();
+        let size = usize::from_str_radix(size_hex, 16)
+            .map_err(|err| AppError::new("realtime_token_response_error", err.to_string()))?;
+        if size == 0 {
+            break;
+        }
+        if rest.len() < size + 2 {
+            return Err(AppError::new(
+                "realtime_token_response_error",
+                "OpenAI returned a truncated chunked response.",
+            ));
+        }
+        decoded.push_str(&rest[..size]);
+        remaining = &rest[size + 2..];
+    }
+
+    Ok(decoded)
+}
+
+fn extract_openai_error_message(body: &str) -> Option<String> {
+    serde_json::from_str::<Value>(body).ok().and_then(|value| {
+        value
+            .pointer("/error/message")
+            .or_else(|| value.get("message"))
+            .and_then(Value::as_str)
+            .map(ToString::to_string)
+    })
+}
+
+fn realtime_translation_request(bearer_token: &str) -> AppResult<Request<()>> {
+    let mut request = REALTIME_TRANSLATION_URL
+        .into_client_request()
+        .map_err(|err| AppError::new("realtime_request_error", err.to_string()))?;
+    let auth = HeaderValue::from_str(&format!("Bearer {}", bearer_token.trim()))
+        .map_err(|err| AppError::new("realtime_auth_error", err.to_string()))?;
+    request.headers_mut().insert(AUTHORIZATION, auth);
+    request.headers_mut().insert(
+        "OpenAI-Safety-Identifier",
+        HeaderValue::from_static("baka-trans-local-user"),
+    );
+
+    Ok(request)
 }
 
 async fn append_audio<W>(

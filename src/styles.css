@@ -607,6 +607,15 @@ h2 {
   color: var(--warn);
 }
 
+.key-test-row {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  font-size: 12px;
+  gap: 10px;
+  margin-top: 10px;
+}
+
 .setup-list {
   display: grid;
   gap: 8px;

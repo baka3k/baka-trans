@@ -1,11 +1,11 @@
 use crate::audio;
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::models::{
-    AppStatus, AudioDevices, AudioOutputChannel, ExportRequest, ExportedTranscript,
-    ManualBoundaryRequest, SessionConfig,
+    ApiKeyTestResult, AppStatus, AudioDevices, AudioOutputChannel, ExportRequest,
+    ExportedTranscript, ManualBoundaryRequest, SessionConfig,
 };
-use crate::security;
 use crate::session::AppState;
+use crate::{ai, security};
 use tauri::{AppHandle, State};
 
 #[tauri::command]
@@ -59,6 +59,35 @@ pub fn save_api_key(api_key: String) -> AppResult<()> {
 #[tauri::command]
 pub fn has_api_key() -> bool {
     security::has_api_key()
+}
+
+#[tauri::command]
+pub async fn test_api_key() -> AppResult<ApiKeyTestResult> {
+    let info = security::load_api_key_info()?;
+    if let Err(error) = ai::test_realtime_connection(&info.key).await {
+        return Err(AppError::new(
+            error.code,
+            format!(
+                "Realtime test failed for {} key {}: {}",
+                api_key_source_label(info.source),
+                info.fingerprint,
+                error.message
+            ),
+        ));
+    }
+    Ok(ApiKeyTestResult {
+        source: info.source,
+        fingerprint: info.fingerprint,
+        message: "Realtime translation accepted this key.".to_string(),
+    })
+}
+
+fn api_key_source_label(source: crate::models::ApiKeySource) -> &'static str {
+    match source {
+        crate::models::ApiKeySource::Environment => "environment",
+        crate::models::ApiKeySource::Keychain => "Keychain",
+        crate::models::ApiKeySource::Memory => "memory",
+    }
 }
 
 #[tauri::command]
