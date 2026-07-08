@@ -33,6 +33,8 @@ export interface SessionConfig {
   translationStyle: TranslationStyle;
   inputDeviceId: string;
   outputDeviceId: string;
+  monitorOutputDeviceId: string;
+  monitorOriginalAudio: boolean;
   voiceId: string;
   fallbackEnabled: boolean;
 }
@@ -67,4 +69,3 @@ export interface ExportedTranscript {
   fileName: string;
   content: string;
 }
-

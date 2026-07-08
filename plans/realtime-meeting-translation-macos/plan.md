@@ -96,8 +96,10 @@ Core session config:
 - source language: `auto`, `en`, `ja`, `vi`
 - target language: `en`, `ja`, `vi`
 - translation style: `literal`, `natural`, `technical_meeting_safe`
-- input device ID
-- output device ID
+- translation input device ID
+- translated audio output device ID
+- optional original-audio monitor output device ID
+- original-audio monitor enabled flag
 - voice ID
 - fallback mode enabled
 
@@ -152,9 +154,17 @@ Session status:
    - Add long-session stability testing, reconnect/backoff, device disappearance handling, secure key storage, and macOS packaging.
    - See `phase-05-hardening-packaging.md`.
 
+6. Advanced audio routing profile
+   - Add explicit routing controls for meeting source input, translated output, and optional original-audio monitoring.
+   - Support the meeting scenario where Teams audio is captured from BlackHole, translated audio is played to headphones, and the original meeting audio is still heard through Mac speakers or another selected monitor output.
+   - Persist routing choices and validate feedback-risk combinations before session start.
+   - See `phase-06-audio-routing-profile.md`.
+
 ## Acceptance Criteria
 
 - The user can select source/target languages, input device, and output device.
+- The user can choose the meeting audio input source independently from translated output.
+- The user can optionally monitor original meeting audio on a separate output device such as Mac speakers while translated audio plays to headphones.
 - The app can capture Teams-routed audio through BlackHole 2ch.
 - The app streams audio to the OpenAI realtime translation path and receives translated output.
 - The translated audio plays only to the selected headphones/output device.
@@ -179,6 +189,7 @@ Session status:
 - Realtime translated audio event format and output codec must be verified during implementation against current API behavior.
 - Bluetooth output latency may make the 1-3 second target harder.
 - Simultaneous capture/playback can create feedback if the selected input receives output audio.
+- Original-audio monitoring can duplicate Teams audio or create echo unless the selected input, translated output, and monitor output are validated together.
 - API quota/network errors can interrupt meetings unless retry and fallback paths are explicit.
 
 ## Out of Scope for MVP

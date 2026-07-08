@@ -55,6 +55,14 @@ const styles: Array<{ value: TranslationStyle; label: string }> = [
 ];
 
 const voices = ["marin", "cedar", "coral", "verse", "alloy", "nova"];
+const routingStorageKey = "baka-trans-routing-profile-v1";
+
+interface RoutingProfile {
+  inputDeviceId: string;
+  outputDeviceId: string;
+  monitorOutputDeviceId: string;
+  monitorOriginalAudio: boolean;
+}
 
 export default function App() {
   const [devices, setDevices] = useState<AudioDevices>({ inputs: [], outputs: [] });
@@ -64,6 +72,8 @@ export default function App() {
     useState<TranslationStyle>("technical_meeting_safe");
   const [inputDeviceId, setInputDeviceId] = useState("");
   const [outputDeviceId, setOutputDeviceId] = useState("");
+  const [monitorOutputDeviceId, setMonitorOutputDeviceId] = useState("");
+  const [monitorOriginalAudio, setMonitorOriginalAudio] = useState(false);
   const [voiceId, setVoiceId] = useState("marin");
   const [fallbackEnabled, setFallbackEnabled] = useState(false);
   const [status, setStatus] = useState<SessionStatus>("idle");
@@ -77,13 +87,21 @@ export default function App() {
 
   const selectedInput = devices.inputs.find((device) => device.id === inputDeviceId);
   const selectedOutput = devices.outputs.find((device) => device.id === outputDeviceId);
-  const feedbackWarning =
-    selectedInput &&
-    selectedOutput &&
-    normalizeDeviceName(selectedInput.name) === normalizeDeviceName(selectedOutput.name);
+  const selectedMonitorOutput = devices.outputs.find(
+    (device) => device.id === monitorOutputDeviceId,
+  );
+  const routingWarnings = getRoutingWarnings(
+    selectedInput,
+    selectedOutput,
+    monitorOriginalAudio ? selectedMonitorOutput : undefined,
+  );
 
   const canStart =
-    status === "idle" && inputDeviceId.length > 0 && outputDeviceId.length > 0 && apiKeyStored;
+    status === "idle" &&
+    inputDeviceId.length > 0 &&
+    outputDeviceId.length > 0 &&
+    (!monitorOriginalAudio || monitorOutputDeviceId.length > 0) &&
+    apiKeyStored;
   const canPause = ["listening", "translating", "speaking"].includes(status);
   const canResume = status === "paused";
   const canStop = status !== "idle" && status !== "stopping";
@@ -95,12 +113,16 @@ export default function App() {
       translationStyle,
       inputDeviceId,
       outputDeviceId,
+      monitorOutputDeviceId,
+      monitorOriginalAudio,
       voiceId,
       fallbackEnabled,
     }),
     [
       fallbackEnabled,
       inputDeviceId,
+      monitorOriginalAudio,
+      monitorOutputDeviceId,
       outputDeviceId,
       sourceLanguage,
       targetLanguage,
@@ -143,8 +165,13 @@ export default function App() {
       setDevices(deviceList);
       setStatus(appStatus.sessionStatus);
       setApiKeyStored(stored);
-      setInputDeviceId(selectDefaultDevice(deviceList.inputs));
-      setOutputDeviceId(selectDefaultDevice(deviceList.outputs));
+      const storedRouting = readRoutingProfile();
+      setInputDeviceId(resolveStoredDevice(deviceList.inputs, storedRouting?.inputDeviceId));
+      setOutputDeviceId(resolveStoredDevice(deviceList.outputs, storedRouting?.outputDeviceId));
+      setMonitorOutputDeviceId(
+        resolveStoredDevice(deviceList.outputs, storedRouting?.monitorOutputDeviceId),
+      );
+      setMonitorOriginalAudio(storedRouting?.monitorOriginalAudio ?? false);
     } catch (cause) {
       setError(normalizeError(cause));
     } finally {
@@ -186,6 +213,46 @@ export default function App() {
     } catch {
       downloadText(`baka-trans-transcript.${format === "markdown" ? "md" : "txt"}`, localContent);
     }
+  }
+
+  function updateInputDevice(deviceId: string) {
+    setInputDeviceId(deviceId);
+    persistRoutingProfile({
+      inputDeviceId: deviceId,
+      outputDeviceId,
+      monitorOutputDeviceId,
+      monitorOriginalAudio,
+    });
+  }
+
+  function updateOutputDevice(deviceId: string) {
+    setOutputDeviceId(deviceId);
+    persistRoutingProfile({
+      inputDeviceId,
+      outputDeviceId: deviceId,
+      monitorOutputDeviceId,
+      monitorOriginalAudio,
+    });
+  }
+
+  function updateMonitorOutputDevice(deviceId: string) {
+    setMonitorOutputDeviceId(deviceId);
+    persistRoutingProfile({
+      inputDeviceId,
+      outputDeviceId,
+      monitorOutputDeviceId: deviceId,
+      monitorOriginalAudio,
+    });
+  }
+
+  function updateMonitorEnabled(enabled: boolean) {
+    setMonitorOriginalAudio(enabled);
+    persistRoutingProfile({
+      inputDeviceId,
+      outputDeviceId,
+      monitorOutputDeviceId,
+      monitorOriginalAudio: enabled,
+    });
   }
 
   return (
@@ -294,20 +361,39 @@ export default function App() {
         </div>
 
         <div className="panel devices-panel">
-          <div className="section-title">Audio</div>
+          <div className="section-title">Audio routing</div>
           <DeviceSelect
             icon={<Mic size={17} />}
-            label="Input"
+            label="Meeting source"
+            description="Captured and sent for translation."
             devices={devices.inputs}
             value={inputDeviceId}
-            onChange={setInputDeviceId}
+            onChange={updateInputDevice}
           />
           <DeviceSelect
             icon={<Headphones size={17} />}
-            label="Output"
+            label="Translated audio"
+            description="Private translated speech playback."
             devices={devices.outputs}
             value={outputDeviceId}
-            onChange={setOutputDeviceId}
+            onChange={updateOutputDevice}
+          />
+          <label className="toggle-row no-margin">
+            <input
+              type="checkbox"
+              checked={monitorOriginalAudio}
+              onChange={(event) => updateMonitorEnabled(event.currentTarget.checked)}
+            />
+            <span>Original audio monitor</span>
+          </label>
+          <DeviceSelect
+            icon={<Volume2 size={17} />}
+            label="Monitor output"
+            description="Optional original meeting audio playback."
+            devices={devices.outputs}
+            value={monitorOutputDeviceId}
+            onChange={updateMonitorOutputDevice}
+            disabled={!monitorOriginalAudio}
           />
           <div className="meter-row">
             <Volume2 size={17} />
@@ -319,10 +405,28 @@ export default function App() {
               onClick={() => outputDeviceId && runCommand(() => playTestTone(outputDeviceId))}
               disabled={!outputDeviceId || busy}
             >
-              Test
+              TTS
             </button>
           </div>
-          {feedbackWarning ? <InlineWarning text="Input and output look identical." /> : null}
+          <div className="button-row compact">
+            <button
+              className="small-button"
+              onClick={() =>
+                monitorOutputDeviceId && runCommand(() => playTestTone(monitorOutputDeviceId))
+              }
+              disabled={!monitorOriginalAudio || !monitorOutputDeviceId || busy}
+            >
+              Test monitor
+            </button>
+          </div>
+          <RoutingSummary
+            input={selectedInput}
+            output={selectedOutput}
+            monitor={monitorOriginalAudio ? selectedMonitorOutput : undefined}
+          />
+          {routingWarnings.map((warning) => (
+            <InlineWarning text={warning} key={warning} />
+          ))}
         </div>
 
         <div className="panel key-panel">
@@ -340,9 +444,11 @@ export default function App() {
           </div>
           <ol className="checklist">
             <li>Install BlackHole 2ch.</li>
-            <li>Set Teams speaker output to BlackHole or a multi-output route.</li>
-            <li>Select BlackHole as input here.</li>
-            <li>Select headphones as output here.</li>
+            <li>Set Teams speaker output to BlackHole for translation capture.</li>
+            <li>Use macOS Multi-Output Device or Teams routing if you also need speakers.</li>
+            <li>Select BlackHole as meeting source.</li>
+            <li>Select headphones as translated audio.</li>
+            <li>Enable original monitor only when you want the captured source mirrored locally.</li>
           </ol>
         </div>
       </section>
@@ -408,15 +514,19 @@ function SelectField({
 function DeviceSelect({
   icon,
   label,
+  description,
   devices,
   value,
   onChange,
+  disabled = false,
 }: {
   icon: React.ReactNode;
   label: string;
+  description?: string;
   devices: AudioDeviceInfo[];
   value: string;
   onChange: (value: string) => void;
+  disabled?: boolean;
 }) {
   return (
     <label className="device-field">
@@ -424,7 +534,12 @@ function DeviceSelect({
         {icon}
         {label}
       </span>
-      <select value={value} onChange={(event) => onChange(event.currentTarget.value)}>
+      {description ? <small>{description}</small> : null}
+      <select
+        value={value}
+        onChange={(event) => onChange(event.currentTarget.value)}
+        disabled={disabled}
+      >
         <option value="">No device</option>
         {devices.map((device) => (
           <option value={device.id} key={device.id}>
@@ -434,6 +549,33 @@ function DeviceSelect({
         ))}
       </select>
     </label>
+  );
+}
+
+function RoutingSummary({
+  input,
+  output,
+  monitor,
+}: {
+  input?: AudioDeviceInfo;
+  output?: AudioDeviceInfo;
+  monitor?: AudioDeviceInfo;
+}) {
+  return (
+    <div className="routing-summary">
+      <div>
+        <strong>Meeting</strong>
+        <span>{input?.name ?? "No input"}</span>
+      </div>
+      <div>
+        <strong>Translation</strong>
+        <span>{output?.name ?? "No output"}</span>
+      </div>
+      <div>
+        <strong>Original</strong>
+        <span>{monitor?.name ?? "Off"}</span>
+      </div>
+    </div>
   );
 }
 
@@ -450,12 +592,69 @@ function selectDefaultDevice(devices: AudioDeviceInfo[]) {
   return devices.find((device) => device.isDefault)?.id ?? devices[0]?.id ?? "";
 }
 
+function resolveStoredDevice(devices: AudioDeviceInfo[], storedId?: string) {
+  if (!storedId) {
+    return selectDefaultDevice(devices);
+  }
+
+  const exact = devices.find((device) => device.id === storedId);
+  if (exact) {
+    return exact.id;
+  }
+
+  const storedName = storedId.split(":").slice(2).join(":");
+  const sameName = devices.find(
+    (device) => normalizeDeviceName(device.name) === normalizeDeviceName(storedName),
+  );
+  return sameName?.id ?? selectDefaultDevice(devices);
+}
+
 function labelStatus(status: SessionStatus) {
   return status.replace(/_/g, " ");
 }
 
 function normalizeDeviceName(name: string) {
   return name.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function getRoutingWarnings(
+  input?: AudioDeviceInfo,
+  output?: AudioDeviceInfo,
+  monitor?: AudioDeviceInfo,
+) {
+  const warnings: string[] = [];
+  if (sameDeviceName(input, output)) {
+    warnings.push("Meeting source and translated output look identical.");
+  }
+  if (sameDeviceName(input, monitor)) {
+    warnings.push("Meeting source and original monitor look identical.");
+  }
+  if (sameDeviceName(output, monitor)) {
+    warnings.push("Translated output and original monitor use the same device.");
+  }
+  return warnings;
+}
+
+function sameDeviceName(left?: AudioDeviceInfo, right?: AudioDeviceInfo) {
+  return Boolean(
+    left &&
+      right &&
+      normalizeDeviceName(left.name).length > 0 &&
+      normalizeDeviceName(left.name) === normalizeDeviceName(right.name),
+  );
+}
+
+function readRoutingProfile(): RoutingProfile | null {
+  try {
+    const raw = window.localStorage.getItem(routingStorageKey);
+    return raw ? (JSON.parse(raw) as RoutingProfile) : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistRoutingProfile(profile: RoutingProfile) {
+  window.localStorage.setItem(routingStorageKey, JSON.stringify(profile));
 }
 
 function normalizeError(cause: unknown): AppErrorPayload {

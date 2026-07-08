@@ -7,6 +7,8 @@ Depends on: phase 01
 
 Implement reliable macOS audio device enumeration, capture, and playback primitives using BlackHole 2ch as the default Teams routing path.
 
+Phase 02 owns low-level device primitives. User-facing multi-route behavior for meeting input, translated output, and optional original-audio monitoring is planned separately in `phase-06-audio-routing-profile.md`.
+
 ## Implementation Tasks
 
 - Implement audio device enumeration with `cpal`:
@@ -29,11 +31,13 @@ Implement reliable macOS audio device enumeration, capture, and playback primiti
   - selected output device
   - playable local test tone
   - controlled buffer size to avoid runaway latency
+- Expose reusable playback primitives so phase 06 can run a second output queue for original-audio monitoring.
 - Add setup guide UI:
   - install/select BlackHole 2ch
   - set Teams speaker output to BlackHole or a multi-output route
   - select BlackHole as app input
   - select headphones as app output
+  - defer advanced original-audio monitor selection to phase 06
 - Add explicit warning when input and output devices can create feedback.
 
 ## Verification

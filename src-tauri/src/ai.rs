@@ -22,7 +22,7 @@ pub async fn run_realtime_translation(
     config: SessionConfig,
     api_key: String,
     mut audio_rx: mpsc::Receiver<Vec<i16>>,
-    playback_tx: std_mpsc::Sender<Vec<i16>>,
+    playback_tx: std_mpsc::SyncSender<Vec<i16>>,
     transcript_store: Arc<Mutex<Vec<TranscriptItem>>>,
 ) -> AppResult<()> {
     let mut request = REALTIME_TRANSLATION_URL
@@ -109,7 +109,7 @@ pub async fn run_realtime_translation(
 fn handle_realtime_event(
     app: &AppHandle,
     event: Value,
-    playback_tx: &std_mpsc::Sender<Vec<i16>>,
+    playback_tx: &std_mpsc::SyncSender<Vec<i16>>,
     transcript_store: &Arc<Mutex<Vec<TranscriptItem>>>,
 ) -> AppResult<bool> {
     let Some(event_type) = event.get("type").and_then(Value::as_str) else {
@@ -125,7 +125,7 @@ fn handle_realtime_event(
         }
         "session.output_audio.delta" => {
             if let Some(samples) = decode_output_audio(&event) {
-                let _ = playback_tx.send(samples);
+                let _ = playback_tx.try_send(samples);
             }
             let _ = app.emit("session-status", SessionStatus::Speaking);
         }

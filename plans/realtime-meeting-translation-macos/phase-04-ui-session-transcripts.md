@@ -7,6 +7,8 @@ Depends on: phase 03
 
 Build the user-facing workflow for running a translation session during a meeting.
 
+Phase 04 covers the baseline session workflow. Advanced audio route labeling and the optional original-audio monitor control are planned in `phase-06-audio-routing-profile.md`.
+
 ## Implementation Tasks
 
 - Replace placeholder controls with real backend data.
@@ -48,6 +50,10 @@ Build the user-facing workflow for running a translation session during a meetin
   - show stored/not stored state
   - do not render full key after save
 - Add a setup checklist for Teams + BlackHole routing.
+- Leave room in the audio section for phase 06 selectors:
+  - meeting source input
+  - translated audio output
+  - original audio monitor output
 - Add accessible keyboard navigation and focus states.
 
 ## Verification

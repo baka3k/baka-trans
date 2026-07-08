@@ -12,6 +12,7 @@ pub struct AppState {
     status: Mutex<SessionStatus>,
     capture: Mutex<Option<CaptureRuntime>>,
     playback: Mutex<Option<PlaybackRuntime>>,
+    monitor_playback: Mutex<Option<PlaybackRuntime>>,
     transcript: Arc<Mutex<Vec<TranscriptItem>>>,
     last_config: Mutex<Option<SessionConfig>>,
 }
@@ -22,6 +23,7 @@ impl AppState {
             status: Mutex::new(SessionStatus::Idle),
             capture: Mutex::new(None),
             playback: Mutex::new(None),
+            monitor_playback: Mutex::new(None),
             transcript: Arc::new(Mutex::new(Vec::new())),
             last_config: Mutex::new(None),
         }
@@ -65,6 +67,8 @@ impl AppState {
             )
             .map_err(|err| AppError::new("event_emit_error", err.to_string()))?;
         }
+
+        validate_routing_config(&config)?;
 
         self.set_status(&app, SessionStatus::Starting)?;
         self.transcript.lock().map_err(lock_error)?.clear();
@@ -133,12 +137,20 @@ impl AppState {
 
     fn start_pipeline(&self, app: AppHandle, config: SessionConfig) -> AppResult<()> {
         let api_key = security::load_api_key()?;
-        let (capture, audio_rx) = audio::start_capture(app.clone(), &config.input_device_id)?;
         let playback = audio::start_playback(&config.output_device_id)?;
         let playback_tx = playback.sender();
+        let monitor_playback = if config.monitor_original_audio {
+            Some(audio::start_playback(&config.monitor_output_device_id)?)
+        } else {
+            None
+        };
+        let monitor_tx = monitor_playback.as_ref().map(PlaybackRuntime::sender);
+        let (capture, audio_rx) =
+            audio::start_capture(app.clone(), &config.input_device_id, monitor_tx)?;
         let transcript_store = Arc::clone(&self.transcript);
         *self.capture.lock().map_err(lock_error)? = Some(capture);
         *self.playback.lock().map_err(lock_error)? = Some(playback);
+        *self.monitor_playback.lock().map_err(lock_error)? = monitor_playback;
         self.set_status(&app, SessionStatus::Listening)?;
 
         tauri::async_runtime::spawn(async move {
@@ -161,6 +173,10 @@ impl AppState {
     fn finish_pipeline(&self, app: &AppHandle, result: AppResult<()>) {
         let _ = self.capture.lock().map(|mut capture| *capture = None);
         let _ = self.playback.lock().map(|mut playback| *playback = None);
+        let _ = self
+            .monitor_playback
+            .lock()
+            .map(|mut monitor_playback| *monitor_playback = None);
 
         match result {
             Ok(()) => {
@@ -190,6 +206,31 @@ fn render_text(items: &[TranscriptItem]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn validate_routing_config(config: &SessionConfig) -> AppResult<()> {
+    if config.input_device_id.trim().is_empty() {
+        return Err(AppError::new(
+            "missing_input_device",
+            "Choose a meeting source input before starting.",
+        ));
+    }
+
+    if config.output_device_id.trim().is_empty() {
+        return Err(AppError::new(
+            "missing_output_device",
+            "Choose a translated audio output before starting.",
+        ));
+    }
+
+    if config.monitor_original_audio && config.monitor_output_device_id.trim().is_empty() {
+        return Err(AppError::new(
+            "missing_monitor_output",
+            "Choose an original audio monitor output or disable monitoring.",
+        ));
+    }
+
+    Ok(())
 }
 
 fn render_markdown(items: &[TranscriptItem]) -> String {

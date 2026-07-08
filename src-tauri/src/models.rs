@@ -74,6 +74,8 @@ pub struct SessionConfig {
     pub translation_style: TranslationStyle,
     pub input_device_id: String,
     pub output_device_id: String,
+    pub monitor_output_device_id: String,
+    pub monitor_original_audio: bool,
     pub voice_id: String,
     pub fallback_enabled: bool,
 }

@@ -18,13 +18,13 @@ pub struct CaptureRuntime {
 }
 
 pub struct PlaybackRuntime {
-    audio_tx: std_mpsc::Sender<Vec<i16>>,
+    audio_tx: std_mpsc::SyncSender<Vec<i16>>,
     stop_tx: std_mpsc::Sender<()>,
     join_handle: Option<thread::JoinHandle<()>>,
 }
 
 impl PlaybackRuntime {
-    pub fn sender(&self) -> std_mpsc::Sender<Vec<i16>> {
+    pub fn sender(&self) -> std_mpsc::SyncSender<Vec<i16>> {
         self.audio_tx.clone()
     }
 }
@@ -78,6 +78,7 @@ pub fn list_devices() -> AppResult<AudioDevices> {
 pub fn start_capture(
     app: AppHandle,
     input_device_id: &str,
+    monitor_tx: Option<std_mpsc::SyncSender<Vec<i16>>>,
 ) -> AppResult<(CaptureRuntime, mpsc::Receiver<Vec<i16>>)> {
     let (tx, rx) = mpsc::channel::<Vec<i16>>(24);
     let (stop_tx, stop_rx) = std_mpsc::channel::<()>();
@@ -85,8 +86,9 @@ pub fn start_capture(
     let device_id = input_device_id.to_string();
     let thread_device_id = device_id.clone();
 
-    let join_handle =
-        thread::spawn(move || run_capture_thread(app, tx, thread_device_id, stop_rx, ready_tx));
+    let join_handle = thread::spawn(move || {
+        run_capture_thread(app, tx, monitor_tx, thread_device_id, stop_rx, ready_tx)
+    });
 
     match ready_rx.recv_timeout(Duration::from_secs(3)) {
         Ok(Ok(())) => Ok((
@@ -167,7 +169,7 @@ pub fn play_test_tone(output_device_id: &str) -> AppResult<()> {
 }
 
 pub fn start_playback(output_device_id: &str) -> AppResult<PlaybackRuntime> {
-    let (audio_tx, audio_rx) = std_mpsc::channel::<Vec<i16>>();
+    let (audio_tx, audio_rx) = std_mpsc::sync_channel::<Vec<i16>>(24);
     let (stop_tx, stop_rx) = std_mpsc::channel::<()>();
     let (ready_tx, ready_rx) = std_mpsc::channel::<AppResult<()>>();
     let device_id = output_device_id.to_string();
@@ -209,6 +211,7 @@ fn handle_input(
     channels: usize,
     sample_rate: u32,
     tx: &mpsc::Sender<Vec<i16>>,
+    monitor_tx: Option<&std_mpsc::SyncSender<Vec<i16>>>,
     app: &AppHandle,
     input_device_id: &str,
 ) {
@@ -220,7 +223,12 @@ fn handle_input(
     let (rms, peak) = level(&mono);
     let resampled = resample_linear(&mono, sample_rate, REALTIME_SAMPLE_RATE);
     let pcm = f32_to_pcm16(&resampled);
-    let _ = tx.try_send(pcm);
+    if let Some(monitor_tx) = monitor_tx {
+        let _ = tx.try_send(pcm.clone());
+        let _ = monitor_tx.try_send(pcm);
+    } else {
+        let _ = tx.try_send(pcm);
+    }
     let _ = app.emit(
         "audio-level",
         AudioLevelEvent {
@@ -234,6 +242,7 @@ fn handle_input(
 fn run_capture_thread(
     app: AppHandle,
     tx: mpsc::Sender<Vec<i16>>,
+    monitor_tx: Option<std_mpsc::SyncSender<Vec<i16>>>,
     device_id: String,
     stop_rx: std_mpsc::Receiver<()>,
     ready_tx: std_mpsc::Sender<AppResult<()>>,
@@ -271,7 +280,15 @@ fn run_capture_thread(
             device.build_input_stream(
                 &config,
                 move |data: &[f32], _| {
-                    handle_input(data, channels, sample_rate, &tx, &app, &device_id)
+                    handle_input(
+                        data,
+                        channels,
+                        sample_rate,
+                        &tx,
+                        monitor_tx.as_ref(),
+                        &app,
+                        &device_id,
+                    )
                 },
                 err_fn,
                 None,
@@ -288,7 +305,15 @@ fn run_capture_thread(
                         .iter()
                         .map(|v| *v as f32 / i16::MAX as f32)
                         .collect::<Vec<_>>();
-                    handle_input(&samples, channels, sample_rate, &tx, &app, &device_id);
+                    handle_input(
+                        &samples,
+                        channels,
+                        sample_rate,
+                        &tx,
+                        monitor_tx.as_ref(),
+                        &app,
+                        &device_id,
+                    );
                 },
                 err_fn,
                 None,
@@ -305,7 +330,15 @@ fn run_capture_thread(
                         .iter()
                         .map(|v| (*v as f32 / u16::MAX as f32) * 2.0 - 1.0)
                         .collect::<Vec<_>>();
-                    handle_input(&samples, channels, sample_rate, &tx, &app, &device_id);
+                    handle_input(
+                        &samples,
+                        channels,
+                        sample_rate,
+                        &tx,
+                        monitor_tx.as_ref(),
+                        &app,
+                        &device_id,
+                    );
                 },
                 err_fn,
                 None,
@@ -359,6 +392,7 @@ fn run_playback_thread(
         }
     };
     let channels = supported.channels() as usize;
+    let output_sample_rate = supported.sample_rate().0;
     let config: StreamConfig = supported.clone().into();
     let err_fn = |err| eprintln!("Output stream error: {err}");
 
@@ -367,7 +401,9 @@ fn run_playback_thread(
             let mut queue = VecDeque::new();
             device.build_output_stream(
                 &config,
-                move |data: &mut [f32], _| fill_output_f32(data, channels, &audio_rx, &mut queue),
+                move |data: &mut [f32], _| {
+                    fill_output_f32(data, channels, output_sample_rate, &audio_rx, &mut queue)
+                },
                 err_fn,
                 None,
             )
@@ -376,7 +412,9 @@ fn run_playback_thread(
             let mut queue = VecDeque::new();
             device.build_output_stream(
                 &config,
-                move |data: &mut [i16], _| fill_output_i16(data, channels, &audio_rx, &mut queue),
+                move |data: &mut [i16], _| {
+                    fill_output_i16(data, channels, output_sample_rate, &audio_rx, &mut queue)
+                },
                 err_fn,
                 None,
             )
@@ -385,7 +423,9 @@ fn run_playback_thread(
             let mut queue = VecDeque::new();
             device.build_output_stream(
                 &config,
-                move |data: &mut [u16], _| fill_output_u16(data, channels, &audio_rx, &mut queue),
+                move |data: &mut [u16], _| {
+                    fill_output_u16(data, channels, output_sample_rate, &audio_rx, &mut queue)
+                },
                 err_fn,
                 None,
             )
@@ -420,10 +460,11 @@ fn run_playback_thread(
 fn fill_output_f32(
     data: &mut [f32],
     channels: usize,
+    output_sample_rate: u32,
     rx: &std_mpsc::Receiver<Vec<i16>>,
     queue: &mut VecDeque<i16>,
 ) {
-    refill_output_queue(rx, queue, data.len() / channels);
+    refill_output_queue(rx, queue, data.len() / channels, output_sample_rate);
     for frame in data.chunks_mut(channels) {
         let sample = queue.pop_front().unwrap_or_default() as f32 / i16::MAX as f32;
         for out in frame {
@@ -435,10 +476,11 @@ fn fill_output_f32(
 fn fill_output_i16(
     data: &mut [i16],
     channels: usize,
+    output_sample_rate: u32,
     rx: &std_mpsc::Receiver<Vec<i16>>,
     queue: &mut VecDeque<i16>,
 ) {
-    refill_output_queue(rx, queue, data.len() / channels);
+    refill_output_queue(rx, queue, data.len() / channels, output_sample_rate);
     for frame in data.chunks_mut(channels) {
         let sample = queue.pop_front().unwrap_or_default();
         for out in frame {
@@ -450,10 +492,11 @@ fn fill_output_i16(
 fn fill_output_u16(
     data: &mut [u16],
     channels: usize,
+    output_sample_rate: u32,
     rx: &std_mpsc::Receiver<Vec<i16>>,
     queue: &mut VecDeque<i16>,
 ) {
-    refill_output_queue(rx, queue, data.len() / channels);
+    refill_output_queue(rx, queue, data.len() / channels, output_sample_rate);
     for frame in data.chunks_mut(channels) {
         let sample = queue.pop_front().unwrap_or_default();
         let converted = ((sample as i32 + i16::MAX as i32 + 1) as f32 / (u16::MAX as f32 + 1.0)
@@ -468,13 +511,27 @@ fn refill_output_queue(
     rx: &std_mpsc::Receiver<Vec<i16>>,
     queue: &mut VecDeque<i16>,
     target_frames: usize,
+    output_sample_rate: u32,
 ) {
     while queue.len() < target_frames * 3 {
         match rx.try_recv() {
-            Ok(chunk) => queue.extend(chunk),
+            Ok(chunk) => queue.extend(resample_pcm16_chunk(&chunk, REALTIME_SAMPLE_RATE, output_sample_rate)),
             Err(_) => break,
         }
     }
+}
+
+fn resample_pcm16_chunk(samples: &[i16], from_rate: u32, to_rate: u32) -> Vec<i16> {
+    if from_rate == to_rate {
+        return samples.to_vec();
+    }
+
+    let f32_samples = samples
+        .iter()
+        .map(|sample| *sample as f32 / i16::MAX as f32)
+        .collect::<Vec<_>>();
+    let resampled = resample_linear(&f32_samples, from_rate, to_rate);
+    f32_to_pcm16(&resampled)
 }
 
 fn downmix_to_mono(data: &[f32], channels: usize) -> Vec<f32> {
