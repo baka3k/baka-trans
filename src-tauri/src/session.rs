@@ -224,10 +224,16 @@ impl AppState {
 
     fn start_pipeline(&self, app: AppHandle, config: SessionConfig) -> AppResult<()> {
         let api_key = security::load_api_key()?;
-        let playback = audio::start_playback(&config.output_device_id)?;
+        let playback = audio::start_playback_with_channel(
+            &config.output_device_id,
+            config.translation_output_channel,
+        )?;
         let playback_tx = playback.sender();
         let monitor_playback = if config.monitor_original_audio {
-            Some(audio::start_playback(&config.monitor_output_device_id)?)
+            Some(audio::start_playback_with_channel(
+                &config.monitor_output_device_id,
+                config.monitor_output_channel,
+            )?)
         } else {
             None
         };

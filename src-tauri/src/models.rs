@@ -28,6 +28,14 @@ pub struct AudioDevices {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+pub enum AudioOutputChannel {
+    All,
+    Left,
+    Right,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum Language {
     Auto,
     En,
@@ -74,7 +82,9 @@ pub struct SessionConfig {
     pub translation_style: TranslationStyle,
     pub input_device_id: String,
     pub output_device_id: String,
+    pub translation_output_channel: AudioOutputChannel,
     pub monitor_output_device_id: String,
+    pub monitor_output_channel: AudioOutputChannel,
     pub monitor_original_audio: bool,
     pub voice_id: String,
     pub fallback_enabled: bool,

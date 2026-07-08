@@ -1,5 +1,7 @@
 use crate::error::{AppError, AppResult};
-use crate::models::{AudioDeviceInfo, AudioDevices, AudioLevelEvent, DeviceKind};
+use crate::models::{
+    AudioDeviceInfo, AudioDevices, AudioLevelEvent, AudioOutputChannel, DeviceKind,
+};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleFormat, StreamConfig};
 use std::collections::VecDeque;
@@ -114,7 +116,7 @@ pub fn start_capture(
     }
 }
 
-pub fn play_test_tone(output_device_id: &str) -> AppResult<()> {
+pub fn play_test_tone(output_device_id: &str, output_channel: AudioOutputChannel) -> AppResult<()> {
     let device = find_device(output_device_id, DeviceKind::Output)?;
     let supported = device.default_output_config()?;
     let channels = supported.channels() as usize;
@@ -126,7 +128,9 @@ pub fn play_test_tone(output_device_id: &str) -> AppResult<()> {
     let stream = match supported.sample_format() {
         SampleFormat::F32 => device.build_output_stream(
             &config,
-            move |data: &mut [f32], _| fill_tone(data, channels, sample_rate, &mut clock),
+            move |data: &mut [f32], _| {
+                fill_tone(data, channels, output_channel, sample_rate, &mut clock)
+            },
             err_fn,
             None,
         )?,
@@ -134,7 +138,13 @@ pub fn play_test_tone(output_device_id: &str) -> AppResult<()> {
             &config,
             move |data: &mut [i16], _| {
                 let mut buffer = vec![0.0; data.len()];
-                fill_tone(&mut buffer, channels, sample_rate, &mut clock);
+                fill_tone(
+                    &mut buffer,
+                    channels,
+                    output_channel,
+                    sample_rate,
+                    &mut clock,
+                );
                 for (out, sample) in data.iter_mut().zip(buffer) {
                     *out = (sample * i16::MAX as f32) as i16;
                 }
@@ -146,7 +156,13 @@ pub fn play_test_tone(output_device_id: &str) -> AppResult<()> {
             &config,
             move |data: &mut [u16], _| {
                 let mut buffer = vec![0.0; data.len()];
-                fill_tone(&mut buffer, channels, sample_rate, &mut clock);
+                fill_tone(
+                    &mut buffer,
+                    channels,
+                    output_channel,
+                    sample_rate,
+                    &mut clock,
+                );
                 for (out, sample) in data.iter_mut().zip(buffer) {
                     *out = (((sample + 1.0) * 0.5) * u16::MAX as f32) as u16;
                 }
@@ -168,14 +184,18 @@ pub fn play_test_tone(output_device_id: &str) -> AppResult<()> {
     Ok(())
 }
 
-pub fn start_playback(output_device_id: &str) -> AppResult<PlaybackRuntime> {
+pub fn start_playback_with_channel(
+    output_device_id: &str,
+    output_channel: AudioOutputChannel,
+) -> AppResult<PlaybackRuntime> {
     let (audio_tx, audio_rx) = std_mpsc::sync_channel::<Vec<i16>>(24);
     let (stop_tx, stop_rx) = std_mpsc::channel::<()>();
     let (ready_tx, ready_rx) = std_mpsc::channel::<AppResult<()>>();
     let device_id = output_device_id.to_string();
 
-    let join_handle =
-        thread::spawn(move || run_playback_thread(device_id, audio_rx, stop_rx, ready_tx));
+    let join_handle = thread::spawn(move || {
+        run_playback_thread(device_id, output_channel, audio_rx, stop_rx, ready_tx)
+    });
 
     match ready_rx.recv_timeout(Duration::from_secs(3)) {
         Ok(Ok(())) => Ok(PlaybackRuntime {
@@ -373,6 +393,7 @@ fn run_capture_thread(
 
 fn run_playback_thread(
     device_id: String,
+    output_channel: AudioOutputChannel,
     audio_rx: std_mpsc::Receiver<Vec<i16>>,
     stop_rx: std_mpsc::Receiver<()>,
     ready_tx: std_mpsc::Sender<AppResult<()>>,
@@ -402,7 +423,14 @@ fn run_playback_thread(
             device.build_output_stream(
                 &config,
                 move |data: &mut [f32], _| {
-                    fill_output_f32(data, channels, output_sample_rate, &audio_rx, &mut queue)
+                    fill_output_f32(
+                        data,
+                        channels,
+                        output_channel,
+                        output_sample_rate,
+                        &audio_rx,
+                        &mut queue,
+                    )
                 },
                 err_fn,
                 None,
@@ -413,7 +441,14 @@ fn run_playback_thread(
             device.build_output_stream(
                 &config,
                 move |data: &mut [i16], _| {
-                    fill_output_i16(data, channels, output_sample_rate, &audio_rx, &mut queue)
+                    fill_output_i16(
+                        data,
+                        channels,
+                        output_channel,
+                        output_sample_rate,
+                        &audio_rx,
+                        &mut queue,
+                    )
                 },
                 err_fn,
                 None,
@@ -424,7 +459,14 @@ fn run_playback_thread(
             device.build_output_stream(
                 &config,
                 move |data: &mut [u16], _| {
-                    fill_output_u16(data, channels, output_sample_rate, &audio_rx, &mut queue)
+                    fill_output_u16(
+                        data,
+                        channels,
+                        output_channel,
+                        output_sample_rate,
+                        &audio_rx,
+                        &mut queue,
+                    )
                 },
                 err_fn,
                 None,
@@ -460,6 +502,7 @@ fn run_playback_thread(
 fn fill_output_f32(
     data: &mut [f32],
     channels: usize,
+    output_channel: AudioOutputChannel,
     output_sample_rate: u32,
     rx: &std_mpsc::Receiver<Vec<i16>>,
     queue: &mut VecDeque<i16>,
@@ -467,15 +510,14 @@ fn fill_output_f32(
     refill_output_queue(rx, queue, data.len() / channels, output_sample_rate);
     for frame in data.chunks_mut(channels) {
         let sample = queue.pop_front().unwrap_or_default() as f32 / i16::MAX as f32;
-        for out in frame {
-            *out = sample;
-        }
+        write_frame_f32(frame, output_channel, sample);
     }
 }
 
 fn fill_output_i16(
     data: &mut [i16],
     channels: usize,
+    output_channel: AudioOutputChannel,
     output_sample_rate: u32,
     rx: &std_mpsc::Receiver<Vec<i16>>,
     queue: &mut VecDeque<i16>,
@@ -483,15 +525,14 @@ fn fill_output_i16(
     refill_output_queue(rx, queue, data.len() / channels, output_sample_rate);
     for frame in data.chunks_mut(channels) {
         let sample = queue.pop_front().unwrap_or_default();
-        for out in frame {
-            *out = sample;
-        }
+        write_frame_i16(frame, output_channel, sample);
     }
 }
 
 fn fill_output_u16(
     data: &mut [u16],
     channels: usize,
+    output_channel: AudioOutputChannel,
     output_sample_rate: u32,
     rx: &std_mpsc::Receiver<Vec<i16>>,
     queue: &mut VecDeque<i16>,
@@ -499,11 +540,7 @@ fn fill_output_u16(
     refill_output_queue(rx, queue, data.len() / channels, output_sample_rate);
     for frame in data.chunks_mut(channels) {
         let sample = queue.pop_front().unwrap_or_default();
-        let converted = ((sample as i32 + i16::MAX as i32 + 1) as f32 / (u16::MAX as f32 + 1.0)
-            * u16::MAX as f32) as u16;
-        for out in frame {
-            *out = converted;
-        }
+        write_frame_u16(frame, output_channel, pcm16_to_u16(sample));
     }
 }
 
@@ -585,14 +622,67 @@ fn level(samples: &[f32]) -> (f32, f32) {
     (rms, peak)
 }
 
-fn fill_tone(data: &mut [f32], channels: usize, sample_rate: f32, clock: &mut f32) {
+fn fill_tone(
+    data: &mut [f32],
+    channels: usize,
+    output_channel: AudioOutputChannel,
+    sample_rate: f32,
+    clock: &mut f32,
+) {
     for frame in data.chunks_mut(channels) {
         let value = (*clock * 440.0 * 2.0 * PI / sample_rate).sin() * 0.16;
         *clock += 1.0;
-        for sample in frame {
-            *sample = value;
+        write_frame_f32(frame, output_channel, value);
+    }
+}
+
+fn write_frame_f32(frame: &mut [f32], output_channel: AudioOutputChannel, sample: f32) {
+    write_frame_by_channel(frame, output_channel, sample, 0.0);
+}
+
+fn write_frame_i16(frame: &mut [i16], output_channel: AudioOutputChannel, sample: i16) {
+    write_frame_by_channel(frame, output_channel, sample, 0);
+}
+
+fn write_frame_u16(frame: &mut [u16], output_channel: AudioOutputChannel, sample: u16) {
+    write_frame_by_channel(frame, output_channel, sample, pcm16_to_u16(0));
+}
+
+fn write_frame_by_channel<T: Copy>(
+    frame: &mut [T],
+    output_channel: AudioOutputChannel,
+    sample: T,
+    silence: T,
+) {
+    match output_channel {
+        AudioOutputChannel::All => {
+            for out in frame {
+                *out = sample;
+            }
+        }
+        AudioOutputChannel::Left => {
+            for out in frame.iter_mut() {
+                *out = silence;
+            }
+            if let Some(out) = frame.first_mut() {
+                *out = sample;
+            }
+        }
+        AudioOutputChannel::Right => {
+            for out in frame.iter_mut() {
+                *out = silence;
+            }
+            let index = if frame.len() > 1 { 1 } else { 0 };
+            if let Some(out) = frame.get_mut(index) {
+                *out = sample;
+            }
         }
     }
+}
+
+fn pcm16_to_u16(sample: i16) -> u16 {
+    ((sample as i32 + i16::MAX as i32 + 1) as f32 / (u16::MAX as f32 + 1.0) * u16::MAX as f32)
+        as u16
 }
 
 fn device_info(

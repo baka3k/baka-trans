@@ -35,6 +35,7 @@ import type {
   AppErrorPayload,
   AudioDeviceInfo,
   AudioDevices,
+  AudioOutputChannel,
   AudioLevelEvent,
   Language,
   ManualBoundaryEvent,
@@ -61,13 +62,20 @@ const styles: Array<{ value: TranslationStyle; label: string }> = [
 ];
 
 const voices = ["marin", "cedar", "coral", "verse", "alloy", "nova"];
+const channelOptions: Array<{ value: AudioOutputChannel; label: string }> = [
+  { value: "all", label: "Both ears" },
+  { value: "left", label: "Left ear" },
+  { value: "right", label: "Right ear" },
+];
 const routingStorageKey = "baka-trans-routing-profile-v1";
 const activeSessionStatuses: SessionStatus[] = ["listening", "translating", "speaking"];
 
 interface RoutingProfile {
   inputDeviceId: string;
   outputDeviceId: string;
+  translationOutputChannel: AudioOutputChannel;
   monitorOutputDeviceId: string;
+  monitorOutputChannel: AudioOutputChannel;
   monitorOriginalAudio: boolean;
 }
 
@@ -79,7 +87,10 @@ export default function App() {
     useState<TranslationStyle>("technical_meeting_safe");
   const [inputDeviceId, setInputDeviceId] = useState("");
   const [outputDeviceId, setOutputDeviceId] = useState("");
+  const [translationOutputChannel, setTranslationOutputChannel] =
+    useState<AudioOutputChannel>("all");
   const [monitorOutputDeviceId, setMonitorOutputDeviceId] = useState("");
+  const [monitorOutputChannel, setMonitorOutputChannel] = useState<AudioOutputChannel>("all");
   const [monitorOriginalAudio, setMonitorOriginalAudio] = useState(false);
   const [voiceId, setVoiceId] = useState("marin");
   const [fallbackEnabled, setFallbackEnabled] = useState(false);
@@ -88,9 +99,11 @@ export default function App() {
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [error, setError] = useState<AppErrorPayload | null>(null);
   const [boundaryFeedback, setBoundaryFeedback] = useState("");
-  const [level, setLevel] = useState(0);
+  const [level, setLevel] = useState({ peak: 0, rms: 0 });
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
   const [busy, setBusy] = useState(false);
+  const [testingTone, setTestingTone] = useState<"translation" | "monitor" | null>(null);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
 
   const selectedInput = devices.inputs.find((device) => device.id === inputDeviceId);
@@ -101,7 +114,9 @@ export default function App() {
   const routingWarnings = getRoutingWarnings(
     selectedInput,
     selectedOutput,
+    translationOutputChannel,
     monitorOriginalAudio ? selectedMonitorOutput : undefined,
+    monitorOutputChannel,
   );
 
   const canStart =
@@ -114,6 +129,10 @@ export default function App() {
   const canPause = canForceBoundary;
   const canResume = status === "paused";
   const canStop = status !== "idle" && status !== "stopping";
+  const canTestAudio = status === "idle" && !busy;
+  const inputSignalPercent = Math.round(level.peak * 100);
+  const inputSignalLabel =
+    inputSignalPercent > 3 ? `${inputSignalPercent}% peak` : status === "idle" ? "Idle" : "No signal";
   const readinessLabel = canStart
     ? "Ready"
     : status === "idle"
@@ -127,7 +146,9 @@ export default function App() {
       translationStyle,
       inputDeviceId,
       outputDeviceId,
+      translationOutputChannel,
       monitorOutputDeviceId,
+      monitorOutputChannel,
       monitorOriginalAudio,
       voiceId,
       fallbackEnabled,
@@ -136,10 +157,12 @@ export default function App() {
       fallbackEnabled,
       inputDeviceId,
       monitorOriginalAudio,
+      monitorOutputChannel,
       monitorOutputDeviceId,
       outputDeviceId,
       sourceLanguage,
       targetLanguage,
+      translationOutputChannel,
       translationStyle,
       voiceId,
     ],
@@ -149,7 +172,12 @@ export default function App() {
     void hydrate();
 
     const unlisten = Promise.all([
-      listen<SessionStatus>("session-status", (event) => setStatus(event.payload)),
+      listen<SessionStatus>("session-status", (event) => {
+        setStatus(event.payload);
+        if (event.payload === "idle") {
+          setLevel({ peak: 0, rms: 0 });
+        }
+      }),
       listen<TranscriptItem>("transcript-update", (event) => {
         setTranscript((items) => mergeTranscriptDelta(items, event.payload));
       }),
@@ -157,7 +185,10 @@ export default function App() {
         setBoundaryFeedback(event.payload.message);
       }),
       listen<AudioLevelEvent>("audio-level", (event) => {
-        setLevel(Math.max(0, Math.min(1, event.payload.peak)));
+        setLevel({
+          peak: Math.max(0, Math.min(1, event.payload.peak)),
+          rms: Math.max(0, Math.min(1, event.payload.rms)),
+        });
       }),
       listen<AppErrorPayload>("app-error", (event) => setError(event.payload)),
     ]);
@@ -198,10 +229,13 @@ export default function App() {
       const storedRouting = readRoutingProfile();
       setInputDeviceId(resolveStoredDevice(deviceList.inputs, storedRouting?.inputDeviceId));
       setOutputDeviceId(resolveStoredDevice(deviceList.outputs, storedRouting?.outputDeviceId));
+      setTranslationOutputChannel(storedRouting?.translationOutputChannel ?? "all");
       setMonitorOutputDeviceId(
         resolveStoredDevice(deviceList.outputs, storedRouting?.monitorOutputDeviceId),
       );
+      setMonitorOutputChannel(storedRouting?.monitorOutputChannel ?? "all");
       setMonitorOriginalAudio(storedRouting?.monitorOriginalAudio ?? false);
+      setLastRefreshedAt(Date.now());
     } catch (cause) {
       setError(normalizeError(cause));
     } finally {
@@ -259,6 +293,22 @@ export default function App() {
     }
   }
 
+  async function testTone(
+    kind: "translation" | "monitor",
+    deviceId: string,
+    outputChannel: AudioOutputChannel,
+  ) {
+    setTestingTone(kind);
+    setError(null);
+    try {
+      await playTestTone(deviceId, outputChannel);
+    } catch (cause) {
+      setError(normalizeError(cause));
+    } finally {
+      setTestingTone(null);
+    }
+  }
+
   async function doExport(format: "text" | "markdown") {
     const localContent = renderTranscript(transcript, format);
     try {
@@ -274,7 +324,9 @@ export default function App() {
     persistRoutingProfile({
       inputDeviceId: deviceId,
       outputDeviceId,
+      translationOutputChannel,
       monitorOutputDeviceId,
+      monitorOutputChannel,
       monitorOriginalAudio,
     });
   }
@@ -284,7 +336,21 @@ export default function App() {
     persistRoutingProfile({
       inputDeviceId,
       outputDeviceId: deviceId,
+      translationOutputChannel,
       monitorOutputDeviceId,
+      monitorOutputChannel,
+      monitorOriginalAudio,
+    });
+  }
+
+  function updateTranslationOutputChannel(outputChannel: AudioOutputChannel) {
+    setTranslationOutputChannel(outputChannel);
+    persistRoutingProfile({
+      inputDeviceId,
+      outputDeviceId,
+      translationOutputChannel: outputChannel,
+      monitorOutputDeviceId,
+      monitorOutputChannel,
       monitorOriginalAudio,
     });
   }
@@ -294,7 +360,21 @@ export default function App() {
     persistRoutingProfile({
       inputDeviceId,
       outputDeviceId,
+      translationOutputChannel,
       monitorOutputDeviceId: deviceId,
+      monitorOutputChannel,
+      monitorOriginalAudio,
+    });
+  }
+
+  function updateMonitorOutputChannel(outputChannel: AudioOutputChannel) {
+    setMonitorOutputChannel(outputChannel);
+    persistRoutingProfile({
+      inputDeviceId,
+      outputDeviceId,
+      translationOutputChannel,
+      monitorOutputDeviceId,
+      monitorOutputChannel: outputChannel,
       monitorOriginalAudio,
     });
   }
@@ -304,7 +384,9 @@ export default function App() {
     persistRoutingProfile({
       inputDeviceId,
       outputDeviceId,
+      translationOutputChannel,
       monitorOutputDeviceId,
+      monitorOutputChannel,
       monitorOriginalAudio: enabled,
     });
   }
@@ -460,6 +542,12 @@ export default function App() {
             value={outputDeviceId}
             onChange={updateOutputDevice}
           />
+          <SelectField
+            label="Translated channel"
+            value={translationOutputChannel}
+            onChange={(value) => updateTranslationOutputChannel(value as AudioOutputChannel)}
+            options={channelOptions}
+          />
           <label className="toggle-row no-margin">
             <input
               type="checkbox"
@@ -477,34 +565,69 @@ export default function App() {
             onChange={updateMonitorOutputDevice}
             disabled={!monitorOriginalAudio}
           />
+          <SelectField
+            label="Original channel"
+            value={monitorOutputChannel}
+            onChange={(value) => updateMonitorOutputChannel(value as AudioOutputChannel)}
+            options={channelOptions}
+            disabled={!monitorOriginalAudio}
+          />
+          <div className="signal-card">
+            <div>
+              <span>Input signal</span>
+              <strong>{inputSignalLabel}</strong>
+            </div>
+            <div
+              className="meter"
+              aria-label="Input signal peak"
+              aria-valuemax={100}
+              aria-valuemin={0}
+              aria-valuenow={inputSignalPercent}
+              role="progressbar"
+            >
+              <div style={{ width: `${inputSignalPercent}%` }} />
+              <span style={{ width: `${Math.round(level.rms * 100)}%` }} />
+            </div>
+          </div>
           <div className="meter-row">
             <Volume2 size={17} />
-            <div className="meter">
-              <div style={{ width: `${Math.round(level * 100)}%` }} />
-            </div>
             <button
               className="small-button"
-              onClick={() => outputDeviceId && runCommand(() => playTestTone(outputDeviceId))}
-              disabled={!outputDeviceId || busy}
+              onClick={() =>
+                outputDeviceId &&
+                testTone("translation", outputDeviceId, translationOutputChannel)
+              }
+              disabled={!outputDeviceId || !canTestAudio || testingTone === "translation"}
             >
-              TTS
+              {testingTone === "translation" ? "Testing" : "Test translated"}
             </button>
           </div>
           <div className="button-row compact">
             <button
               className="small-button"
               onClick={() =>
-                monitorOutputDeviceId && runCommand(() => playTestTone(monitorOutputDeviceId))
+                monitorOutputDeviceId &&
+                testTone("monitor", monitorOutputDeviceId, monitorOutputChannel)
               }
-              disabled={!monitorOriginalAudio || !monitorOutputDeviceId || busy}
+              disabled={
+                !monitorOriginalAudio ||
+                !monitorOutputDeviceId ||
+                !canTestAudio ||
+                testingTone === "monitor"
+              }
             >
-              Test monitor
+              {testingTone === "monitor" ? "Testing" : "Test original"}
             </button>
+            {lastRefreshedAt ? (
+              <span className="refresh-note">Refreshed {formatClock(lastRefreshedAt)}</span>
+            ) : null}
           </div>
           <RoutingSummary
             input={selectedInput}
             output={selectedOutput}
+            outputChannel={translationOutputChannel}
             monitor={monitorOriginalAudio ? selectedMonitorOutput : undefined}
+            monitorChannel={monitorOutputChannel}
           />
           {routingWarnings.map((warning) => (
             <InlineWarning text={warning} key={warning} />
@@ -536,8 +659,8 @@ export default function App() {
               <span>Choose BlackHole as source and headphones as translation output.</span>
             </div>
             <div>
-              <strong>3. Monitor</strong>
-              <span>Mirror original audio only when you need local playback.</span>
+              <strong>3. Split</strong>
+              <span>For left/right ears, use one headphone device with opposite channels.</span>
             </div>
           </div>
         </div>
@@ -582,16 +705,22 @@ function SelectField({
   value,
   onChange,
   options,
+  disabled = false,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   options: Array<{ value: string; label: string }>;
+  disabled?: boolean;
 }) {
   return (
     <label className="field">
       <span>{label}</span>
-      <select value={value} onChange={(event) => onChange(event.currentTarget.value)}>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.currentTarget.value)}
+        disabled={disabled}
+      >
         {options.map((option) => (
           <option value={option.value} key={option.value}>
             {option.label}
@@ -634,7 +763,7 @@ function DeviceSelect({
         <option value="">No device</option>
         {devices.map((device) => (
           <option value={device.id} key={device.id}>
-            {device.name}
+            {formatDeviceOption(device)}
             {device.isDefault ? " (default)" : ""}
           </option>
         ))}
@@ -646,12 +775,21 @@ function DeviceSelect({
 function RoutingSummary({
   input,
   output,
+  outputChannel,
   monitor,
+  monitorChannel,
 }: {
   input?: AudioDeviceInfo;
   output?: AudioDeviceInfo;
+  outputChannel: AudioOutputChannel;
   monitor?: AudioDeviceInfo;
+  monitorChannel: AudioOutputChannel;
 }) {
+  const splitActive =
+    sameDeviceName(output, monitor) &&
+    ((outputChannel === "left" && monitorChannel === "right") ||
+      (outputChannel === "right" && monitorChannel === "left"));
+
   return (
     <div className="routing-summary">
       <div>
@@ -660,11 +798,15 @@ function RoutingSummary({
       </div>
       <div>
         <strong>Translation</strong>
-        <span>{output?.name ?? "No output"}</span>
+        <span>{formatRoute(output, outputChannel)}</span>
       </div>
       <div>
         <strong>Original</strong>
-        <span>{monitor?.name ?? "Off"}</span>
+        <span>{monitor ? formatRoute(monitor, monitorChannel) : "Off"}</span>
+      </div>
+      <div>
+        <strong>Mode</strong>
+        <span>{splitActive ? "Split ears active" : "Mono route"}</span>
       </div>
     </div>
   );
@@ -711,7 +853,9 @@ function normalizeDeviceName(name: string) {
 function getRoutingWarnings(
   input?: AudioDeviceInfo,
   output?: AudioDeviceInfo,
+  outputChannel: AudioOutputChannel = "all",
   monitor?: AudioDeviceInfo,
+  monitorChannel: AudioOutputChannel = "all",
 ) {
   const warnings: string[] = [];
   if (sameDeviceName(input, output)) {
@@ -721,7 +865,18 @@ function getRoutingWarnings(
     warnings.push("Meeting source and original monitor look identical.");
   }
   if (sameDeviceName(output, monitor)) {
-    warnings.push("Translated output and original monitor use the same device.");
+    const splitActive =
+      (outputChannel === "left" && monitorChannel === "right") ||
+      (outputChannel === "right" && monitorChannel === "left");
+    if (!splitActive) {
+      warnings.push("Translated output and original monitor share a device. Use opposite ears or separate outputs.");
+    }
+  }
+  if (!isStereoCapable(output) && outputChannel !== "all") {
+    warnings.push("Translated left/right routing needs a stereo output device.");
+  }
+  if (!isStereoCapable(monitor) && monitorChannel !== "all") {
+    warnings.push("Original left/right routing needs a stereo output device.");
   }
   return warnings;
 }
@@ -746,6 +901,43 @@ function readRoutingProfile(): RoutingProfile | null {
 
 function persistRoutingProfile(profile: RoutingProfile) {
   window.localStorage.setItem(routingStorageKey, JSON.stringify(profile));
+}
+
+function isStereoCapable(device?: AudioDeviceInfo) {
+  return (device?.maxChannels ?? 2) >= 2;
+}
+
+function formatDeviceOption(device: AudioDeviceInfo) {
+  const channelInfo = device.maxChannels ? `${device.maxChannels}ch` : "channels ?";
+  const sampleInfo =
+    device.minSampleRate && device.maxSampleRate
+      ? device.minSampleRate === device.maxSampleRate
+        ? `${device.maxSampleRate}Hz`
+        : `${device.minSampleRate}-${device.maxSampleRate}Hz`
+      : "sample rate ?";
+  return `${device.name} - ${channelInfo}, ${sampleInfo}`;
+}
+
+function formatRoute(device: AudioDeviceInfo | undefined, outputChannel: AudioOutputChannel) {
+  if (!device) {
+    return "No output";
+  }
+  return `${device.name} (${channelLabel(outputChannel)})`;
+}
+
+function channelLabel(outputChannel: AudioOutputChannel) {
+  switch (outputChannel) {
+    case "left":
+      return "left";
+    case "right":
+      return "right";
+    case "all":
+      return "both ears";
+  }
+}
+
+function formatClock(timestamp: number) {
+  return new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 function normalizeError(cause: unknown): AppErrorPayload {

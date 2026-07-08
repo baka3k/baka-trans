@@ -374,7 +374,7 @@ h2 {
 
 .meter-row {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) 58px;
+  grid-template-columns: 18px minmax(0, 1fr);
 }
 
 .meter {
@@ -383,19 +383,59 @@ h2 {
   border-radius: 999px;
   height: 12px;
   overflow: hidden;
+  position: relative;
   width: 100%;
 }
 
-.meter div {
+.meter div,
+.meter span {
   background: linear-gradient(90deg, var(--accent), #d7a426, var(--danger));
   height: 100%;
+  inset: 0 auto 0 0;
+  position: absolute;
   transition: width 120ms ease-out;
+}
+
+.meter span {
+  background: rgb(19 32 28 / 0.32);
+}
+
+.signal-card {
+  background: var(--panel-subtle);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.signal-card > div:first-child {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.signal-card span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.signal-card strong {
+  color: var(--text);
+  font-size: 12px;
 }
 
 .small-button {
   font-size: 13px;
   height: 30px;
   padding: 0 9px;
+}
+
+.refresh-note {
+  align-self: center;
+  color: var(--text-soft);
+  font-size: 12px;
 }
 
 .routing-summary {
@@ -601,6 +641,10 @@ h2 {
   button.primary,
   .brand-mark {
     color: #13201c;
+  }
+
+  .meter span {
+    background: rgb(237 244 241 / 0.32);
   }
 }
 

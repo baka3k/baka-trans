@@ -1,8 +1,8 @@
 use crate::audio;
 use crate::error::AppResult;
 use crate::models::{
-    AppStatus, AudioDevices, ExportRequest, ExportedTranscript, ManualBoundaryRequest,
-    SessionConfig,
+    AppStatus, AudioDevices, AudioOutputChannel, ExportRequest, ExportedTranscript,
+    ManualBoundaryRequest, SessionConfig,
 };
 use crate::security;
 use crate::session::AppState;
@@ -70,6 +70,9 @@ pub fn export_transcript(
 }
 
 #[tauri::command]
-pub fn play_test_tone(output_device_id: String) -> AppResult<()> {
-    audio::play_test_tone(&output_device_id)
+pub fn play_test_tone(
+    output_device_id: String,
+    output_channel: AudioOutputChannel,
+) -> AppResult<()> {
+    audio::play_test_tone(&output_device_id, output_channel)
 }

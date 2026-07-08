@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AppStatus,
+  AudioOutputChannel,
   AudioDevices,
   ExportedTranscript,
   ManualBoundaryReason,
@@ -54,6 +55,6 @@ export function exportTranscript(format: "text" | "markdown") {
   });
 }
 
-export function playTestTone(outputDeviceId: string) {
-  return invoke<void>("play_test_tone", { outputDeviceId });
+export function playTestTone(outputDeviceId: string, outputChannel: AudioOutputChannel) {
+  return invoke<void>("play_test_tone", { outputDeviceId, outputChannel });
 }

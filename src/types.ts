@@ -1,4 +1,5 @@
 export type DeviceKind = "input" | "output";
+export type AudioOutputChannel = "all" | "left" | "right";
 export type Language = "auto" | "en" | "ja" | "vi";
 export type TranslationStyle = "literal" | "natural" | "technical_meeting_safe";
 export type ManualBoundaryReason = "user_button" | "keyboard_shortcut";
@@ -41,7 +42,9 @@ export interface SessionConfig {
   translationStyle: TranslationStyle;
   inputDeviceId: string;
   outputDeviceId: string;
+  translationOutputChannel: AudioOutputChannel;
   monitorOutputDeviceId: string;
+  monitorOutputChannel: AudioOutputChannel;
   monitorOriginalAudio: boolean;
   voiceId: string;
   fallbackEnabled: boolean;
