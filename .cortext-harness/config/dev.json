@@ -1,0 +1,67 @@
+{
+  "active": true,
+  "project": {
+    "code": "baka-trans",
+    "name": "baka-trans"
+  },
+  "code": {
+    "env": {
+      "GRAPH_PROVIDER": "falkordb",
+      "FALKORDB_HOST": "localhost",
+      "FALKORDB_PORT": "6379",
+      "FALKORDB_GRAPH": "hyper_graph",
+      "FALKORDB_USERNAME": "",
+      "FALKORDB_PASSWORD": "",
+      "QDRANT_HOST": "localhost",
+      "QDRANT_PORT": "6333",
+      "EMBEDDING_MODEL": "jinaai/jina-embeddings-v3",
+      "BATCH_SIZE": "1",
+      "MAX_EMBED_CHARS": "500",
+      "device": "cpu"
+    },
+    "source": {
+      "projects": [
+        {
+          "git": "",
+          "folder": [
+            "/Users/hieplq1.rpm/AI/baka-trans"
+          ]
+        }
+      ]
+    }
+  },
+  "doc": {
+    "env": {
+      "GRAPH_PROVIDER": "falkordb",
+      "FALKORDB_HOST": "localhost",
+      "FALKORDB_PORT": "6379",
+      "FALKORDB_GRAPH": "hyper_graph",
+      "FALKORDB_USERNAME": "",
+      "FALKORDB_PASSWORD": "",
+      "QDRANT_HOST": "localhost",
+      "QDRANT_PORT": "6333",
+      "EMBEDDING_MODEL": "BAAI/bge-m3",
+      "BATCH_SIZE": "1",
+      "MAX_EMBED_CHARS": "500",
+      "device": "cpu"
+    },
+    "source": {
+      "projects": [
+        {
+          "git": "QDRANT_HOST [localhost]:",
+          "folder": [
+            "docs",
+            "docs/design-docs",
+            "docs/exec-plans",
+            "docs/exec-plans/active",
+            "docs/exec-plans/completed",
+            "docs/generated",
+            "docs/logs",
+            "docs/product-specs",
+            "docs/references"
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -179,6 +179,14 @@ pub struct AudioLevelEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TranslatedAudioLevelEvent {
+    pub sample_count: usize,
+    pub rms: f32,
+    pub peak: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExportRequest {
     pub format: ExportFormat,
 }

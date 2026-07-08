@@ -2,7 +2,7 @@ use crate::audio::pcm16_to_le_bytes;
 use crate::error::{AppError, AppResult};
 use crate::models::{
     ManualBoundaryEvent, ManualBoundaryRequest, ManualBoundaryStatus, SessionConfig, SessionStatus,
-    TranscriptItem, TranscriptStatus,
+    TranscriptItem, TranscriptStatus, TranslatedAudioLevelEvent,
 };
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
@@ -476,7 +476,27 @@ fn handle_realtime_event(
         }
         "session.output_audio.delta" => {
             if let Some(samples) = decode_output_audio(&event) {
-                let _ = playback_tx.try_send(samples);
+                let (rms, peak) = pcm16_level(&samples);
+                let sample_count = samples.len();
+                if let Err(error) = playback_tx.try_send(samples) {
+                    if matches!(error, std_mpsc::TrySendError::Disconnected(_)) {
+                        let _ = app.emit(
+                            "app-error",
+                            AppError::new(
+                                "audio_playback_error",
+                                "Translated audio arrived, but the playback stream is not available.",
+                            ),
+                        );
+                    }
+                }
+                let _ = app.emit(
+                    "translated-audio-level",
+                    TranslatedAudioLevelEvent {
+                        sample_count,
+                        rms,
+                        peak,
+                    },
+                );
             }
             let _ = app.emit("session-status", SessionStatus::Speaking);
         }
@@ -657,6 +677,23 @@ fn decode_output_audio(event: &Value) -> Option<Vec<i16>> {
             .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]))
             .collect(),
     )
+}
+
+fn pcm16_level(samples: &[i16]) -> (f32, f32) {
+    let mut peak = 0.0f32;
+    let mut sum = 0.0f32;
+    for sample in samples {
+        let value = *sample as f32 / i16::MAX as f32;
+        let abs = value.abs();
+        peak = peak.max(abs);
+        sum += value * value;
+    }
+    let rms = if samples.is_empty() {
+        0.0
+    } else {
+        (sum / samples.len() as f32).sqrt()
+    };
+    (rms, peak)
 }
 
 fn merge_transcript_delta(transcript: &mut Vec<TranscriptItem>, item: TranscriptItem) {

@@ -91,6 +91,12 @@ export interface AudioLevelEvent {
   peak: number;
 }
 
+export interface TranslatedAudioLevelEvent {
+  sampleCount: number;
+  rms: number;
+  peak: number;
+}
+
 export interface AppErrorPayload {
   code: string;
   message: string;
