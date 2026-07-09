@@ -80,6 +80,8 @@ impl AppState {
             ));
         }
 
+        config.validate_realtime_target_language()?;
+
         if config.target_language == config.source_language
             && config.source_language.realtime_code() != "auto"
         {

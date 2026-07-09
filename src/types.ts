@@ -1,7 +1,9 @@
+import type { LanguageCode } from "./languages";
+
 export type DeviceKind = "input" | "output";
 export type AudioOutputChannel = "all" | "left" | "right";
 export type ApiKeySource = "environment" | "keychain" | "memory";
-export type Language = "auto" | "en" | "ja" | "vi";
+export type Language = LanguageCode;
 export type TranslationStyle = "literal" | "natural" | "technical_meeting_safe";
 export type ManualBoundaryReason = "user_button" | "keyboard_shortcut";
 export type ManualBoundaryStatus =

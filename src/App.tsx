@@ -46,6 +46,7 @@ import {
   renderTranscript,
   validateLlmProfileDraft,
 } from "./transcript";
+import { sourceLanguageOptions, targetLanguageOptions } from "./languages";
 import type {
   AppErrorPayload,
   ApiKeySource,
@@ -68,15 +69,6 @@ import type {
   TranslatedAudioLevelEvent,
   TranscriptItem,
 } from "./types";
-
-const languages: Array<{ value: Language; label: string }> = [
-  { value: "auto", label: "Auto" },
-  { value: "en", label: "English" },
-  { value: "ja", label: "Japanese" },
-  { value: "vi", label: "Vietnamese" },
-];
-
-const targetLanguages = languages.filter((language) => language.value !== "auto");
 
 const channelOptions: Array<{ value: AudioOutputChannel; label: string }> = [
   { value: "all", label: "Both ears" },
@@ -754,13 +746,13 @@ export default function App() {
                   label="Source"
                   value={sourceLanguage}
                   onChange={(value) => setSourceLanguage(value as Language)}
-                  options={languages}
+                  options={sourceLanguageOptions}
                 />
                 <SelectField
                   label="Target"
                   value={targetLanguage}
                   onChange={(value) => setTargetLanguage(value as Language)}
-                  options={targetLanguages}
+                  options={targetLanguageOptions}
                 />
               </div>
 

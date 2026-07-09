@@ -1,3 +1,4 @@
+use crate::error::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -38,19 +39,180 @@ pub enum AudioOutputChannel {
 #[serde(rename_all = "snake_case")]
 pub enum Language {
     Auto,
+    Ar,
+    Af,
+    Az,
+    Be,
+    Bn,
+    Bs,
+    Bg,
+    Ca,
+    Zh,
+    Hr,
+    Cs,
+    Da,
+    Nl,
+    Dz,
     En,
+    Eo,
+    Et,
+    Eu,
+    Fa,
+    Fi,
+    Fil,
+    Fr,
+    Gl,
+    De,
+    El,
+    Gu,
+    Ht,
+    Haw,
+    He,
+    Hi,
+    Hu,
+    Hy,
+    Id,
+    It,
     Ja,
+    Jv,
+    Ka,
+    Kk,
+    Ko,
+    Ku,
+    La,
+    Lv,
+    Lt,
+    Mk,
+    Ms,
+    Ml,
+    Mi,
+    Mn,
+    My,
+    Ne,
+    No,
+    Nn,
+    Pl,
+    Pt,
+    Pa,
+    Ro,
+    Ru,
+    Sr,
+    Sn,
+    Sk,
+    Sl,
+    Sq,
+    Es,
+    Sw,
+    Sv,
+    Tl,
+    Te,
+    Th,
+    Tr,
+    Uk,
+    Uz,
     Vi,
+    Cy,
+    Yo,
 }
 
 impl Language {
     pub fn realtime_code(self) -> &'static str {
         match self {
             Language::Auto => "auto",
+            Language::Ar => "ar",
+            Language::Af => "af",
+            Language::Az => "az",
+            Language::Be => "be",
+            Language::Bn => "bn",
+            Language::Bs => "bs",
+            Language::Bg => "bg",
+            Language::Ca => "ca",
+            Language::Zh => "zh",
+            Language::Hr => "hr",
+            Language::Cs => "cs",
+            Language::Da => "da",
+            Language::Nl => "nl",
+            Language::Dz => "dz",
             Language::En => "en",
+            Language::Eo => "eo",
+            Language::Et => "et",
+            Language::Eu => "eu",
+            Language::Fa => "fa",
+            Language::Fi => "fi",
+            Language::Fil => "fil",
+            Language::Fr => "fr",
+            Language::Gl => "gl",
+            Language::De => "de",
+            Language::El => "el",
+            Language::Gu => "gu",
+            Language::Ht => "ht",
+            Language::Haw => "haw",
+            Language::He => "he",
+            Language::Hi => "hi",
+            Language::Hu => "hu",
+            Language::Hy => "hy",
+            Language::Id => "id",
+            Language::It => "it",
             Language::Ja => "ja",
+            Language::Jv => "jv",
+            Language::Ka => "ka",
+            Language::Kk => "kk",
+            Language::Ko => "ko",
+            Language::Ku => "ku",
+            Language::La => "la",
+            Language::Lv => "lv",
+            Language::Lt => "lt",
+            Language::Mk => "mk",
+            Language::Ms => "ms",
+            Language::Ml => "ml",
+            Language::Mi => "mi",
+            Language::Mn => "mn",
+            Language::My => "my",
+            Language::Ne => "ne",
+            Language::No => "no",
+            Language::Nn => "nn",
+            Language::Pl => "pl",
+            Language::Pt => "pt",
+            Language::Pa => "pa",
+            Language::Ro => "ro",
+            Language::Ru => "ru",
+            Language::Sr => "sr",
+            Language::Sn => "sn",
+            Language::Sk => "sk",
+            Language::Sl => "sl",
+            Language::Sq => "sq",
+            Language::Es => "es",
+            Language::Sw => "sw",
+            Language::Sv => "sv",
+            Language::Tl => "tl",
+            Language::Te => "te",
+            Language::Th => "th",
+            Language::Tr => "tr",
+            Language::Uk => "uk",
+            Language::Uz => "uz",
             Language::Vi => "vi",
+            Language::Cy => "cy",
+            Language::Yo => "yo",
         }
+    }
+
+    pub fn is_realtime_target_supported(self) -> bool {
+        matches!(
+            self,
+            Language::Es
+                | Language::Pt
+                | Language::Fr
+                | Language::Ja
+                | Language::Ru
+                | Language::Zh
+                | Language::De
+                | Language::Ko
+                | Language::Hi
+                | Language::Id
+                | Language::Vi
+                | Language::It
+                | Language::En
+        )
     }
 }
 
@@ -76,6 +238,22 @@ pub struct SessionConfig {
     pub monitor_original_audio: bool,
     pub voice_id: String,
     pub fallback_enabled: bool,
+}
+
+impl SessionConfig {
+    pub fn validate_realtime_target_language(&self) -> AppResult<()> {
+        if self.target_language.is_realtime_target_supported() {
+            return Ok(());
+        }
+
+        Err(AppError::new(
+            "unsupported_target_language",
+            format!(
+                "Target language '{}' is not supported by OpenAI Realtime Translation.",
+                self.target_language.realtime_code(),
+            ),
+        ))
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -332,4 +510,48 @@ pub struct MeetingSummaryResult {
 pub struct MeetingSummaryStatusEvent {
     pub status: MeetingSummaryStatus,
     pub message: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn session_config(target_language: Language) -> SessionConfig {
+        SessionConfig {
+            source_language: Language::Auto,
+            target_language,
+            translation_style: TranslationStyle::TechnicalMeetingSafe,
+            input_device_id: "input".to_string(),
+            output_device_id: "output".to_string(),
+            translation_output_channel: AudioOutputChannel::All,
+            monitor_output_device_id: String::new(),
+            monitor_output_channel: AudioOutputChannel::All,
+            monitor_original_audio: false,
+            voice_id: "marin".to_string(),
+            fallback_enabled: false,
+        }
+    }
+
+    #[test]
+    fn validates_realtime_target_language() {
+        assert!(session_config(Language::Es)
+            .validate_realtime_target_language()
+            .is_ok());
+    }
+
+    #[test]
+    fn rejects_unsupported_realtime_target_language() {
+        let error = session_config(Language::Ar)
+            .validate_realtime_target_language()
+            .expect_err("Arabic should not be allowed as a target language");
+
+        assert_eq!(error.code, "unsupported_target_language");
+        assert!(
+            error
+                .message
+                .contains("Target language 'ar' is not supported"),
+            "{}",
+            error.message,
+        );
+    }
 }
