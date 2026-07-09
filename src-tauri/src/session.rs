@@ -310,7 +310,7 @@ impl AppState {
             config.translation_output_channel,
         )?;
         let playback_tx = playback.sender();
-        let monitor_playback = if config.monitor_original_audio {
+        let monitor_playback = if should_start_original_monitor(&config) {
             Some(audio::start_playback_with_channel(
                 app.clone(),
                 &config.monitor_output_device_id,
@@ -358,9 +358,7 @@ impl AppState {
         match result {
             Ok(()) => {
                 let current = self.status().unwrap_or(SessionStatus::Idle);
-                if current == SessionStatus::Stopping {
-                    let _ = self.set_status(app, SessionStatus::Idle);
-                } else if current != SessionStatus::Paused {
+                if current != SessionStatus::Paused {
                     let _ = self.set_status(app, SessionStatus::Idle);
                 }
             }
@@ -473,6 +471,43 @@ fn validate_routing_config(config: &SessionConfig) -> AppResult<()> {
     Ok(())
 }
 
+fn should_start_original_monitor(config: &SessionConfig) -> bool {
+    config.monitor_original_audio
+        && !has_output_monitor_conflict(
+            &config.output_device_id,
+            config.translation_output_channel,
+            &config.monitor_output_device_id,
+            config.monitor_output_channel,
+        )
+}
+
+fn has_output_monitor_conflict(
+    output_device_id: &str,
+    translation_channel: AudioOutputChannel,
+    monitor_output_device_id: &str,
+    monitor_channel: AudioOutputChannel,
+) -> bool {
+    same_audio_device(output_device_id, monitor_output_device_id)
+        && !uses_opposite_channels(translation_channel, monitor_channel)
+}
+
+fn same_audio_device(left: &str, right: &str) -> bool {
+    let left = left.trim();
+    let right = right.trim();
+    !left.is_empty() && left == right
+}
+
+fn uses_opposite_channels(
+    translation_channel: AudioOutputChannel,
+    monitor_channel: AudioOutputChannel,
+) -> bool {
+    matches!(
+        (translation_channel, monitor_channel),
+        (AudioOutputChannel::Left, AudioOutputChannel::Right)
+            | (AudioOutputChannel::Right, AudioOutputChannel::Left)
+    )
+}
+
 fn render_markdown(items: &[TranscriptItem]) -> String {
     let mut content = String::from("# Baka Trans Transcript\n\n");
     for item in items {
@@ -498,4 +533,60 @@ fn now_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{Language, TranslationStyle};
+
+    fn session_config() -> SessionConfig {
+        SessionConfig {
+            source_language: Language::Auto,
+            target_language: Language::En,
+            translation_style: TranslationStyle::TechnicalMeetingSafe,
+            input_device_id: "input:0:BlackHole 2ch".to_string(),
+            output_device_id: "output:0:Headphones".to_string(),
+            translation_output_channel: AudioOutputChannel::All,
+            monitor_output_device_id: String::new(),
+            monitor_output_channel: AudioOutputChannel::All,
+            monitor_original_audio: false,
+            voice_id: "marin".to_string(),
+            fallback_enabled: false,
+        }
+    }
+
+    #[test]
+    fn allows_same_output_device_without_opposite_channels() {
+        let mut config = session_config();
+        config.monitor_original_audio = true;
+        config.monitor_output_device_id = config.output_device_id.clone();
+        config.translation_output_channel = AudioOutputChannel::All;
+        config.monitor_output_channel = AudioOutputChannel::Left;
+
+        assert!(validate_routing_config(&config).is_ok());
+        assert!(!should_start_original_monitor(&config));
+    }
+
+    #[test]
+    fn allows_same_output_device_with_opposite_channels() {
+        let mut config = session_config();
+        config.monitor_original_audio = true;
+        config.monitor_output_device_id = config.output_device_id.clone();
+        config.translation_output_channel = AudioOutputChannel::Left;
+        config.monitor_output_channel = AudioOutputChannel::Right;
+
+        assert!(validate_routing_config(&config).is_ok());
+        assert!(should_start_original_monitor(&config));
+    }
+
+    #[test]
+    fn allows_separate_monitor_output_device_with_same_name() {
+        let mut config = session_config();
+        config.monitor_original_audio = true;
+        config.monitor_output_device_id = "output:1:Headphones".to_string();
+
+        assert!(validate_routing_config(&config).is_ok());
+        assert!(should_start_original_monitor(&config));
+    }
 }

@@ -242,7 +242,7 @@ fn post_json_over_tls(
          Connection: close\r\n\
          \r\n\
          {body}",
-        body.as_bytes().len()
+        body.len()
     );
     stream
         .write_all(request.as_bytes())

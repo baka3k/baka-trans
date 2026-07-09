@@ -20,10 +20,12 @@ Build a lightweight macOS desktop app that captures Microsoft Teams meeting audi
 - 2026-07-08 Phase 07 update: `mind_mcp` and `graph_mcp` returned unrelated indexed corpus results for the manual sentence-boundary fallback request. Local plan files, `src-tauri/src/ai.rs`, `src-tauri/src/session.rs`, and `src/App.tsx` are the implementation source of truth.
 - 2026-07-08 Source signal update: `mind_mcp` had no matching project collection and `graph_mcp` returned unrelated indexed data. Local code shows `src-tauri/src/audio.rs` already emits `audio-level` with `rms` and `peak`, while `src/App.tsx` renders a basic meter. The new scope should refine this into an explicit live source-signal indicator rather than duplicating capture logic.
 - 2026-07-09 LLM summary-agent update: `mind_mcp` has no project paragraph sources. `graph_mcp` found current `bakatrans` API-key and settings UI symbols, plus unrelated historical examples for OpenAI-compatible/Ollama calls. Local source shows translation currently has a single OpenAI key path (`src-tauri/src/security.rs`, `src-tauri/src/ai.rs`, `src/api.ts`) and settings UI in `src/App.tsx`; the summary feature should split translation credentials from reusable LLM provider profiles instead of overloading the existing key panel.
+- 2026-07-09 OpenAI realtime language-selector update: `mind_mcp` default collection was missing and the project collection returned empty passages. `graph_mcp` found the current selector in `src/App.tsx` and `targetLanguages = languages.filter(...)`; local source confirms both the React `Language` union in `src/types.ts` and Rust `Language` enum in `src-tauri/src/models.rs` are still limited to `auto`, `en`, `ja`, and `vi`. The new scope should update the existing realtime translation plan rather than create a separate plan.
 
 ## Official API Notes
 
 - OpenAI Realtime Translation supports a dedicated `/v1/realtime/translations` endpoint and `gpt-realtime-translate` for interpreter-style live speech translation.
+- OpenAI's Realtime Translation cookbook says `gpt-realtime-translate` dynamically detects more than 70 input languages and supports 13 target output languages. Target output languages are Spanish, Portuguese, French, Japanese, Russian, Chinese, German, Korean, Hindi, Indonesian, Vietnamese, Italian, and English.
 - OpenAI Realtime WebSocket audio uses `input_audio_buffer.append` for base64 audio chunks. `input_audio_buffer.commit` forces the current input buffer into a conversation item and clears it; with server VAD the server normally commits automatically, while disabling VAD requires manual commit and response creation.
 - OpenAI Realtime Transcription recommends `gpt-realtime-whisper` for low-latency live transcript deltas, while standard Audio API transcription models are better for non-streaming file or chunk workflows.
 - OpenAI Text-to-Speech docs recommend `gpt-4o-mini-tts` for intelligent realtime TTS, with `tts-1` and `tts-1-hd` as older alternatives.
@@ -38,6 +40,7 @@ References:
 - https://developers.openai.com/api/docs/guides/realtime-websocket
 - https://developers.openai.com/api/docs/guides/text-to-speech
 - https://developers.openai.com/api/docs/models
+- https://developers.openai.com/cookbook/examples/voice_solutions/realtime_translation_guide
 - https://adk.dev/agents/models/ollama/
 
 ## Scope Challenge
@@ -118,8 +121,8 @@ Module boundaries:
 
 Core session config:
 
-- source language: `auto`, `en`, `ja`, `vi`
-- target language: `en`, `ja`, `vi`
+- source language: `auto` plus OpenAI Realtime Translation input-language codes for user labeling, fallback paths, and same-language warnings. Dedicated realtime translation should continue relying on model-side source-language detection.
+- target language: one of OpenAI Realtime Translation's 13 output-language codes: `es`, `pt`, `fr`, `ja`, `ru`, `zh`, `de`, `ko`, `hi`, `id`, `vi`, `it`, `en`
 - translation style: `literal`, `natural`, `technical_meeting_safe`
 - translation input device ID
 - translated audio output device ID
@@ -247,9 +250,17 @@ Session status:
    - Implement a meeting summary agent that operates over transcript state with explicit steps for summaries, decisions, action items, blockers, and points to remember.
    - See `phase-09-llm-config-summary-agent.md`.
 
+10. OpenAI Realtime supported language selector
+   - Replace the current `auto/en/ja/vi` language option set with OpenAI Realtime Translation-supported language metadata.
+   - Keep `Auto` available only for source language. Limit target language to the 13 supported output languages.
+   - Update the React options, shared TypeScript types, Rust deserialization/validation, and tests so unsupported target codes cannot reach `/v1/realtime/translations`.
+   - See `phase-10-openai-realtime-language-selector.md`.
+
 ## Acceptance Criteria
 
 - The user can select source/target languages, input device, and output device.
+- The target-language selector includes all 13 OpenAI Realtime Translation output languages and excludes `Auto`.
+- The source-language selector includes `Auto` and OpenAI Realtime Translation input-language options without pretending the dedicated realtime endpoint requires a manual source-language parameter.
 - The user can choose the meeting audio input source independently from translated output.
 - The user can optionally monitor original meeting audio on a separate output device such as Mac speakers while translated audio plays to headphones.
 - The app can capture Teams-routed audio through BlackHole 2ch.

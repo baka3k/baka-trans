@@ -167,11 +167,17 @@ export default function App() {
   const selectedMonitorOutput = devices.outputs.find(
     (device) => device.id === monitorOutputDeviceId,
   );
-  const routingWarnings = getRoutingWarnings(
-    selectedInput,
+  const outputMonitorConflict = hasOutputMonitorConflict(
     selectedOutput,
     translationOutputChannel,
     monitorOriginalAudio ? selectedMonitorOutput : undefined,
+    monitorOutputChannel,
+  );
+  const effectiveMonitorOriginalAudio = monitorOriginalAudio && !outputMonitorConflict;
+  const routingWarnings = getRoutingWarnings(
+    selectedOutput,
+    translationOutputChannel,
+    effectiveMonitorOriginalAudio ? selectedMonitorOutput : undefined,
     monitorOutputChannel,
   );
 
@@ -202,7 +208,7 @@ export default function App() {
   const translationOutLevel = localMonitorActive
     ? inputSignalPercent
     : Math.round(translatedLevel.peak * 100);
-  const monitorOutLevel = monitorOriginalAudio && canForceBoundary ? inputSignalPercent : 0;
+  const monitorOutLevel = effectiveMonitorOriginalAudio && canForceBoundary ? inputSignalPercent : 0;
   const audioLineRows: AudioLineRow[] = [
     {
       id: "input",
@@ -240,11 +246,11 @@ export default function App() {
     {
       id: "monitor",
       label: "Original out",
-      detail: monitorOriginalAudio ? formatRoute(selectedMonitorOutput, monitorOutputChannel) : "Off",
-      state: monitorOriginalAudio ? (monitorOutLevel > 3 ? "signal" : "armed") : "off",
+      detail: effectiveMonitorOriginalAudio ? formatRoute(selectedMonitorOutput, monitorOutputChannel) : "Off",
+      state: effectiveMonitorOriginalAudio ? (monitorOutLevel > 3 ? "signal" : "armed") : "off",
       leftLevel: channelLevel(monitorOutputChannel, "left", monitorOutLevel),
       rightLevel: channelLevel(monitorOutputChannel, "right", monitorOutLevel),
-      disabled: !monitorOriginalAudio || !selectedMonitorOutput,
+      disabled: !effectiveMonitorOriginalAudio || !selectedMonitorOutput,
     },
   ];
   const readinessLabel = canStart
@@ -269,14 +275,14 @@ export default function App() {
       translationOutputChannel,
       monitorOutputDeviceId,
       monitorOutputChannel,
-      monitorOriginalAudio,
+      monitorOriginalAudio: effectiveMonitorOriginalAudio,
       voiceId: "marin",
       fallbackEnabled,
     }),
     [
+      effectiveMonitorOriginalAudio,
       fallbackEnabled,
       inputDeviceId,
-      monitorOriginalAudio,
       monitorOutputChannel,
       monitorOutputDeviceId,
       outputDeviceId,
@@ -906,7 +912,7 @@ export default function App() {
                     testTone("monitor", monitorOutputDeviceId, monitorOutputChannel)
                   }
                   disabled={
-                    !monitorOriginalAudio ||
+                    !effectiveMonitorOriginalAudio ||
                     !monitorOutputDeviceId ||
                     !canTestAudio ||
                     testingTone === "monitor"
@@ -922,7 +928,7 @@ export default function App() {
                 input={selectedInput}
                 output={selectedOutput}
                 outputChannel={translationOutputChannel}
-                monitor={monitorOriginalAudio ? selectedMonitorOutput : undefined}
+                monitor={effectiveMonitorOriginalAudio ? selectedMonitorOutput : undefined}
                 monitorChannel={monitorOutputChannel}
               />
               {routingWarnings.map((warning) => (
@@ -1367,7 +1373,7 @@ function RoutingSummary({
   monitorChannel: AudioOutputChannel;
 }) {
   const splitActive =
-    sameDeviceName(output, monitor) &&
+    sameDeviceId(output, monitor) &&
     ((outputChannel === "left" && monitorChannel === "right") ||
       (outputChannel === "right" && monitorChannel === "left"));
 
@@ -1462,27 +1468,12 @@ function normalizeDeviceName(name: string) {
 }
 
 function getRoutingWarnings(
-  input?: AudioDeviceInfo,
   output?: AudioDeviceInfo,
   outputChannel: AudioOutputChannel = "all",
   monitor?: AudioDeviceInfo,
   monitorChannel: AudioOutputChannel = "all",
 ) {
   const warnings: string[] = [];
-  if (sameDeviceName(input, output)) {
-    warnings.push("Meeting source and translated output look identical.");
-  }
-  if (sameDeviceName(input, monitor)) {
-    warnings.push("Meeting source and original monitor look identical.");
-  }
-  if (sameDeviceName(output, monitor)) {
-    const splitActive =
-      (outputChannel === "left" && monitorChannel === "right") ||
-      (outputChannel === "right" && monitorChannel === "left");
-    if (!splitActive) {
-      warnings.push("Translated output and original monitor share a device. Use opposite ears or separate outputs.");
-    }
-  }
   if (!isStereoCapable(output) && outputChannel !== "all") {
     warnings.push("Translated left/right routing needs a stereo output device.");
   }
@@ -1492,12 +1483,23 @@ function getRoutingWarnings(
   return warnings;
 }
 
-function sameDeviceName(left?: AudioDeviceInfo, right?: AudioDeviceInfo) {
-  return Boolean(
-    left &&
-      right &&
-      normalizeDeviceName(left.name).length > 0 &&
-      normalizeDeviceName(left.name) === normalizeDeviceName(right.name),
+function sameDeviceId(left?: AudioDeviceInfo, right?: AudioDeviceInfo) {
+  return Boolean(left && right && left.id.length > 0 && left.id === right.id);
+}
+
+function hasOutputMonitorConflict(
+  output?: AudioDeviceInfo,
+  outputChannel: AudioOutputChannel = "all",
+  monitor?: AudioDeviceInfo,
+  monitorChannel: AudioOutputChannel = "all",
+) {
+  if (!sameDeviceId(output, monitor)) {
+    return false;
+  }
+
+  return !(
+    (outputChannel === "left" && monitorChannel === "right") ||
+    (outputChannel === "right" && monitorChannel === "left")
   );
 }
 
