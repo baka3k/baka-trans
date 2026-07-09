@@ -5,7 +5,12 @@ import type {
   AudioOutputChannel,
   AudioDevices,
   ExportedTranscript,
+  LlmProviderProfile,
+  LlmProviderProfileDraft,
+  LlmProviderTestResult,
   ManualBoundaryReason,
+  MeetingSummaryConfig,
+  MeetingSummaryResult,
   SessionConfig,
 } from "./types";
 
@@ -46,12 +51,44 @@ export function saveApiKey(apiKey: string) {
   return invoke<void>("save_api_key", { apiKey });
 }
 
+export function saveTranslationApiKey(apiKey: string) {
+  return invoke<void>("save_translation_api_key", { apiKey });
+}
+
 export function hasApiKey() {
   return invoke<boolean>("has_api_key");
 }
 
+export function hasTranslationApiKey() {
+  return invoke<boolean>("has_translation_api_key");
+}
+
 export function testApiKey() {
   return invoke<ApiKeyTestResult>("test_api_key");
+}
+
+export function testTranslationApiKey() {
+  return invoke<ApiKeyTestResult>("test_translation_api_key");
+}
+
+export function listLlmProfiles() {
+  return invoke<LlmProviderProfile[]>("list_llm_profiles");
+}
+
+export function saveLlmProfile(draft: LlmProviderProfileDraft) {
+  return invoke<LlmProviderProfile>("save_llm_profile", { draft });
+}
+
+export function deleteLlmProfile(profileId: string) {
+  return invoke<void>("delete_llm_profile", { profileId });
+}
+
+export function testLlmProfile(profileId: string) {
+  return invoke<LlmProviderTestResult>("test_llm_profile", { profileId });
+}
+
+export function runMeetingSummaryAgent(config: MeetingSummaryConfig) {
+  return invoke<MeetingSummaryResult>("run_meeting_summary_agent", { config });
 }
 
 export function exportTranscript(format: "text" | "markdown") {

@@ -21,6 +21,10 @@ export type SessionStatus =
   | "stopping"
   | "error";
 export type TranscriptStatus = "partial" | "final" | "error";
+export type LlmProviderKind = "openai" | "openai_compatible" | "ollama" | "adk_litellm";
+export type MeetingSummaryTrigger = "manual" | "end_of_session";
+export type TranscriptScope = "source" | "translated" | "both";
+export type MeetingSummaryStatus = "running" | "complete" | "error";
 
 export interface AudioDeviceInfo {
   id: string;
@@ -65,6 +69,42 @@ export interface ApiKeyTestResult {
   message: string;
 }
 
+export interface LlmProviderProfile {
+  id: string;
+  name: string;
+  kind: LlmProviderKind;
+  model: string;
+  baseUrl?: string;
+  hasApiKey: boolean;
+  apiKeySource?: string;
+  apiKeyFingerprint?: string;
+  timeoutSeconds: number;
+  maxOutputTokens: number;
+  temperature: number;
+  enabled: boolean;
+}
+
+export interface LlmProviderProfileDraft {
+  id?: string;
+  name: string;
+  kind: LlmProviderKind;
+  model: string;
+  baseUrl?: string;
+  apiKey?: string;
+  timeoutSeconds?: number;
+  maxOutputTokens?: number;
+  temperature?: number;
+  enabled?: boolean;
+}
+
+export interface LlmProviderTestResult {
+  profileId: string;
+  ok: boolean;
+  message: string;
+  model: string;
+  baseUrl: string;
+}
+
 export interface ManualBoundaryRequest {
   reason: ManualBoundaryReason;
   requestedAtMs: number;
@@ -105,4 +145,49 @@ export interface AppErrorPayload {
 export interface ExportedTranscript {
   fileName: string;
   content: string;
+}
+
+export interface MeetingSummarySections {
+  summary: boolean;
+  decisions: boolean;
+  actionItems: boolean;
+  blockers: boolean;
+  importantPoints: boolean;
+}
+
+export interface MeetingSummaryConfig {
+  providerProfileId: string;
+  trigger: MeetingSummaryTrigger;
+  transcriptScope: TranscriptScope;
+  outputLanguage: string;
+  sections: MeetingSummarySections;
+  maxTranscriptChars: number;
+  rollingMemoryEnabled: boolean;
+}
+
+export interface ActionItem {
+  text: string;
+  owner?: string;
+  dueDate?: string;
+  sourceItemIds: string[];
+}
+
+export interface MeetingSummaryResult {
+  id: string;
+  createdAtMs: number;
+  sourceItemIds: string[];
+  summary: string;
+  decisions: string[];
+  actionItems: ActionItem[];
+  blockers: string[];
+  importantPoints: string[];
+  model: string;
+  providerProfileId: string;
+  status: MeetingSummaryStatus;
+  errorMessage?: string;
+}
+
+export interface MeetingSummaryStatusEvent {
+  status: MeetingSummaryStatus;
+  message: string;
 }

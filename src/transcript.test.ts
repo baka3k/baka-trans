@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { mergeTranscriptDelta, renderTranscript } from "./transcript";
-import type { TranscriptItem } from "./types";
+import {
+  buildMeetingSummaryConfig,
+  mergeTranscriptDelta,
+  renderTranscript,
+  validateLlmProfileDraft,
+} from "./transcript";
+import type { MeetingSummaryResult, TranscriptItem } from "./types";
 
 const base: TranscriptItem = {
   id: "1",
@@ -31,5 +36,51 @@ describe("transcript helpers", () => {
     expect(output).toContain("# Baka Trans Transcript");
     expect(output).toContain("Xin chao");
   });
-});
 
+  it("includes meeting notes in markdown exports", () => {
+    const notes: MeetingSummaryResult = {
+      id: "notes",
+      createdAtMs: 2,
+      sourceItemIds: ["1"],
+      summary: "The team agreed to ship.",
+      decisions: ["Ship on Friday"],
+      actionItems: [
+        {
+          text: "Prepare release notes",
+          owner: "Mai",
+          dueDate: "Friday",
+          sourceItemIds: ["1"],
+        },
+      ],
+      blockers: [],
+      importantPoints: ["Customer demo is Monday"],
+      model: "gpt-test",
+      providerProfileId: "profile",
+      status: "complete",
+    };
+
+    const output = renderTranscript([{ ...base, status: "final" }], "markdown", notes);
+
+    expect(output).toContain("# Meeting Notes");
+    expect(output).toContain("Prepare release notes");
+  });
+
+  it("validates provider profiles for required model and base URL", () => {
+    expect(
+      validateLlmProfileDraft({
+        name: "Local",
+        kind: "openai_compatible",
+        model: "",
+        baseUrl: "",
+      }),
+    ).toEqual(["Model is required.", "Base URL is required for this provider."]);
+  });
+
+  it("builds default meeting summary config", () => {
+    const config = buildMeetingSummaryConfig("profile");
+
+    expect(config.providerProfileId).toBe("profile");
+    expect(config.transcriptScope).toBe("both");
+    expect(config.sections.actionItems).toBe(true);
+  });
+});

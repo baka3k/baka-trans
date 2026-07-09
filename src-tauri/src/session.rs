@@ -296,6 +296,10 @@ impl AppState {
         })
     }
 
+    pub fn transcript_snapshot(&self) -> AppResult<Vec<TranscriptItem>> {
+        Ok(self.transcript.lock().map_err(lock_error)?.clone())
+    }
+
     fn start_pipeline(&self, app: AppHandle, config: SessionConfig) -> AppResult<()> {
         let api_key = security::load_api_key()?;
         let playback = audio::start_playback_with_channel(

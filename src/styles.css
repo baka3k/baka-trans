@@ -164,7 +164,7 @@ button:focus-visible {
 .translation-column {
   display: grid;
   gap: 12px;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   height: calc(100dvh - 124px);
   min-height: 0;
 }
@@ -666,6 +666,126 @@ h2 {
   margin-top: 10px;
 }
 
+.summary-config-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.segmented-control {
+  background: var(--panel-subtle);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 4px;
+}
+
+.segmented-control button {
+  border-color: transparent;
+  font-size: 12px;
+  height: 30px;
+  padding: 0 6px;
+}
+
+.segmented-control button.active {
+  background: var(--accent);
+  color: #f7fbf9;
+}
+
+.profile-actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.summary-options {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+}
+
+.section-toggles {
+  display: grid;
+  gap: 7px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.section-toggles label {
+  align-items: center;
+  background: var(--panel-subtle);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text-muted);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 650;
+  gap: 5px;
+  justify-content: center;
+  min-height: 32px;
+  padding: 6px;
+}
+
+.section-toggles input {
+  accent-color: var(--accent);
+  height: 14px;
+  width: 14px;
+}
+
+.run-summary-button {
+  width: 100%;
+}
+
+.summary-status {
+  background: var(--panel-subtle);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 8px 10px;
+}
+
+.notes-panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 10px;
+  max-height: 300px;
+  overflow: auto;
+  padding: 14px;
+}
+
+.notes-summary {
+  color: var(--text);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.notes-list {
+  display: grid;
+  gap: 6px;
+}
+
+.notes-list strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.notes-list ul {
+  color: var(--text-muted);
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.notes-list li {
+  line-height: 1.4;
+}
+
 .setup-list {
   display: grid;
   gap: 8px;
@@ -827,7 +947,8 @@ h2 {
   }
 
   button.primary,
-  .brand-mark {
+  .brand-mark,
+  .segmented-control button.active {
     color: #13201c;
   }
 
@@ -898,6 +1019,8 @@ h2 {
   }
 
   .field-grid.two,
+  .segmented-control,
+  .section-toggles,
   .transcript-head,
   .transcript-row,
   .line-row {

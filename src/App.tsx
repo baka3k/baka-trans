@@ -2,6 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import {
   Activity,
   AlertTriangle,
+  Bot,
   Check,
   Download,
   FileText,
@@ -13,7 +14,9 @@ import {
   RefreshCw,
   Save,
   Send,
+  Settings2,
   Square,
+  Trash2,
   Volume2,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -21,18 +24,28 @@ import {
   exportTranscript,
   forceTranslateBoundary,
   getAppStatus,
+  deleteLlmProfile,
   listAudioDevices,
+  listLlmProfiles,
   pauseSession,
   playTestTone,
   resumeSession,
-  saveApiKey,
+  runMeetingSummaryAgent,
+  saveLlmProfile,
+  saveTranslationApiKey,
   startLocalMonitor,
   startSession,
   stopLocalMonitor,
   stopSession,
-  testApiKey,
+  testLlmProfile,
+  testTranslationApiKey,
 } from "./api";
-import { mergeTranscriptDelta, renderTranscript } from "./transcript";
+import {
+  buildMeetingSummaryConfig,
+  mergeTranscriptDelta,
+  renderTranscript,
+  validateLlmProfileDraft,
+} from "./transcript";
 import type {
   AppErrorPayload,
   ApiKeySource,
@@ -41,10 +54,17 @@ import type {
   AudioOutputChannel,
   AudioLevelEvent,
   Language,
+  LlmProviderKind,
+  LlmProviderProfile,
+  LlmProviderProfileDraft,
   ManualBoundaryEvent,
   ManualBoundaryReason,
+  MeetingSummaryConfig,
+  MeetingSummaryResult,
+  MeetingSummaryStatusEvent,
   SessionConfig,
   SessionStatus,
+  TranscriptScope,
   TranslatedAudioLevelEvent,
   TranscriptItem,
 } from "./types";
@@ -62,6 +82,17 @@ const channelOptions: Array<{ value: AudioOutputChannel; label: string }> = [
   { value: "all", label: "Both ears" },
   { value: "left", label: "Left ear" },
   { value: "right", label: "Right ear" },
+];
+const providerKinds: Array<{ value: LlmProviderKind; label: string; title: string }> = [
+  { value: "openai", label: "OpenAI", title: "OpenAI chat completions" },
+  { value: "openai_compatible", label: "Compatible", title: "OpenAI-compatible endpoint" },
+  { value: "ollama", label: "Ollama", title: "Local Ollama via /v1" },
+  { value: "adk_litellm", label: "ADK", title: "ADK/LiteLLM model naming" },
+];
+const transcriptScopeOptions: Array<{ value: TranscriptScope; label: string }> = [
+  { value: "both", label: "Both" },
+  { value: "source", label: "Source" },
+  { value: "translated", label: "Translated" },
 ];
 const routingStorageKey = "baka-trans-routing-profile-v1";
 const activeSessionStatuses: SessionStatus[] = ["listening", "translating", "speaking"];
@@ -84,6 +115,17 @@ interface RoutingProfile {
   monitorOutputChannel: AudioOutputChannel;
   monitorOriginalAudio: boolean;
 }
+
+const emptyProfileDraft: LlmProviderProfileDraft = {
+  name: "Local notes",
+  kind: "ollama",
+  model: "llama3.2",
+  baseUrl: "http://localhost:11434/v1",
+  timeoutSeconds: 60,
+  maxOutputTokens: 1200,
+  temperature: 0.2,
+  enabled: true,
+};
 
 export default function App() {
   const [devices, setDevices] = useState<AudioDevices>({ inputs: [], outputs: [] });
@@ -113,6 +155,19 @@ export default function App() {
   const [testingTone, setTestingTone] = useState<"translation" | "monitor" | null>(null);
   const [localMonitorActive, setLocalMonitorActive] = useState(false);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
+  const [llmProfiles, setLlmProfiles] = useState<LlmProviderProfile[]>([]);
+  const [selectedProfileId, setSelectedProfileId] = useState("");
+  const [profileDraft, setProfileDraft] =
+    useState<LlmProviderProfileDraft>(emptyProfileDraft);
+  const [profileKeyDraft, setProfileKeyDraft] = useState("");
+  const [testingProfile, setTestingProfile] = useState(false);
+  const [profileTestMessage, setProfileTestMessage] = useState("");
+  const [summaryConfig, setSummaryConfig] = useState<MeetingSummaryConfig>(
+    buildMeetingSummaryConfig(""),
+  );
+  const [meetingNotes, setMeetingNotes] = useState<MeetingSummaryResult | null>(null);
+  const [summaryStatus, setSummaryStatus] = useState("");
+  const [summaryRunning, setSummaryRunning] = useState(false);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
 
   const selectedInput = devices.inputs.find((device) => device.id === inputDeviceId);
@@ -205,6 +260,12 @@ export default function App() {
     : status === "idle"
       ? "Setup needed"
       : labelStatus(status);
+  const selectedProfile = llmProfiles.find((profile) => profile.id === selectedProfileId);
+  const profileDraftErrors = validateLlmProfileDraft(profileDraft);
+  const canRunSummary =
+    Boolean(selectedProfileId) &&
+    !summaryRunning &&
+    transcript.some((item) => item.sourceText.trim() || item.translatedText.trim());
 
   const config: SessionConfig = useMemo(
     () => ({
@@ -264,6 +325,14 @@ export default function App() {
         });
       }),
       listen<AppErrorPayload>("app-error", (event) => setError(event.payload)),
+      listen<MeetingSummaryStatusEvent>("summary-agent-status", (event) => {
+        setSummaryStatus(event.payload.message);
+        setSummaryRunning(event.payload.status === "running");
+      }),
+      listen<MeetingSummaryResult>("meeting-summary-update", (event) => {
+        setMeetingNotes(event.payload);
+        setSummaryRunning(false);
+      }),
     ]);
 
     return () => {
@@ -291,10 +360,15 @@ export default function App() {
   async function hydrate() {
     setBusy(true);
     try {
-      const [deviceList, appStatus] = await Promise.all([listAudioDevices(), getAppStatus()]);
+      const [deviceList, appStatus, profiles] = await Promise.all([
+        listAudioDevices(),
+        getAppStatus(),
+        listLlmProfiles(),
+      ]);
       setDevices(deviceList);
       setStatus(appStatus.sessionStatus);
       applyAppStatus(appStatus);
+      applyProfiles(profiles);
       setKeyTestMessage("");
       const storedRouting = readRoutingProfile();
       setInputDeviceId(resolveStoredDevice(deviceList.inputs, storedRouting?.inputDeviceId));
@@ -313,11 +387,28 @@ export default function App() {
     }
   }
 
+  function applyProfiles(profiles: LlmProviderProfile[]) {
+    setLlmProfiles(profiles);
+    const nextSelected =
+      profiles.find((profile) => profile.id === selectedProfileId)?.id ??
+      profiles.find((profile) => profile.enabled)?.id ??
+      profiles[0]?.id ??
+      "";
+    setSelectedProfileId(nextSelected);
+    setSummaryConfig((current) => ({ ...current, providerProfileId: nextSelected }));
+    if (nextSelected) {
+      const profile = profiles.find((item) => item.id === nextSelected);
+      if (profile) {
+        setProfileDraft(profileToDraft(profile));
+      }
+    }
+  }
+
   async function saveKey() {
     setBusy(true);
     setError(null);
     try {
-      await saveApiKey(apiKeyDraft);
+      await saveTranslationApiKey(apiKeyDraft);
       const appStatus = await getAppStatus();
       applyAppStatus(appStatus);
       setKeyTestMessage("");
@@ -333,6 +424,94 @@ export default function App() {
       setError(normalizeError(cause));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function saveSummaryProfile() {
+    const errors = validateLlmProfileDraft(profileDraft);
+    if (errors.length > 0) {
+      setError({ code: "invalid_llm_profile", message: errors[0] });
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setProfileTestMessage("");
+    try {
+      const saved = await saveLlmProfile({
+        ...profileDraft,
+        apiKey: profileKeyDraft.trim() || undefined,
+      });
+      const profiles = await listLlmProfiles();
+      setLlmProfiles(profiles);
+      setSelectedProfileId(saved.id);
+      setSummaryConfig((current) => ({ ...current, providerProfileId: saved.id }));
+      setProfileDraft(profileToDraft(saved));
+      setProfileKeyDraft("");
+      setProfileTestMessage("Profile saved.");
+    } catch (cause) {
+      setError(normalizeError(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteSelectedProfile() {
+    if (!selectedProfileId) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteLlmProfile(selectedProfileId);
+      const profiles = await listLlmProfiles();
+      setProfileDraft(emptyProfileDraft);
+      setProfileKeyDraft("");
+      applyProfiles(profiles);
+      setProfileTestMessage("Profile deleted.");
+    } catch (cause) {
+      setError(normalizeError(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function testSelectedProfile() {
+    if (!selectedProfileId) {
+      return;
+    }
+    setTestingProfile(true);
+    setError(null);
+    setProfileTestMessage("");
+    try {
+      const result = await testLlmProfile(selectedProfileId);
+      setProfileTestMessage(`${result.message} ${result.baseUrl}`);
+      const profiles = await listLlmProfiles();
+      applyProfiles(profiles);
+    } catch (cause) {
+      setError(normalizeError(cause));
+    } finally {
+      setTestingProfile(false);
+    }
+  }
+
+  async function runSummary() {
+    if (!selectedProfileId) {
+      return;
+    }
+    setSummaryRunning(true);
+    setSummaryStatus("Starting summary");
+    setError(null);
+    try {
+      const result = await runMeetingSummaryAgent({
+        ...summaryConfig,
+        providerProfileId: selectedProfileId,
+      });
+      setMeetingNotes(result);
+      setSummaryStatus("Meeting notes ready");
+    } catch (cause) {
+      setSummaryRunning(false);
+      setSummaryStatus("Summary failed");
+      setError(normalizeError(cause));
     }
   }
 
@@ -363,7 +542,7 @@ export default function App() {
     setError(null);
     setKeyTestMessage("");
     try {
-      const result = await testApiKey();
+      const result = await testTranslationApiKey();
       setApiKeyStored(true);
       setApiKeySource(result.source);
       setApiKeyFingerprint(result.fingerprint);
@@ -424,10 +603,12 @@ export default function App() {
   }
 
   async function doExport(format: "text" | "markdown") {
-    const localContent = renderTranscript(transcript, format);
+    const localContent = renderTranscript(transcript, format, meetingNotes);
     try {
       const backend = await exportTranscript(format);
-      downloadText(backend.fileName, backend.content || localContent);
+      const content =
+        meetingNotes && backend.content ? renderTranscript(transcript, format, meetingNotes) : backend.content;
+      downloadText(backend.fileName, content || localContent);
     } catch {
       downloadText(`baka-trans-transcript.${format === "markdown" ? "md" : "txt"}`, localContent);
     }
@@ -759,14 +940,16 @@ export default function App() {
 
             <div className="panel key-panel">
               <div className="panel-header">
-                <h2>Settings</h2>
+                <h2>Translation OpenAI key</h2>
               </div>
               <div className="key-row">
                 <input
                   type="password"
                   value={apiKeyDraft}
                   placeholder={
-                    apiKeyStored ? "Saved key loaded. Paste only to replace." : "OpenAI API key"
+                    apiKeyStored
+                      ? "Saved translation key. Paste only to replace."
+                      : "OpenAI Realtime API key"
                   }
                   onChange={(event) => setApiKeyDraft(event.currentTarget.value)}
                 />
@@ -778,8 +961,8 @@ export default function App() {
                 <KeyRound size={14} />
                 <span>
                   {apiKeyStored
-                    ? `Using ${labelApiKeySource(apiKeySource)} key ${apiKeyFingerprint || ""} automatically`
-                    : "No OpenAI API key available"}
+                    ? `Using ${labelApiKeySource(apiKeySource)} key ${apiKeyFingerprint || ""} for realtime translation`
+                    : "No translation OpenAI key available"}
                 </span>
               </div>
               <div className="key-test-row">
@@ -801,16 +984,221 @@ export default function App() {
                   <strong>2. Select</strong>
                   <span>Choose BlackHole as source and headphones as translation output.</span>
                 </div>
-            <div>
-              <strong>3. Split</strong>
-              <span>For left/right ears, use one headphone device with opposite channels.</span>
+                <div>
+                  <strong>3. Split</strong>
+                  <span>For left/right ears, use one headphone device with opposite channels.</span>
+                </div>
+                <div>
+                  <strong>4. Teams</strong>
+                  <span>Output to BlackHole or Loopback, then select that device as the Teams microphone.</span>
+                </div>
+              </div>
             </div>
-            <div>
-              <strong>4. Teams</strong>
-              <span>Output to BlackHole or Loopback, then select that device as the Teams microphone.</span>
+
+            <div className="panel summary-config-panel">
+              <div className="panel-header">
+                <h2>Summary Agent</h2>
+                <span className={`panel-state ${selectedProfile ? "ok" : ""}`}>
+                  {selectedProfile ? "Configured" : "No profile"}
+                </span>
+              </div>
+
+              <div className="field-grid">
+                <SelectField
+                  label="Profile"
+                  value={selectedProfileId}
+                  onChange={(value) => {
+                    const profile = llmProfiles.find((item) => item.id === value);
+                    setSelectedProfileId(value);
+                    setSummaryConfig((current) => ({ ...current, providerProfileId: value }));
+                    setProfileDraft(profile ? profileToDraft(profile) : emptyProfileDraft);
+                    setProfileKeyDraft("");
+                    setProfileTestMessage("");
+                  }}
+                  options={[
+                    { value: "", label: "New profile" },
+                    ...llmProfiles.map((profile) => ({
+                      value: profile.id,
+                      label: profile.name,
+                    })),
+                  ]}
+                />
+
+                <div className="segmented-control" aria-label="Provider kind">
+                  {providerKinds.map((kind) => (
+                    <button
+                      type="button"
+                      className={profileDraft.kind === kind.value ? "active" : ""}
+                      title={kind.title}
+                      key={kind.value}
+                      onClick={() =>
+                        setProfileDraft((current) => ({
+                          ...current,
+                          kind: kind.value,
+                          baseUrl: defaultBaseUrlForKind(kind.value, current.baseUrl),
+                        }))
+                      }
+                    >
+                      {kind.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="field-grid two">
+                  <label className="field">
+                    <span>Name</span>
+                    <input
+                      value={profileDraft.name}
+                      onChange={(event) =>
+                        setProfileDraft((current) => ({
+                          ...current,
+                          name: event.currentTarget.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Model</span>
+                    <input
+                      value={profileDraft.model}
+                      placeholder="gpt-4.1-mini or llama3.2"
+                      onChange={(event) =>
+                        setProfileDraft((current) => ({
+                          ...current,
+                          model: event.currentTarget.value,
+                        }))
+                      }
+                    />
+                  </label>
+                </div>
+
+                <label className="field">
+                  <span>Base URL</span>
+                  <input
+                    value={profileDraft.baseUrl ?? ""}
+                    placeholder={profileDraft.kind === "ollama" ? "http://localhost:11434/v1" : ""}
+                    onChange={(event) =>
+                      setProfileDraft((current) => ({
+                        ...current,
+                        baseUrl: event.currentTarget.value,
+                      }))
+                    }
+                  />
+                </label>
+
+                <div className="key-row">
+                  <input
+                    type="password"
+                    value={profileKeyDraft}
+                    placeholder={
+                      selectedProfile?.hasApiKey
+                        ? `Saved key ${selectedProfile.apiKeyFingerprint ?? ""}`
+                        : profileDraft.kind === "ollama"
+                          ? "Optional placeholder key"
+                          : "Summary provider API key"
+                    }
+                    onChange={(event) => setProfileKeyDraft(event.currentTarget.value)}
+                  />
+                  <button
+                    onClick={saveSummaryProfile}
+                    disabled={busy || profileDraftErrors.length > 0}
+                  >
+                    <Save size={17} /> Save
+                  </button>
+                </div>
+
+                <div className="profile-actions">
+                  <button
+                    className="small-button"
+                    onClick={testSelectedProfile}
+                    disabled={!selectedProfileId || busy || testingProfile}
+                  >
+                    <Check size={14} /> {testingProfile ? "Testing" : "Test profile"}
+                  </button>
+                  <button
+                    className="small-button danger"
+                    onClick={deleteSelectedProfile}
+                    disabled={!selectedProfileId || busy}
+                    title="Delete profile"
+                  >
+                    <Trash2 size={14} /> Delete
+                  </button>
+                  <button
+                    className="small-button"
+                    onClick={() => {
+                      setSelectedProfileId("");
+                      setProfileDraft(emptyProfileDraft);
+                      setProfileKeyDraft("");
+                      setProfileTestMessage("");
+                    }}
+                  >
+                    <Settings2 size={14} /> New
+                  </button>
+                </div>
+                {profileDraftErrors[0] ? <InlineWarning text={profileDraftErrors[0]} /> : null}
+                {profileTestMessage ? <div className="key-test-row">{profileTestMessage}</div> : null}
+              </div>
+
+              <div className="summary-options">
+                <div className="field-grid two">
+                  <SelectField
+                    label="Transcript"
+                    value={summaryConfig.transcriptScope}
+                    onChange={(value) =>
+                      setSummaryConfig((current) => ({
+                        ...current,
+                        transcriptScope: value as TranscriptScope,
+                      }))
+                    }
+                    options={transcriptScopeOptions}
+                  />
+                  <label className="field">
+                    <span>Language</span>
+                    <input
+                      value={summaryConfig.outputLanguage}
+                      onChange={(event) =>
+                        setSummaryConfig((current) => ({
+                          ...current,
+                          outputLanguage: event.currentTarget.value,
+                        }))
+                      }
+                    />
+                  </label>
+                </div>
+                <div className="section-toggles">
+                  {(
+                    [
+                      ["summary", "Summary"],
+                      ["decisions", "Decisions"],
+                      ["actionItems", "Actions"],
+                      ["blockers", "Blockers"],
+                      ["importantPoints", "Points"],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <label key={key}>
+                      <input
+                        type="checkbox"
+                        checked={summaryConfig.sections[key]}
+                        onChange={(event) =>
+                          setSummaryConfig((current) => ({
+                            ...current,
+                            sections: {
+                              ...current.sections,
+                              [key]: event.currentTarget.checked,
+                            },
+                          }))
+                        }
+                      />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+                <button className="primary run-summary-button" onClick={runSummary} disabled={!canRunSummary}>
+                  <Bot size={17} /> {summaryRunning ? "Running" : "Run summary"}
+                </button>
+                {summaryStatus ? <div className="summary-status">{summaryStatus}</div> : null}
+              </div>
             </div>
-          </div>
-        </div>
           </section>
         </aside>
 
@@ -819,6 +1207,20 @@ export default function App() {
             <section className="error-bar">
               <AlertTriangle size={18} />
               <span>{error.message}</span>
+            </section>
+          ) : null}
+
+          {meetingNotes ? (
+            <section className="notes-panel">
+              <div className="panel-header">
+                <h2>Meeting Notes</h2>
+                <span className="panel-state ok">{meetingNotes.model}</span>
+              </div>
+              {meetingNotes.summary ? <p className="notes-summary">{meetingNotes.summary}</p> : null}
+              <NotesList title="Decisions" values={meetingNotes.decisions} />
+              <ActionItemsList items={meetingNotes.actionItems} />
+              <NotesList title="Blockers" values={meetingNotes.blockers} />
+              <NotesList title="Important points" values={meetingNotes.importantPoints} />
             </section>
           ) : null}
 
@@ -848,6 +1250,42 @@ export default function App() {
         </section>
       </div>
     </main>
+  );
+}
+
+function NotesList({ title, values }: { title: string; values: string[] }) {
+  if (values.length === 0) {
+    return null;
+  }
+  return (
+    <div className="notes-list">
+      <strong>{title}</strong>
+      <ul>
+        {values.map((value) => (
+          <li key={value}>{value}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function ActionItemsList({ items }: { items: MeetingSummaryResult["actionItems"] }) {
+  if (items.length === 0) {
+    return null;
+  }
+  return (
+    <div className="notes-list">
+      <strong>Action items</strong>
+      <ul>
+        {items.map((item) => (
+          <li key={`${item.text}-${item.owner ?? ""}`}>
+            {item.text}
+            {item.owner ? <span> Owner: {item.owner}.</span> : null}
+            {item.dueDate ? <span> Due: {item.dueDate}.</span> : null}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -1139,6 +1577,30 @@ function labelApiKeySource(source: ApiKeySource | null) {
     default:
       return "unknown";
   }
+}
+
+function profileToDraft(profile: LlmProviderProfile): LlmProviderProfileDraft {
+  return {
+    id: profile.id,
+    name: profile.name,
+    kind: profile.kind,
+    model: profile.model,
+    baseUrl: profile.baseUrl,
+    timeoutSeconds: profile.timeoutSeconds,
+    maxOutputTokens: profile.maxOutputTokens,
+    temperature: profile.temperature,
+    enabled: profile.enabled,
+  };
+}
+
+function defaultBaseUrlForKind(kind: LlmProviderKind, current?: string) {
+  if (kind === "openai") {
+    return "https://api.openai.com/v1";
+  }
+  if (kind === "ollama") {
+    return "http://localhost:11434/v1";
+  }
+  return current ?? "";
 }
 
 function formatClock(timestamp: number) {
