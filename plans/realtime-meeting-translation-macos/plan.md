@@ -19,6 +19,7 @@ Build a lightweight macOS desktop app that captures Microsoft Teams meeting audi
 - `mind_mcp` was reachable, but its graph-RAG query failed with an internal backend error. `graph_mcp` semantic results pointed to an unrelated indexed project, so local `note.md` is the project source of truth.
 - 2026-07-08 Phase 07 update: `mind_mcp` and `graph_mcp` returned unrelated indexed corpus results for the manual sentence-boundary fallback request. Local plan files, `src-tauri/src/ai.rs`, `src-tauri/src/session.rs`, and `src/App.tsx` are the implementation source of truth.
 - 2026-07-08 Source signal update: `mind_mcp` had no matching project collection and `graph_mcp` returned unrelated indexed data. Local code shows `src-tauri/src/audio.rs` already emits `audio-level` with `rms` and `peak`, while `src/App.tsx` renders a basic meter. The new scope should refine this into an explicit live source-signal indicator rather than duplicating capture logic.
+- 2026-07-09 LLM summary-agent update: `mind_mcp` has no project paragraph sources. `graph_mcp` found current `bakatrans` API-key and settings UI symbols, plus unrelated historical examples for OpenAI-compatible/Ollama calls. Local source shows translation currently has a single OpenAI key path (`src-tauri/src/security.rs`, `src-tauri/src/ai.rs`, `src/api.ts`) and settings UI in `src/App.tsx`; the summary feature should split translation credentials from reusable LLM provider profiles instead of overloading the existing key panel.
 
 ## Official API Notes
 
@@ -27,6 +28,7 @@ Build a lightweight macOS desktop app that captures Microsoft Teams meeting audi
 - OpenAI Realtime Transcription recommends `gpt-realtime-whisper` for low-latency live transcript deltas, while standard Audio API transcription models are better for non-streaming file or chunk workflows.
 - OpenAI Text-to-Speech docs recommend `gpt-4o-mini-tts` for intelligent realtime TTS, with `tts-1` and `tts-1-hd` as older alternatives.
 - Current OpenAI model docs list GPT-5.5 as the flagship model and GPT-5.4 mini/nano as lower-latency/lower-cost choices. For this app, the main path should avoid a text model in the hot loop when the dedicated translation session can produce translated audio directly.
+- Google ADK's Ollama model guide says ADK integrates with Ollama-hosted models through LiteLLM, recommends the `ollama_chat` provider for Ollama agents, and notes the alternate OpenAI-provider path with `OPENAI_API_BASE=http://localhost:11434/v1` plus any non-empty API key. This matters for the summary agent because provider config must support both direct OpenAI-compatible chat completion and ADK/LiteLLM-style model IDs.
 
 References:
 
@@ -36,6 +38,7 @@ References:
 - https://developers.openai.com/api/docs/guides/realtime-websocket
 - https://developers.openai.com/api/docs/guides/text-to-speech
 - https://developers.openai.com/api/docs/models
+- https://adk.dev/agents/models/ollama/
 
 ## Scope Challenge
 
@@ -74,14 +77,31 @@ Captured audio chunks
   -> playback queue
 ```
 
+Meeting summary agent architecture:
+
+```text
+Transcript final items
+  -> session transcript store
+  -> MeetingSummaryAgent trigger (manual, end-of-session, or interval)
+  -> transcript chunking + rolling meeting memory
+  -> agent steps:
+       summarize agenda/context
+       extract decisions
+       extract action items and owners
+       identify risks, blockers, deadlines, and facts to remember
+       produce concise meeting notes
+  -> summary state + Tauri events
+  -> React summary panel and transcript export
+```
+
 Module boundaries:
 
 - Frontend: React TypeScript UI, session controls, device selectors, language/style settings, live transcript panel, export actions.
 - Tauri commands/events: typed bridge between React and Rust.
 - Audio: device enumeration, capture stream, resampling, chunking, output playback.
-- AI pipeline: realtime translation client, fallback STT/translation/TTS client, retry/backoff, API error normalization.
+- AI pipeline: realtime translation client, fallback STT/translation/TTS client, summary-agent model client, retry/backoff, API error normalization.
 - Session state: lifecycle, status transitions, transcript history, pause/resume, cleanup.
-- Security: Keychain-backed API key storage, no raw audio persistence by default.
+- Security/config: Keychain-backed secret storage for translation and LLM profiles, non-secret provider profile persistence, no raw audio persistence by default.
 
 ## Proposed Stack
 
@@ -89,6 +109,7 @@ Module boundaries:
 - Rust async runtime: `tokio`.
 - Audio capture/output: `cpal`; add `rubato` or `dasp` for resampling if needed.
 - Realtime connection: `tokio-tungstenite` with TLS.
+- Summary LLM client: OpenAI-compatible chat-completions HTTP client in Rust first; keep an ADK sidecar adapter optional if richer ADK workflows are required after the profile/config work lands.
 - Secure key storage: `keyring`.
 - Serialization/errors: `serde`, `thiserror`, `tracing`.
 - Frontend state: React state or a small store after UI complexity is visible; avoid large state frameworks in the first scaffold.
@@ -115,6 +136,42 @@ Transcript item:
 - translated text
 - status: `partial`, `final`, `error`
 - latency metrics when available
+
+LLM provider profile:
+
+- stable provider ID
+- display name
+- provider kind: `openai`, `openai_compatible`, `ollama`, `adk_litellm`
+- model ID
+- base URL
+- optional API key secret reference
+- timeout and max output tokens
+- temperature
+- enabled flag
+- last test result and fingerprint
+
+Meeting summary agent config:
+
+- selected LLM provider profile ID
+- summary trigger: `manual`, `session_end`, optional interval
+- transcript scope: source text, translated text, or both
+- output language
+- enabled sections: summary, decisions, action items, blockers, follow-ups, facts to remember
+- maximum transcript chars per run
+- rolling memory enabled flag
+
+Meeting summary result:
+
+- stable ID
+- session timestamp range
+- short summary
+- decisions
+- action items with optional owner and due date
+- blockers/risks
+- important points to remember
+- source transcript item IDs used
+- model/provider metadata
+- status: `pending`, `complete`, `error`
 
 Source audio signal state:
 
@@ -184,6 +241,12 @@ Session status:
    - Keep the backend change limited to metadata only if the current `rms` and `peak` event is insufficient.
    - See `phase-08-source-audio-signal-indicator.md`.
 
+9. LLM configuration and meeting-summary agent
+   - Redesign the current OpenAI key panel into clear translation and summary-agent configuration areas.
+   - Add reusable OpenAI-compatible LLM provider profiles, including Ollama/ADK-friendly settings.
+   - Implement a meeting summary agent that operates over transcript state with explicit steps for summaries, decisions, action items, blockers, and points to remember.
+   - See `phase-09-llm-config-summary-agent.md`.
+
 ## Acceptance Criteria
 
 - The user can select source/target languages, input device, and output device.
@@ -198,7 +261,11 @@ Session status:
 - The UI clearly indicates when the selected meeting source is actively delivering audio data into the app, even before translation output appears.
 - The source signal indicator distinguishes a healthy but silent stream from a stream that has stopped sending events.
 - Transcript export works as plain text and Markdown.
-- API key is stored in Keychain or loaded from development environment variables only.
+- Translation API key is stored in Keychain or loaded from development environment variables only.
+- The user can add, test, select, edit, and disable LLM provider profiles for meeting summaries without changing the realtime translation key.
+- LLM profiles support OpenAI and OpenAI-compatible endpoints, including local Ollama through either `http://localhost:11434/v1` OpenAI-provider mode or an ADK/LiteLLM-compatible model naming path.
+- The user can run a meeting-summary agent over the current transcript and receive summary, decisions, action items, blockers, and points to remember.
+- The summary agent exposes progress/error state and never blocks live audio capture, translation, playback, or manual boundary controls.
 - Raw audio is not stored unless a future explicit setting is added.
 
 ## Verification Strategy
@@ -206,10 +273,12 @@ Session status:
 - Unit tests for config validation, transcript reducer/state transitions, event parsing, and retry policy.
 - Unit tests for manual boundary command routing, empty-buffer handling, debounce behavior, and UI disabled states.
 - Unit tests for source signal state transitions: waiting, receiving, silent, stale, and error.
+- Unit tests for LLM provider config validation, OpenAI-compatible request building, Ollama base URL normalization, summary-agent output parsing, and transcript scope selection.
 - Rust integration checks for device enumeration and audio format conversion.
 - Manual macOS validation with BlackHole 2ch and Teams audio routing.
 - Manual validation that the source indicator changes when Teams/fixture audio is routed into BlackHole, goes silent when audio stops, and turns stale when capture events stop.
 - Realtime API smoke test with a short local audio fixture before live meeting tests.
+- Summary-agent smoke tests with one OpenAI profile and one local/Ollama-compatible profile when available.
 - Two-hour soak test with synthetic or looped audio before packaging.
 - Frontend verification at small and normal desktop window sizes.
 
@@ -224,15 +293,18 @@ Session status:
 - Manual boundary commits can produce duplicate, truncated, or empty translations if they race with server VAD or are pressed too often.
 - Realtime translation may require additional response triggering depending on selected turn-detection mode; this must be verified against the active API event contract.
 - A low level meter alone can mislead users during silence, so freshness and selected-device matching must be visible enough to prove the audio path is connected.
+- Provider config can become confusing if translation and summary settings are mixed together; the UI should name them as separate concerns and allow explicit sharing only when selected by the user.
+- Ollama/OpenAI-compatible providers vary in JSON output reliability and tool-call behavior; summary-agent parsing must tolerate fenced text, invalid JSON, and retries before surfacing an error.
+- Bundling a full ADK runtime inside a desktop app may add packaging complexity. Keep the agent contract independent of ADK and treat an ADK sidecar as an adapter, not the only execution path.
 
 ## Out of Scope for MVP
 
 - Virtual microphone rebroadcast into Teams.
 - Speaker diarization.
-- Meeting summaries or searchable archives.
+- Searchable meeting archives.
 - Windows support.
 - Native Teams integration.
-- Local/offline speech models.
+- Local/offline speech models for realtime translation.
 
 ## Cook Command
 
