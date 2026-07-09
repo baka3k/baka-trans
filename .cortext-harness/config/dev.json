@@ -1,15 +1,15 @@
 {
   "active": true,
   "project": {
-    "code": "baka-trans",
-    "name": "baka-trans"
+    "code": "bakatrans",
+    "name": "bakatrans"
   },
   "code": {
     "env": {
       "GRAPH_PROVIDER": "falkordb",
       "FALKORDB_HOST": "localhost",
       "FALKORDB_PORT": "6379",
-      "FALKORDB_GRAPH": "hyper_graph",
+      "FALKORDB_GRAPH": "bakatrans",
       "FALKORDB_USERNAME": "",
       "FALKORDB_PASSWORD": "",
       "QDRANT_HOST": "localhost",
@@ -17,7 +17,8 @@
       "EMBEDDING_MODEL": "jinaai/jina-embeddings-v3",
       "BATCH_SIZE": "1",
       "MAX_EMBED_CHARS": "500",
-      "device": "cpu"
+      "device": "mps",
+      "QDRANT_URL": "http://localhost:6333"
     },
     "source": {
       "projects": [
@@ -43,7 +44,8 @@
       "EMBEDDING_MODEL": "BAAI/bge-m3",
       "BATCH_SIZE": "1",
       "MAX_EMBED_CHARS": "500",
-      "device": "cpu"
+      "device": "mps",
+      "QDRANT_URL": "http://localhost:6333"
     },
     "source": {
       "projects": [
