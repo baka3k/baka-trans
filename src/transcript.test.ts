@@ -27,6 +27,43 @@ describe("transcript helpers", () => {
     expect(merged[0].sourceText).toBe("Hello world");
   });
 
+  it("merges final translation-only deltas into the current row", () => {
+    const merged = mergeTranscriptDelta([base], {
+      ...base,
+      id: "2",
+      sourceText: "",
+      translatedText: "Xin chao",
+      status: "final",
+    });
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({
+      sourceText: "Hello",
+      translatedText: "Xin chao",
+      status: "final",
+    });
+  });
+
+  it("starts a new translated line after sentence boundaries", () => {
+    const merged = mergeTranscriptDelta(
+      [
+        {
+          ...base,
+          translatedText: "Good morning.",
+        },
+      ],
+      {
+        ...base,
+        id: "2",
+        sourceText: "",
+        translatedText: " We can start now.",
+      },
+    );
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0].translatedText).toBe("Good morning.\nWe can start now.");
+  });
+
   it("renders markdown exports", () => {
     const output = renderTranscript(
       [{ ...base, translatedText: "Xin chao", status: "final" }],

@@ -31,7 +31,7 @@ pub enum RealtimeControl {
 }
 
 pub async fn test_realtime_connection(api_key: &str) -> AppResult<()> {
-    let token = mint_realtime_client_secret(api_key, "vi").await?;
+    let token = mint_realtime_client_secret(api_key, "auto", "vi").await?;
     let request = realtime_translation_request(&token)?;
     let (mut socket, _) = connect_async(request)
         .await
@@ -52,24 +52,22 @@ pub async fn run_realtime_translation(
     let mut boundary_state = ManualBoundaryRuntimeState::default();
 
     'session: loop {
-        let realtime_token =
-            mint_realtime_client_secret(&api_key, config.target_language.realtime_code()).await?;
+        let realtime_token = mint_realtime_client_secret(
+            &api_key,
+            config.source_language.realtime_code(),
+            config.target_language.realtime_code(),
+        )
+        .await?;
         let request = realtime_translation_request(&realtime_token)?;
         let (socket, _) = connect_async(request)
             .await
             .map_err(|err| AppError::new("realtime_connect_error", err.to_string()))?;
         let (mut writer, mut reader) = socket.split();
 
-        let update = json!({
-            "type": "session.update",
-            "session": {
-                "audio": {
-                    "output": {
-                        "language": config.target_language.realtime_code(),
-                    }
-                }
-            }
-        });
+        let update = realtime_session_update(
+            config.source_language.realtime_code(),
+            config.target_language.realtime_code(),
+        );
         writer
             .send(Message::Text(update.to_string().into()))
             .await
@@ -163,25 +161,30 @@ struct RealtimeClientSecretResponse {
     value: String,
 }
 
-async fn mint_realtime_client_secret(api_key: &str, target_language: &str) -> AppResult<String> {
+async fn mint_realtime_client_secret(
+    api_key: &str,
+    source_language: &str,
+    target_language: &str,
+) -> AppResult<String> {
     let api_key = api_key.trim().to_string();
+    let source_language = source_language.to_string();
     let target_language = target_language.to_string();
     tokio::task::spawn_blocking(move || {
-        mint_realtime_client_secret_blocking(&api_key, &target_language)
+        mint_realtime_client_secret_blocking(&api_key, &source_language, &target_language)
     })
     .await
     .map_err(|err| AppError::new("realtime_token_task_error", err.to_string()))?
 }
 
-fn mint_realtime_client_secret_blocking(api_key: &str, target_language: &str) -> AppResult<String> {
+fn mint_realtime_client_secret_blocking(
+    api_key: &str,
+    source_language: &str,
+    target_language: &str,
+) -> AppResult<String> {
     let body = json!({
             "session": {
                 "model": "gpt-realtime-translate",
-                "audio": {
-                    "output": {
-                        "language": target_language,
-                    }
-                }
+                "audio": realtime_audio_config(source_language, target_language),
             }
     })
     .to_string();
@@ -210,6 +213,33 @@ fn mint_realtime_client_secret_blocking(api_key: &str, target_language: &str) ->
     }
 
     Ok(token)
+}
+
+fn realtime_session_update(source_language: &str, target_language: &str) -> Value {
+    json!({
+        "type": "session.update",
+        "session": {
+            "audio": realtime_audio_config(source_language, target_language),
+        }
+    })
+}
+
+fn realtime_audio_config(source_language: &str, target_language: &str) -> Value {
+    let mut transcription = json!({
+        "model": "gpt-realtime-whisper",
+    });
+    if source_language != "auto" {
+        transcription["language"] = json!(source_language);
+    }
+
+    json!({
+        "input": {
+            "transcription": transcription,
+        },
+        "output": {
+            "language": target_language,
+        }
+    })
 }
 
 struct HttpResponse {
@@ -702,22 +732,55 @@ fn merge_transcript_delta(transcript: &mut Vec<TranscriptItem>, item: Transcript
         return;
     };
 
-    if last.status != TranscriptStatus::Partial || item.status != TranscriptStatus::Partial {
+    if last.status == TranscriptStatus::Final || !is_single_sided_delta(&item) {
         transcript.push(item);
         return;
     }
 
     if !item.source_text.is_empty() && item.translated_text.is_empty() {
         last.source_text.push_str(&item.source_text);
+        last.status = item.status;
         return;
     }
 
     if !item.translated_text.is_empty() && item.source_text.is_empty() {
-        last.translated_text.push_str(&item.translated_text);
+        append_transcript_text(&mut last.translated_text, &item.translated_text, true);
+        last.status = item.status;
         return;
     }
 
     transcript.push(item);
+}
+
+fn is_single_sided_delta(item: &TranscriptItem) -> bool {
+    (!item.source_text.is_empty() && item.translated_text.is_empty())
+        || (!item.translated_text.is_empty() && item.source_text.is_empty())
+}
+
+fn append_transcript_text(current: &mut String, delta: &str, break_after_sentence: bool) {
+    if delta.is_empty() {
+        return;
+    }
+    if break_after_sentence && should_start_new_transcript_line(current, delta) {
+        current.push('\n');
+        current.push_str(delta.trim_start());
+        return;
+    }
+    current.push_str(delta);
+}
+
+fn should_start_new_transcript_line(current: &str, delta: &str) -> bool {
+    let next = delta.trim_start();
+    current
+        .trim_end()
+        .chars()
+        .next_back()
+        .is_some_and(|ch| matches!(ch, '.' | '!' | '?' | '。' | '！' | '？'))
+        && !next.is_empty()
+        && !next
+            .chars()
+            .next()
+            .is_some_and(|ch| matches!(ch, ',' | '.' | ';' | ':' | '!' | '?' | ')'))
 }
 
 fn now_ms() -> u64 {
@@ -729,7 +792,11 @@ fn now_ms() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_empty_buffer_error, is_manual_boundary_error};
+    use super::{
+        is_empty_buffer_error, is_manual_boundary_error, merge_transcript_delta,
+        realtime_session_update,
+    };
+    use crate::models::{TranscriptItem, TranscriptStatus};
 
     #[test]
     fn identifies_empty_input_audio_buffer_errors() {
@@ -745,5 +812,87 @@ mod tests {
         assert!(!is_manual_boundary_error(
             "Realtime API rate limit exceeded."
         ));
+    }
+
+    #[test]
+    fn realtime_session_update_enables_source_transcription() {
+        let update = realtime_session_update("vi", "en");
+
+        assert_eq!(update["type"], "session.update");
+        assert_eq!(
+            update["session"]["audio"]["input"]["transcription"]["model"],
+            "gpt-realtime-whisper"
+        );
+        assert_eq!(
+            update["session"]["audio"]["input"]["transcription"]["language"],
+            "vi"
+        );
+        assert_eq!(update["session"]["audio"]["output"]["language"], "en");
+    }
+
+    #[test]
+    fn realtime_session_update_omits_auto_source_language_hint() {
+        let update = realtime_session_update("auto", "en");
+
+        assert!(update["session"]["audio"]["input"]["transcription"]["language"].is_null());
+    }
+
+    #[test]
+    fn merges_final_translation_only_delta_into_current_item() {
+        let mut transcript = vec![TranscriptItem {
+            id: "1".to_string(),
+            timestamp_ms: 1,
+            source_text: "Hello".to_string(),
+            translated_text: String::new(),
+            status: TranscriptStatus::Partial,
+            latency_ms: None,
+        }];
+
+        merge_transcript_delta(
+            &mut transcript,
+            TranscriptItem {
+                id: "2".to_string(),
+                timestamp_ms: 2,
+                source_text: String::new(),
+                translated_text: "Xin chao".to_string(),
+                status: TranscriptStatus::Final,
+                latency_ms: None,
+            },
+        );
+
+        assert_eq!(transcript.len(), 1);
+        assert_eq!(transcript[0].source_text, "Hello");
+        assert_eq!(transcript[0].translated_text, "Xin chao");
+        assert_eq!(transcript[0].status, TranscriptStatus::Final);
+    }
+
+    #[test]
+    fn adds_translated_line_break_after_sentence_boundary() {
+        let mut transcript = vec![TranscriptItem {
+            id: "1".to_string(),
+            timestamp_ms: 1,
+            source_text: "Hello".to_string(),
+            translated_text: "Good morning.".to_string(),
+            status: TranscriptStatus::Partial,
+            latency_ms: None,
+        }];
+
+        merge_transcript_delta(
+            &mut transcript,
+            TranscriptItem {
+                id: "2".to_string(),
+                timestamp_ms: 2,
+                source_text: String::new(),
+                translated_text: " We can start now.".to_string(),
+                status: TranscriptStatus::Partial,
+                latency_ms: None,
+            },
+        );
+
+        assert_eq!(transcript.len(), 1);
+        assert_eq!(
+            transcript[0].translated_text,
+            "Good morning.\nWe can start now."
+        );
     }
 }

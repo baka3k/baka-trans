@@ -873,6 +873,7 @@ h2 {
   margin: 0;
   overflow-wrap: anywhere;
   padding: 13px 14px;
+  white-space: pre-wrap;
 }
 
 .transcript-row p + p {

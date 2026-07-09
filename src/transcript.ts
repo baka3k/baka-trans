@@ -10,16 +10,7 @@ export function mergeTranscriptDelta(
   update: TranscriptItem,
 ): TranscriptItem[] {
   const last = items[items.length - 1];
-  if (!last || last.status !== "partial" || update.status !== "partial") {
-    return [...items, update];
-  }
-
-  const canMergeSource =
-    update.sourceText.length > 0 && update.translatedText.length === 0;
-  const canMergeTranslation =
-    update.translatedText.length > 0 && update.sourceText.length === 0;
-
-  if (!canMergeSource && !canMergeTranslation) {
+  if (!last || last.status === "final" || !isSingleSidedDelta(update)) {
     return [...items, update];
   }
 
@@ -28,12 +19,37 @@ export function mergeTranscriptDelta(
     {
       ...last,
       timestampMs: Math.min(last.timestampMs, update.timestampMs),
-      sourceText: `${last.sourceText}${update.sourceText}`,
-      translatedText: `${last.translatedText}${update.translatedText}`,
+      sourceText: appendTranscriptText(last.sourceText, update.sourceText, false),
+      translatedText: appendTranscriptText(last.translatedText, update.translatedText, true),
       status: update.status,
       latencyMs: update.latencyMs ?? last.latencyMs,
     },
   ];
+}
+
+function isSingleSidedDelta(item: TranscriptItem) {
+  return (
+    (item.sourceText.length > 0 && item.translatedText.length === 0) ||
+    (item.translatedText.length > 0 && item.sourceText.length === 0)
+  );
+}
+
+function appendTranscriptText(current: string, delta: string, breakAfterSentence: boolean) {
+  if (!delta) {
+    return current;
+  }
+  if (!current) {
+    return delta;
+  }
+  if (breakAfterSentence && shouldStartNewTranscriptLine(current, delta)) {
+    return `${current}\n${delta.trimStart()}`;
+  }
+  return `${current}${delta}`;
+}
+
+function shouldStartNewTranscriptLine(current: string, delta: string) {
+  const next = delta.trimStart();
+  return /[.!?。！？]\s*$/.test(current) && next.length > 0 && !/^[,.;:!?)]/.test(next);
 }
 
 export function renderTranscript(

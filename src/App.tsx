@@ -812,7 +812,7 @@ export default function App() {
               <DeviceSelect
                 icon={<Mic size={17} />}
                 label="Meeting source"
-                description="Captured and sent for translation."
+                description="Mac input captured for translation. Route Teams speaker audio here."
                 devices={devices.inputs}
                 value={inputDeviceId}
                 onChange={updateInputDevice}
@@ -976,7 +976,7 @@ export default function App() {
               <div className="setup-list">
                 <div>
                   <strong>1. Route</strong>
-                  <span>Send meeting audio to BlackHole 2ch.</span>
+                  <span>Set Teams speaker output to BlackHole 2ch or a multi-output device that includes it.</span>
                 </div>
                 <div>
                   <strong>2. Select</strong>
@@ -988,7 +988,7 @@ export default function App() {
                 </div>
                 <div>
                   <strong>4. Teams</strong>
-                  <span>Output to BlackHole or Loopback, then select that device as the Teams microphone.</span>
+                  <span>To speak translated audio into Teams, route translated output to a virtual device and select it as the Teams microphone.</span>
                 </div>
               </div>
             </div>
