@@ -1,6 +1,6 @@
 # Look & Help OCR Assistant Overlay for macOS
 
-Status: planned
+Status: completed
 Created: 2026-07-10
 Source spec: user request in Codex thread, Vietnamese: add a feature similar to Look through, but instead of only translating it reads information from the region underneath, sends that information to an LLM with a configurable system prompt, shows the answer in the overlay, and has a settings button to hide/show the system prompt.
 Mode: `hi-plan --fast`
@@ -123,6 +123,17 @@ You are Look & Help, a compact assistant for the visible screen region. Explain,
 1. Phase 01: Shared overlay capture foundation and helper mode entry point
 2. Phase 02: Look & Help prompt settings, persistence, and overlay UI
 3. Phase 03: LLM execution pipeline, dedupe, cancellation, and tests
+4. Phase 04: Manual capture workflow and overlay workspace redesign
+
+### Phase 04: Manual Capture and Workspace Redesign
+
+- Replace the timed Look & Help scan loop with an explicit **Capture** action. Look through remains realtime; Look & Help becomes deliberate and on-demand.
+- Keep the last captured OCR text and LLM answer visible until the user captures again.
+- Present the workflow as three persistent regions: **Captured screen**, **Request**, and **LLM result**.
+- Keep profile and opacity controls in a collapsible settings region, while the request editor remains directly visible in the workspace.
+- Reserve fixed layout rows for the title bar, status/action bar, workspace, and footer. Each text region owns its own scrolling area so controls cannot cover content.
+- Increase the default and minimum helper window sizes to support the three-region layout, with an explicit narrow-window single-column fallback.
+- Preserve prompt/profile persistence, OCR-only LLM input, response caching, stale-response suppression, and Screen Recording permission handling.
 
 ## Scope Decisions
 
@@ -148,6 +159,9 @@ You are Look & Help, a compact assistant for the visible screen region. Explain,
 - Clicking it opens/focuses a dedicated helper overlay window.
 - Look through and Look & Help can be opened/closed independently without corrupting each other's state.
 - Helper overlay captures text under its region and shows no-text/permission/error states.
+- Helper capture runs only when the user presses **Capture**; opening or moving the overlay does not start a request.
+- The overlay keeps captured OCR text, the editable request, and the LLM result visually separated.
+- Toolbars remain outside scrollable text regions and do not obscure their content at the minimum window size.
 - Helper overlay has a settings button that toggles system prompt visibility.
 - Editing the system prompt affects the next LLM request and persists after restart.
 - Helper overlay sends normalized OCR text to the selected LLM profile and renders the answer.
@@ -164,6 +178,15 @@ You are Look & Help, a compact assistant for the visible screen region. Explain,
 - Manual test: overlay over browser article, code editor error text, chat text, and empty region.
 - Manual test: edit system prompt, hide/show prompt panel, move overlay before response returns, and confirm stale output is not shown.
 - App checks: `npm test`, `npm run build`, and `cargo test` from `src-tauri`.
+
+Phase 04 validation completed on 2026-07-10:
+
+- `npm test`: 26 tests passed.
+- `npm run build`: TypeScript and Vite production build passed.
+- `cargo fmt --check`: passed.
+- `cargo test`: 49 tests passed and 2 live-provider smoke tests remained intentionally ignored.
+- Browser layout checks passed at 560x640 and the 380x500 minimum size. The root stayed within the viewport, the three regions remained separated, and long request text scrolled inside its own region.
+- Native Screen Recording, OCR, and provider execution still require a manual Tauri runtime check with macOS permission and an enabled LLM profile.
 
 ## References
 

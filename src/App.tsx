@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  captureLookHelp,
   exportTranscript,
   forceTranslateBoundary,
   getAppStatus,
@@ -54,7 +55,6 @@ import {
   stopLocalMonitor,
   stopSession,
   setOverlayPaused,
-  setLookHelpPaused,
   testLlmProfile,
   testTranslationApiKey,
   translationCredentialStatus,
@@ -2000,6 +2000,7 @@ function LookHelpOverlayWindow() {
   const [profiles, setProfiles] = useState<LlmProviderProfile[]>([]);
   const [opacity, setOpacity] = useState(0.78);
   const [copied, setCopied] = useState(false);
+  const [capturePending, setCapturePending] = useState(false);
   const [statusMessage, setStatusMessage] = useState("Starting Look & Help");
   const config = status?.config ?? defaultLookHelpConfig();
 
@@ -2085,10 +2086,19 @@ function LookHelpOverlayWindow() {
     );
   }
 
-  async function togglePaused() {
-    const paused = !(status?.isPaused ?? false);
-    setStatus((current) => (current ? { ...current, isPaused: paused } : current));
-    await setLookHelpPaused(paused);
+  async function captureScreen() {
+    if (capturePending) {
+      return;
+    }
+    setCapturePending(true);
+    setAnswer(null);
+    try {
+      await captureLookHelp();
+    } catch (cause) {
+      setStatusMessage(normalizeError(cause).message);
+    } finally {
+      setCapturePending(false);
+    }
   }
 
   async function copyAnswer() {
@@ -2104,6 +2114,10 @@ function LookHelpOverlayWindow() {
   const answerText = answer?.answerText.trim();
   const sourceText = answer?.sourceText.trim();
   const selectedProfile = profiles.find((profile) => profile.id === config.providerProfileId);
+  const isWorking =
+    capturePending || statusKind === "scanning" || statusKind === "thinking";
+  const captureLabel =
+    statusKind === "thinking" ? "Asking LLM" : isWorking ? "Capturing" : "Capture";
 
   return (
     <main
@@ -2127,18 +2141,10 @@ function LookHelpOverlayWindow() {
                 promptPanelVisible: !config.promptPanelVisible,
               })
             }
-            title={config.promptPanelVisible ? "Hide prompt" : "Show prompt"}
-            aria-label={config.promptPanelVisible ? "Hide prompt" : "Show prompt"}
+            title={config.promptPanelVisible ? "Hide settings" : "Show settings"}
+            aria-label={config.promptPanelVisible ? "Hide settings" : "Show settings"}
           >
             <Settings2 size={14} />
-          </button>
-          <button
-            className="icon-button tight"
-            onClick={togglePaused}
-            title={status?.isPaused ? "Resume scanning" : "Pause scanning"}
-            aria-label={status?.isPaused ? "Resume scanning" : "Pause scanning"}
-          >
-            {status?.isPaused ? <Play size={14} /> : <Pause size={14} />}
           </button>
           <button
             className="icon-button tight"
@@ -2151,10 +2157,18 @@ function LookHelpOverlayWindow() {
         </div>
       </header>
 
-      <section className={`overlay-status-strip overlay-${statusKind}`}>
+      <section className={`overlay-status-strip look-help-status-strip overlay-${statusKind}`}>
         <span className={`status-dot status-${statusKind}`} />
         <span>{overlayStatusLabel(statusKind)}</span>
         <small>{statusMessage}</small>
+        <button
+          className="look-help-capture-button"
+          onClick={() => void captureScreen()}
+          disabled={isWorking}
+        >
+          <ScanText size={15} />
+          {captureLabel}
+        </button>
       </section>
 
       {config.promptPanelVisible ? (
@@ -2175,74 +2189,112 @@ function LookHelpOverlayWindow() {
               ))}
             </select>
           </label>
-          <label className="look-help-prompt-field">
-            <span>System prompt</span>
-            <textarea
-              value={config.systemPrompt}
-              onChange={(event) =>
-                updateHelperConfig({ ...config, systemPrompt: event.currentTarget.value })
-              }
+          <label>
+            <span>Opacity</span>
+            <input
+              type="range"
+              min="0.35"
+              max="0.94"
+              step="0.01"
+              value={opacity}
+              onChange={(event) => {
+                const nextOpacity = Number(event.currentTarget.value);
+                updateHelperConfig({ ...config, opacity: nextOpacity });
+              }}
             />
           </label>
         </section>
       ) : null}
 
-      <section className="overlay-translation-surface look-help-answer-surface" aria-live="polite">
-        {answerText ? (
-          <p>{answerText}</p>
-        ) : statusKind === "permission_needed" ? (
-          <div className="overlay-empty">
-            <AlertTriangle size={24} />
-            <strong>{statusMessage}</strong>
-            <button onClick={() => void openScreenRecordingSettings()}>
-              <Settings2 size={15} /> Open Privacy Settings
+      <section className="look-help-workspace">
+        <article className="look-help-panel look-help-source-panel">
+          <header>
+            <strong>Captured screen</strong>
+            <small>{sourceText ? `${sourceText.length} characters` : "OCR text"}</small>
+          </header>
+          <div className="look-help-panel-body">
+            {sourceText ? (
+              <p>{sourceText}</p>
+            ) : (
+              <div className="look-help-panel-empty">
+                <ScanText size={22} />
+                <strong>Position the window over the content you need.</strong>
+                <span>Text is read only when you press Capture.</span>
+              </div>
+            )}
+          </div>
+        </article>
+
+        <article className="look-help-panel look-help-request-panel">
+          <header>
+            <strong>Request</strong>
+            <small>Sent with captured text</small>
+          </header>
+          <textarea
+            aria-label="Request for the LLM"
+            value={config.systemPrompt}
+            onChange={(event) =>
+              updateHelperConfig({ ...config, systemPrompt: event.currentTarget.value })
+            }
+          />
+        </article>
+
+        <article className="look-help-panel look-help-result-panel" aria-live="polite">
+          <header>
+            <strong>LLM result</strong>
+            <button
+              className="icon-button tight"
+              onClick={copyAnswer}
+              disabled={!answerText}
+              title="Copy result"
+              aria-label="Copy result"
+            >
+              <Copy size={14} />
             </button>
+          </header>
+          <div className="look-help-panel-body look-help-result-body">
+            {answerText ? (
+              <p>{answerText}</p>
+            ) : statusKind === "permission_needed" ? (
+              <div className="look-help-panel-empty">
+                <AlertTriangle size={22} />
+                <strong>{statusMessage}</strong>
+                <button onClick={() => void openScreenRecordingSettings()}>
+                  <Settings2 size={15} /> Open Privacy Settings
+                </button>
+              </div>
+            ) : statusKind === "error" ? (
+              <div className="look-help-panel-empty">
+                <AlertTriangle size={22} />
+                <strong>{statusMessage}</strong>
+              </div>
+            ) : statusKind === "no_text" ? (
+              <div className="look-help-panel-empty">
+                <ScanText size={22} />
+                <strong>No readable text found.</strong>
+                <span>Adjust the capture area and try again.</span>
+              </div>
+            ) : isWorking ? (
+              <div className="look-help-panel-empty">
+                <Bot size={22} />
+                <strong>
+                  {statusKind === "thinking" ? "Preparing the answer" : "Reading the screen"}
+                </strong>
+              </div>
+            ) : (
+              <div className="look-help-panel-empty">
+                <Bot size={22} />
+                <strong>No answer yet.</strong>
+                <span>Capture the screen when the region is aligned.</span>
+              </div>
+            )}
           </div>
-        ) : statusKind === "error" ? (
-          <div className="overlay-empty">
-            <AlertTriangle size={24} />
-            <strong>{statusMessage}</strong>
-          </div>
-        ) : (
-          <div className="overlay-empty">
-            <Bot size={26} />
-            <strong>{status?.isPaused ? "Paused" : "Scanning"}</strong>
-          </div>
-        )}
+        </article>
       </section>
 
-      {sourceText ? (
-        <details className="overlay-source-preview">
-          <summary>Source</summary>
-          <p>{sourceText}</p>
-        </details>
-      ) : null}
-
-      <footer className="overlay-controls look-help-controls">
-        <label>
-          <span>Opacity</span>
-          <input
-            type="range"
-            min="0.35"
-            max="0.94"
-            step="0.01"
-            value={opacity}
-            onChange={(event) => {
-              const nextOpacity = Number(event.currentTarget.value);
-              updateHelperConfig({ ...config, opacity: nextOpacity });
-            }}
-          />
-        </label>
-        <button
-          className="icon-button tight"
-          onClick={copyAnswer}
-          disabled={!answerText}
-          title="Copy answer"
-          aria-label="Copy answer"
-        >
-          <Copy size={14} />
-        </button>
-        <span>{copied ? "Copied" : selectedProfile?.name ?? "No profile"}</span>
+      <footer className="look-help-meta-bar">
+        <span>{selectedProfile?.name ?? "No LLM profile selected"}</span>
+        <span>{copied ? "Result copied" : "Manual capture only"}</span>
       </footer>
     </main>
   );

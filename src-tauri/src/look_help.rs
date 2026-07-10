@@ -8,8 +8,6 @@ use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::time::Duration;
-use tauri::async_runtime::JoinHandle;
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 #[cfg(target_os = "macos")]
@@ -38,7 +36,6 @@ struct LookHelpInner {
     last_request_hash: Option<u64>,
     active_request_id: u64,
     cache: VecDeque<(u64, String)>,
-    runtime: Option<JoinHandle<()>>,
 }
 
 impl LookHelpState {
@@ -55,7 +52,6 @@ impl LookHelpState {
                 last_request_hash: None,
                 active_request_id: 0,
                 cache: VecDeque::new(),
-                runtime: None,
             }),
         }
     }
@@ -72,12 +68,14 @@ impl LookHelpState {
                 let mut inner = self.inner.lock().map_err(lock_error)?;
                 inner.config = config;
                 inner.is_open = true;
+                inner.is_paused = false;
                 inner.window_id = window_id;
                 inner.active_request_id = inner.active_request_id.saturating_add(1);
+                inner.status = OverlayStatusKind::Idle;
+                inner.message = "Ready to capture.".to_string();
                 inner.status_payload()
             };
             emit_status(&app, status)?;
-            self.ensure_runtime(app);
             return Ok(());
         }
 
@@ -87,8 +85,8 @@ impl LookHelpState {
             WebviewUrl::App("index.html?overlay=look-help".into()),
         )
         .title("Baka Trans Look & Help")
-        .inner_size(420.0, 440.0)
-        .min_inner_size(300.0, 240.0)
+        .inner_size(560.0, 640.0)
+        .min_inner_size(380.0, 500.0)
         .transparent(true)
         .decorations(false)
         .content_protected(true)
@@ -104,13 +102,12 @@ impl LookHelpState {
             inner.is_open = true;
             inner.is_paused = false;
             inner.window_id = window_id;
-            inner.status = OverlayStatusKind::Scanning;
-            inner.message = "Position Look & Help over text.".to_string();
+            inner.status = OverlayStatusKind::Idle;
+            inner.message = "Position the window, then capture.".to_string();
             inner.active_request_id = inner.active_request_id.saturating_add(1);
             inner.status_payload()
         };
         emit_status(&app, status)?;
-        self.ensure_runtime(app);
         Ok(())
     }
 
@@ -129,9 +126,6 @@ impl LookHelpState {
             inner.status = OverlayStatusKind::Idle;
             inner.message = "Look & Help closed.".to_string();
             inner.active_request_id = inner.active_request_id.saturating_add(1);
-            if let Some(handle) = inner.runtime.take() {
-                handle.abort();
-            }
             inner.status_payload()
         };
         emit_status(&app, status)
@@ -150,8 +144,7 @@ impl LookHelpState {
             let mut inner = self.inner.lock().map_err(lock_error)?;
             inner.geometry = Some(geometry);
             if inner.status == OverlayStatusKind::Idle {
-                inner.status = OverlayStatusKind::Scanning;
-                inner.message = "Scanning".to_string();
+                inner.message = "Ready to capture.".to_string();
             }
             inner.status_payload()
         };
@@ -169,12 +162,100 @@ impl LookHelpState {
             if inner.status == OverlayStatusKind::Complete
                 || inner.status == OverlayStatusKind::Error
             {
-                inner.status = OverlayStatusKind::Scanning;
-                inner.message = "Scanning".to_string();
+                inner.status = OverlayStatusKind::Idle;
+                inner.message = "Request updated. Capture when ready.".to_string();
             }
             inner.status_payload()
         };
         emit_status(app, status)
+    }
+
+    pub async fn capture_once(&self, app: AppHandle) -> AppResult<()> {
+        let (is_open, is_paused, geometry, config, window_id) = {
+            let inner = self.inner.lock().map_err(lock_error)?;
+            (
+                inner.is_open,
+                inner.is_paused,
+                inner.geometry.clone(),
+                inner.config.clone(),
+                inner.window_id,
+            )
+        };
+
+        if !is_open {
+            return Err(AppError::new(
+                "look_help_not_open",
+                "Open Look & Help before capturing.",
+            ));
+        }
+        if is_paused {
+            return Err(AppError::new(
+                "look_help_paused",
+                "Resume Look & Help before capturing.",
+            ));
+        }
+        let Some(geometry) = geometry else {
+            set_status(
+                &app,
+                OverlayStatusKind::Idle,
+                "Waiting for the overlay position. Try capture again.",
+            )?;
+            return Ok(());
+        };
+
+        let status = {
+            let mut inner = self.inner.lock().map_err(lock_error)?;
+            inner.last_request_hash = None;
+            inner.active_request_id = inner.active_request_id.saturating_add(1);
+            inner.status = OverlayStatusKind::Scanning;
+            inner.message = "Capturing visible text".to_string();
+            inner.status_payload()
+        };
+        emit_status(&app, status)?;
+
+        match overlay::capture_and_ocr_text(&geometry, config.minimum_confidence, window_id).await {
+            Ok(raw_text) => {
+                let normalized = overlay::normalize_ocr_text(&raw_text);
+                if normalized.is_empty() {
+                    invalidate_and_set_status(
+                        &app,
+                        OverlayStatusKind::NoText,
+                        "No readable text found. Adjust the window and capture again.",
+                    )?;
+                } else {
+                    let source_text = truncate_chars(&normalized, config.max_ocr_input_chars);
+                    app.emit(
+                        UPDATE_EVENT,
+                        LookHelpUpdate {
+                            source_text,
+                            answer_text: String::new(),
+                            status: OverlayStatusKind::Scanning,
+                            message: "Text captured".to_string(),
+                            latency_ms: None,
+                            provider_profile_id: config.provider_profile_id.clone(),
+                            model: String::new(),
+                            prompt_hash: 0,
+                            updated_at_ms: overlay::now_ms(),
+                        },
+                    )
+                    .map_err(|err| AppError::new("event_emit_error", err.to_string()))?;
+
+                    if let Err(error) = handle_ocr_text(&app, &config, normalized).await {
+                        invalidate_and_set_status(&app, OverlayStatusKind::Error, error.message)?;
+                    }
+                }
+            }
+            Err(error) => {
+                let status = if error.code == "screen_recording_permission_needed" {
+                    OverlayStatusKind::PermissionNeeded
+                } else {
+                    OverlayStatusKind::Error
+                };
+                invalidate_and_set_status(&app, status, error.message)?;
+            }
+        }
+
+        Ok(())
     }
 
     pub fn set_paused(&self, app: AppHandle, paused: bool) -> AppResult<()> {
@@ -195,28 +276,6 @@ impl LookHelpState {
             inner.status_payload()
         };
         emit_status(&app, status)
-    }
-
-    fn ensure_runtime(&self, app: AppHandle) {
-        let should_spawn = self
-            .inner
-            .lock()
-            .map(|inner| inner.runtime.is_none())
-            .unwrap_or(false);
-        if !should_spawn {
-            return;
-        }
-
-        let app_for_task = app.clone();
-        let handle = tauri::async_runtime::spawn(async move {
-            look_help_loop(app_for_task).await;
-        });
-
-        if let Ok(mut inner) = self.inner.lock() {
-            if let Some(previous) = inner.runtime.replace(handle) {
-                previous.abort();
-            }
-        }
     }
 }
 
@@ -246,75 +305,6 @@ impl LookHelpInner {
         while self.cache.len() > CACHE_LIMIT {
             let _ = self.cache.pop_front();
         }
-    }
-}
-
-async fn look_help_loop(app: AppHandle) {
-    loop {
-        let (is_open, is_paused, geometry, config, window_id) = {
-            let state = app.state::<LookHelpState>();
-            let snapshot = match state.inner.lock() {
-                Ok(inner) => (
-                    inner.is_open,
-                    inner.is_paused,
-                    inner.geometry.clone(),
-                    inner.config.clone(),
-                    inner.window_id,
-                ),
-                Err(_) => return,
-            };
-            snapshot
-        };
-
-        if !is_open {
-            break;
-        }
-
-        if is_paused {
-            tokio::time::sleep(Duration::from_millis(config.capture_interval_ms)).await;
-            continue;
-        }
-
-        let Some(geometry) = geometry else {
-            let _ = invalidate_and_set_status(
-                &app,
-                OverlayStatusKind::Scanning,
-                "Waiting for overlay geometry.",
-            );
-            tokio::time::sleep(Duration::from_millis(config.capture_interval_ms)).await;
-            continue;
-        };
-
-        match overlay::capture_and_ocr_text(&geometry, config.minimum_confidence, window_id).await {
-            Ok(raw_text) => {
-                let normalized = overlay::normalize_ocr_text(&raw_text);
-                if normalized.is_empty() {
-                    let _ = invalidate_and_set_status(
-                        &app,
-                        OverlayStatusKind::NoText,
-                        "No readable text found.",
-                    );
-                } else {
-                    if let Err(error) = handle_ocr_text(&app, &config, normalized).await {
-                        let _ = invalidate_and_set_status(
-                            &app,
-                            OverlayStatusKind::Error,
-                            error.message,
-                        );
-                    }
-                }
-            }
-            Err(error) => {
-                let status = if error.code == "screen_recording_permission_needed" {
-                    OverlayStatusKind::PermissionNeeded
-                } else {
-                    OverlayStatusKind::Error
-                };
-                let _ = invalidate_and_set_status(&app, status, error.message);
-            }
-        }
-
-        tokio::time::sleep(Duration::from_millis(config.capture_interval_ms)).await;
     }
 }
 

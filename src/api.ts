@@ -156,6 +156,10 @@ export function lookHelpStatus() {
   return invoke<LookHelpStatus>("look_help_status");
 }
 
+export function captureLookHelp() {
+  return invoke<void>("capture_look_help");
+}
+
 export function updateOverlayGeometry(geometry: OverlayGeometry) {
   return invoke<void>("update_overlay_geometry", { geometry });
 }

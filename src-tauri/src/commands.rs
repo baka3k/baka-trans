@@ -254,6 +254,14 @@ pub fn look_help_status(
 }
 
 #[tauri::command]
+pub async fn capture_look_help(
+    app: AppHandle,
+    state: State<'_, look_help::LookHelpState>,
+) -> AppResult<()> {
+    state.capture_once(app).await
+}
+
+#[tauri::command]
 pub fn update_overlay_geometry(
     app: AppHandle,
     state: State<'_, overlay::OverlayState>,
