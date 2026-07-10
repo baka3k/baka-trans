@@ -31,7 +31,7 @@ pub enum RealtimeControl {
 }
 
 pub async fn test_realtime_connection(api_key: &str) -> AppResult<()> {
-    let token = mint_realtime_client_secret(api_key, "auto", "vi").await?;
+    let token = mint_realtime_client_secret(api_key, "vi").await?;
     let request = realtime_translation_request(&token)?;
     let (mut socket, _) = connect_async(request)
         .await
@@ -52,22 +52,15 @@ pub async fn run_realtime_translation(
     let mut boundary_state = ManualBoundaryRuntimeState::default();
 
     'session: loop {
-        let realtime_token = mint_realtime_client_secret(
-            &api_key,
-            config.source_language.realtime_code(),
-            config.target_language.realtime_code(),
-        )
-        .await?;
+        let realtime_token =
+            mint_realtime_client_secret(&api_key, config.target_language.realtime_code()).await?;
         let request = realtime_translation_request(&realtime_token)?;
         let (socket, _) = connect_async(request)
             .await
             .map_err(|err| AppError::new("realtime_connect_error", err.to_string()))?;
         let (mut writer, mut reader) = socket.split();
 
-        let update = realtime_session_update(
-            config.source_language.realtime_code(),
-            config.target_language.realtime_code(),
-        );
+        let update = realtime_session_update(config.target_language.realtime_code());
         writer
             .send(Message::Text(update.to_string().into()))
             .await
@@ -161,30 +154,21 @@ struct RealtimeClientSecretResponse {
     value: String,
 }
 
-async fn mint_realtime_client_secret(
-    api_key: &str,
-    source_language: &str,
-    target_language: &str,
-) -> AppResult<String> {
+async fn mint_realtime_client_secret(api_key: &str, target_language: &str) -> AppResult<String> {
     let api_key = api_key.trim().to_string();
-    let source_language = source_language.to_string();
     let target_language = target_language.to_string();
     tokio::task::spawn_blocking(move || {
-        mint_realtime_client_secret_blocking(&api_key, &source_language, &target_language)
+        mint_realtime_client_secret_blocking(&api_key, &target_language)
     })
     .await
     .map_err(|err| AppError::new("realtime_token_task_error", err.to_string()))?
 }
 
-fn mint_realtime_client_secret_blocking(
-    api_key: &str,
-    source_language: &str,
-    target_language: &str,
-) -> AppResult<String> {
+fn mint_realtime_client_secret_blocking(api_key: &str, target_language: &str) -> AppResult<String> {
     let body = json!({
             "session": {
                 "model": "gpt-realtime-translate",
-                "audio": realtime_audio_config(source_language, target_language),
+                "audio": realtime_audio_config(target_language),
             }
     })
     .to_string();
@@ -215,26 +199,21 @@ fn mint_realtime_client_secret_blocking(
     Ok(token)
 }
 
-fn realtime_session_update(source_language: &str, target_language: &str) -> Value {
+fn realtime_session_update(target_language: &str) -> Value {
     json!({
         "type": "session.update",
         "session": {
-            "audio": realtime_audio_config(source_language, target_language),
+            "audio": realtime_audio_config(target_language),
         }
     })
 }
 
-fn realtime_audio_config(source_language: &str, target_language: &str) -> Value {
-    let mut transcription = json!({
-        "model": "gpt-realtime-whisper",
-    });
-    if source_language != "auto" {
-        transcription["language"] = json!(source_language);
-    }
-
+fn realtime_audio_config(target_language: &str) -> Value {
     json!({
         "input": {
-            "transcription": transcription,
+            "transcription": {
+                "model": "gpt-realtime-whisper",
+            },
         },
         "output": {
             "language": target_language,
@@ -816,23 +795,19 @@ mod tests {
 
     #[test]
     fn realtime_session_update_enables_source_transcription() {
-        let update = realtime_session_update("vi", "en");
+        let update = realtime_session_update("en");
 
         assert_eq!(update["type"], "session.update");
         assert_eq!(
             update["session"]["audio"]["input"]["transcription"]["model"],
             "gpt-realtime-whisper"
         );
-        assert_eq!(
-            update["session"]["audio"]["input"]["transcription"]["language"],
-            "vi"
-        );
         assert_eq!(update["session"]["audio"]["output"]["language"], "en");
     }
 
     #[test]
-    fn realtime_session_update_omits_auto_source_language_hint() {
-        let update = realtime_session_update("auto", "en");
+    fn realtime_session_update_omits_source_language_hint() {
+        let update = realtime_session_update("en");
 
         assert!(update["session"]["audio"]["input"]["transcription"]["language"].is_null());
     }
