@@ -1,3 +1,4 @@
+import { isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import {
@@ -436,6 +437,10 @@ export default function App() {
   );
 
   useEffect(() => {
+    if (!isTauri()) {
+      return;
+    }
+
     void hydrate();
 
     const unlisten = Promise.all([
@@ -492,11 +497,15 @@ export default function App() {
   }, [targetLanguage, targetLanguageOptions]);
 
   useEffect(() => {
+    if (!isTauri()) {
+      return;
+    }
+
     void refreshTranslationCredentialStatus(translationProvider);
   }, [translationProvider]);
 
   useEffect(() => {
-    if (!autoRefreshDevices) {
+    if (!isTauri() || !autoRefreshDevices) {
       return;
     }
 
@@ -684,22 +693,46 @@ export default function App() {
     setError(null);
     setProfileTestMessage("");
     try {
+      const submittedApiKey = profileKeyDraft.trim();
       const saved = await saveLlmProfile({
         ...profileDraft,
-        apiKey: profileKeyDraft.trim() || undefined,
+        apiKey: submittedApiKey || undefined,
       });
       const profiles = await listLlmProfiles();
+      const persisted = profiles.find((profile) => profile.id === saved.id);
+      if (!persisted) {
+        throw {
+          code: "llm_profile_readback_error",
+          message: "The profile was saved, but the app could not read it back.",
+        };
+      }
       setLlmProfiles(profiles);
-      setSelectedProfileId(saved.id);
-      setSummaryConfig((current) => ({ ...current, providerProfileId: saved.id }));
-      setProfileDraft(profileToDraft(saved));
-      setProfileKeyDraft("");
-      setProfileTestMessage("Profile saved.");
+      setSelectedProfileId(persisted.id);
+      setSummaryConfig((current) => ({ ...current, providerProfileId: persisted.id }));
+      setProfileDraft(profileToDraft(persisted));
+      if (submittedApiKey && !persisted.hasApiKey) {
+        throw {
+          code: "missing_llm_api_key",
+          message: "The LLM API key was saved, but the app could not read it back.",
+        };
+      }
+      if (persisted.hasApiKey) {
+        setProfileKeyDraft("");
+      }
+      setProfileTestMessage(
+        persisted.hasApiKey
+          ? `Profile and LLM key saved ${persisted.apiKeyFingerprint ?? ""}.`
+          : "Profile saved.",
+      );
     } catch (cause) {
       setError(normalizeError(cause));
     } finally {
       setBusy(false);
     }
+  }
+
+  function updateProfileDraft(patch: Partial<LlmProviderProfileDraft>) {
+    setProfileDraft((current) => ({ ...current, ...patch }));
   }
 
   async function deleteSelectedProfile() {
@@ -1388,10 +1421,7 @@ export default function App() {
                     <input
                       value={profileDraft.name}
                       onChange={(event) =>
-                        setProfileDraft((current) => ({
-                          ...current,
-                          name: event.currentTarget.value,
-                        }))
+                        updateProfileDraft({ name: event.currentTarget.value })
                       }
                     />
                   </label>
@@ -1401,10 +1431,7 @@ export default function App() {
                       value={profileDraft.model}
                       placeholder="gpt-4.1-mini or llama3.2"
                       onChange={(event) =>
-                        setProfileDraft((current) => ({
-                          ...current,
-                          model: event.currentTarget.value,
-                        }))
+                        updateProfileDraft({ model: event.currentTarget.value })
                       }
                     />
                   </label>
@@ -1416,10 +1443,7 @@ export default function App() {
                     value={profileDraft.baseUrl ?? ""}
                     placeholder={profileDraft.kind === "ollama" ? "http://localhost:11434/v1" : ""}
                     onChange={(event) =>
-                      setProfileDraft((current) => ({
-                        ...current,
-                        baseUrl: event.currentTarget.value,
-                      }))
+                      updateProfileDraft({ baseUrl: event.currentTarget.value })
                     }
                   />
                 </label>
@@ -1434,10 +1458,9 @@ export default function App() {
                       step="1"
                       value={profileNumberValue(profileDraft.timeoutSeconds)}
                       onChange={(event) =>
-                        setProfileDraft((current) => ({
-                          ...current,
+                        updateProfileDraft({
                           timeoutSeconds: parseProfileNumberInput(event.currentTarget.value, true),
-                        }))
+                        })
                       }
                     />
                   </label>
@@ -1450,13 +1473,12 @@ export default function App() {
                       step="1"
                       value={profileNumberValue(profileDraft.maxOutputTokens)}
                       onChange={(event) =>
-                        setProfileDraft((current) => ({
-                          ...current,
+                        updateProfileDraft({
                           maxOutputTokens: parseProfileNumberInput(
                             event.currentTarget.value,
                             true,
                           ),
-                        }))
+                        })
                       }
                     />
                   </label>
@@ -1469,10 +1491,9 @@ export default function App() {
                       step="0.1"
                       value={profileNumberValue(profileDraft.temperature)}
                       onChange={(event) =>
-                        setProfileDraft((current) => ({
-                          ...current,
+                        updateProfileDraft({
                           temperature: parseProfileNumberInput(event.currentTarget.value),
-                        }))
+                        })
                       }
                     />
                   </label>
@@ -1481,10 +1502,7 @@ export default function App() {
                       type="checkbox"
                       checked={profileDraft.enabled ?? true}
                       onChange={(event) =>
-                        setProfileDraft((current) => ({
-                          ...current,
-                          enabled: event.currentTarget.checked,
-                        }))
+                        updateProfileDraft({ enabled: event.currentTarget.checked })
                       }
                     />
                     <span>Enabled</span>
@@ -1510,10 +1528,17 @@ export default function App() {
                       onClick={saveSummaryProfile}
                       disabled={busy || profileDraftErrors.length > 0}
                     >
-                      <Save size={17} /> Save
+                      <Save size={17} /> {selectedProfile?.hasApiKey ? "Replace" : "Save"}
                     </button>
                   </div>
                   <small>Stored separately from translation API keys.</small>
+                  <div className={`key-status ${selectedProfile?.hasApiKey ? "ok" : ""}`}>
+                    {selectedProfile?.hasApiKey
+                      ? `Saved LLM key ${selectedProfile.apiKeyFingerprint ?? ""}`
+                      : profileDraft.kind === "ollama"
+                        ? "No LLM key saved. Optional for local Ollama."
+                        : "No LLM key saved for this profile."}
+                  </div>
                 </label>
 
                 <div className="profile-actions">
@@ -1565,12 +1590,13 @@ export default function App() {
                     <span>Language</span>
                     <input
                       value={summaryConfig.outputLanguage}
-                      onChange={(event) =>
+                      onChange={(event) => {
+                        const outputLanguage = event.currentTarget.value;
                         setSummaryConfig((current) => ({
                           ...current,
-                          outputLanguage: event.currentTarget.value,
-                        }))
-                      }
+                          outputLanguage,
+                        }));
+                      }}
                     />
                   </label>
                 </div>
@@ -1588,15 +1614,16 @@ export default function App() {
                       <input
                         type="checkbox"
                         checked={summaryConfig.sections[key]}
-                        onChange={(event) =>
+                        onChange={(event) => {
+                          const checked = event.currentTarget.checked;
                           setSummaryConfig((current) => ({
                             ...current,
                             sections: {
                               ...current.sections,
-                              [key]: event.currentTarget.checked,
+                              [key]: checked,
                             },
-                          }))
-                        }
+                          }));
+                        }}
                       />
                       <span>{label}</span>
                     </label>
@@ -1701,6 +1728,10 @@ function TransparentOverlayWindow() {
   }, []);
 
   useEffect(() => {
+    if (!isTauri()) {
+      return;
+    }
+
     let disposed = false;
     const appWindow = getCurrentWindow();
 
@@ -1906,6 +1937,10 @@ function LookHelpOverlayWindow() {
   }, []);
 
   useEffect(() => {
+    if (!isTauri()) {
+      return;
+    }
+
     let disposed = false;
     const appWindow = getCurrentWindow();
 

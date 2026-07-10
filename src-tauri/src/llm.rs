@@ -5,7 +5,9 @@ use crate::models::{
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -15,6 +17,7 @@ const CONFIG_DIR_NAME: &str = "dev.baka3k.baka-trans";
 const PROFILE_FILE_NAME: &str = "llm-profiles.json";
 const OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 const OLLAMA_BASE_URL: &str = "http://localhost:11434/v1";
+static PROFILE_SECRET_CACHE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -36,9 +39,15 @@ struct StoredLlmProviderProfile {
     enabled: bool,
 }
 
+#[derive(Debug, Clone)]
+struct ProfileSecretInfo {
+    key: String,
+    source: &'static str,
+}
+
 impl StoredLlmProviderProfile {
-    fn into_profile(self, secret: Option<String>) -> LlmProviderProfile {
-        let api_key_fingerprint = secret.as_ref().map(|key| fingerprint_key(key));
+    fn into_profile(self, secret: Option<ProfileSecretInfo>) -> LlmProviderProfile {
+        let api_key_fingerprint = secret.as_ref().map(|secret| fingerprint_key(&secret.key));
         LlmProviderProfile {
             id: self.id,
             name: self.name,
@@ -46,7 +55,7 @@ impl StoredLlmProviderProfile {
             model: self.model,
             base_url: self.base_url,
             has_api_key: secret.is_some(),
-            api_key_source: secret.map(|_| "profile_secret".to_string()),
+            api_key_source: secret.as_ref().map(|secret| secret.source.to_string()),
             api_key_fingerprint,
             timeout_seconds: self.timeout_seconds,
             max_output_tokens: self.max_output_tokens,
@@ -85,14 +94,14 @@ pub struct ChatCompletion {
 
 pub fn list_profiles() -> AppResult<Vec<LlmProviderProfile>> {
     let store = read_store()?;
-    Ok(store
+    store
         .profiles
         .into_iter()
         .map(|profile| {
-            let secret = load_profile_secret(&profile.id).ok().flatten();
-            profile.into_profile(secret)
+            let secret = load_profile_secret(&profile.id)?;
+            Ok(profile.into_profile(secret))
         })
-        .collect())
+        .collect()
 }
 
 pub fn save_profile(draft: LlmProviderProfileDraft) -> AppResult<LlmProviderProfile> {
@@ -242,7 +251,7 @@ pub async fn chat_completion(
             .as_deref()
             .unwrap_or_else(|| default_base_url(profile.kind)),
     )?;
-    let secret = load_profile_secret(&profile.id).ok().flatten();
+    let secret = load_profile_secret(&profile.id)?.map(|secret| secret.key);
     if requires_api_key(profile.kind) && secret.is_none() {
         return Err(AppError::new(
             "missing_llm_api_key",
@@ -442,32 +451,88 @@ fn profile_store_path() -> AppResult<PathBuf> {
 }
 
 fn save_profile_secret(profile_id: &str, api_key: &str) -> AppResult<()> {
+    let trimmed = api_key.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::new(
+            "invalid_llm_api_key",
+            "LLM API key cannot be empty.",
+        ));
+    }
     let entry = keyring::Entry::new(SERVICE, &profile_secret_user(profile_id))
         .map_err(|err| AppError::new("keychain_error", err.to_string()))?;
     entry
-        .set_password(api_key)
-        .map_err(|err| AppError::new("keychain_error", err.to_string()))
+        .set_password(trimmed)
+        .map_err(|err| AppError::new("keychain_error", err.to_string()))?;
+    cache_profile_secret(profile_id, trimmed)
 }
 
-fn load_profile_secret(profile_id: &str) -> AppResult<Option<String>> {
+fn load_profile_secret(profile_id: &str) -> AppResult<Option<ProfileSecretInfo>> {
     let entry = keyring::Entry::new(SERVICE, &profile_secret_user(profile_id))
         .map_err(|err| AppError::new("keychain_error", err.to_string()))?;
     match entry.get_password() {
-        Ok(secret) => Ok(Some(secret.trim().to_string()).filter(|secret| !secret.is_empty())),
-        Err(_) => Ok(None),
+        Ok(secret) => {
+            let secret = secret.trim().to_string();
+            if secret.is_empty() {
+                return cached_profile_secret_info(profile_id);
+            }
+            cache_profile_secret(profile_id, &secret)?;
+            Ok(Some(ProfileSecretInfo {
+                key: secret,
+                source: "keychain",
+            }))
+        }
+        Err(keyring::Error::NoEntry) => cached_profile_secret_info(profile_id),
+        Err(err) => cached_profile_secret_info(profile_id)?.map_or_else(
+            || Err(AppError::new("keychain_error", err.to_string())),
+            |secret| Ok(Some(secret)),
+        ),
     }
 }
 
 fn delete_profile_secret(profile_id: &str) -> AppResult<()> {
     let entry = keyring::Entry::new(SERVICE, &profile_secret_user(profile_id))
         .map_err(|err| AppError::new("keychain_error", err.to_string()))?;
-    entry
-        .delete_credential()
-        .map_err(|err| AppError::new("keychain_error", err.to_string()))
+    clear_cached_profile_secret(profile_id)?;
+    match entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(err) => Err(AppError::new("keychain_error", err.to_string())),
+    }
 }
 
 fn profile_secret_user(profile_id: &str) -> String {
     format!("{PROFILE_SECRET_PREFIX}{profile_id}")
+}
+
+fn profile_secret_cache() -> &'static Mutex<HashMap<String, String>> {
+    PROFILE_SECRET_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn cache_profile_secret(profile_id: &str, api_key: &str) -> AppResult<()> {
+    profile_secret_cache()
+        .lock()
+        .map_err(|err| AppError::new("credential_cache_error", err.to_string()))?
+        .insert(profile_id.to_string(), api_key.to_string());
+    Ok(())
+}
+
+fn cached_profile_secret_info(profile_id: &str) -> AppResult<Option<ProfileSecretInfo>> {
+    Ok(profile_secret_cache()
+        .lock()
+        .map_err(|err| AppError::new("credential_cache_error", err.to_string()))?
+        .get(profile_id)
+        .cloned()
+        .map(|key| ProfileSecretInfo {
+            key,
+            source: "memory",
+        }))
+}
+
+fn clear_cached_profile_secret(profile_id: &str) -> AppResult<()> {
+    profile_secret_cache()
+        .lock()
+        .map_err(|err| AppError::new("credential_cache_error", err.to_string()))?
+        .remove(profile_id);
+    Ok(())
 }
 
 fn require_non_empty(value: &str, code: &str, message: &str) -> AppResult<String> {
@@ -510,7 +575,10 @@ fn compact_error_body(body: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_chat_completions_url, parse_chat_completion_body, parse_json_object};
+    use super::{
+        cache_profile_secret, cached_profile_secret_info, clear_cached_profile_secret,
+        normalize_chat_completions_url, parse_chat_completion_body, parse_json_object,
+    };
 
     #[test]
     fn normalizes_base_url_to_chat_completions() {
@@ -536,5 +604,20 @@ mod tests {
     fn repairs_json_from_fenced_response() {
         let parsed = parse_json_object("```json\n{\"summary\":\"done\"}\n```").unwrap();
         assert_eq!(parsed["summary"], "done");
+    }
+
+    #[test]
+    fn caches_summary_profile_secrets_for_read_back() {
+        let profile_id = "summary-profile-cache-test";
+        clear_cached_profile_secret(profile_id).unwrap();
+
+        cache_profile_secret(profile_id, "sk-summary-cache-value").unwrap();
+        let cached = cached_profile_secret_info(profile_id).unwrap().unwrap();
+
+        assert_eq!(cached.key, "sk-summary-cache-value");
+        assert_eq!(cached.source, "memory");
+
+        clear_cached_profile_secret(profile_id).unwrap();
+        assert!(cached_profile_secret_info(profile_id).unwrap().is_none());
     }
 }
