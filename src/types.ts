@@ -32,6 +32,13 @@ export type TranslationActivityState =
   | "needs_attention";
 export type LlmProviderKind = "openai" | "openai_compatible" | "ollama" | "adk_litellm";
 export type MeetingSummaryTrigger = "manual" | "end_of_session";
+export type MeetingSummaryPromptPreset =
+  | "balanced"
+  | "professional"
+  | "gentle"
+  | "detailed"
+  | "timeline"
+  | "custom";
 export type TranscriptScope = "source" | "translated" | "both";
 export type MeetingSummaryStatus = "running" | "complete" | "error";
 export type OverlayStatusKind =
@@ -288,6 +295,8 @@ export interface MeetingSummaryConfig {
   trigger: MeetingSummaryTrigger;
   transcriptScope: TranscriptScope;
   outputLanguage: string;
+  promptPreset: MeetingSummaryPromptPreset;
+  customSystemPrompt: string;
   sections: MeetingSummarySections;
   maxTranscriptChars: number;
   rollingMemoryEnabled: boolean;

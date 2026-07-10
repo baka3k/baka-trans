@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  MEETING_SUMMARY_CUSTOM_PROMPT_MAX_CHARS,
   buildMeetingSummaryConfig,
   deriveConversationItems,
   deriveSourceSignalState,
   deriveTranslationActivity,
+  meetingSummaryPromptPresetDescription,
+  meetingSummaryPromptPresets,
   mergeTranscriptDelta,
   renderTranscript,
+  selectMeetingSummaryPromptPreset,
+  validateMeetingSummaryCustomPrompt,
   validateLlmProfileDraft,
 } from "./transcript";
 import type { MeetingSummaryResult, TranscriptItem } from "./types";
@@ -151,7 +156,59 @@ describe("transcript helpers", () => {
     expect(config.providerProfileId).toBe("profile");
     expect(config.transcriptScope).toBe("both");
     expect(config.outputLanguage).toBe("Vietnamese");
+    expect(config.promptPreset).toBe("balanced");
+    expect(config.customSystemPrompt).toBe("");
     expect(config.sections.actionItems).toBe(true);
+  });
+
+  it("defines stable metadata for every meeting summary prompt preset", () => {
+    expect(meetingSummaryPromptPresets.map((preset) => preset.id)).toEqual([
+      "balanced",
+      "professional",
+      "gentle",
+      "detailed",
+      "timeline",
+      "custom",
+    ]);
+
+    for (const preset of meetingSummaryPromptPresets) {
+      expect(preset.label).not.toBe("");
+      expect(preset.description).not.toBe("");
+      expect(meetingSummaryPromptPresetDescription(preset.id)).toBe(preset.description);
+    }
+  });
+
+  it("validates custom meeting summary instructions at the shared limit", () => {
+    expect(validateMeetingSummaryCustomPrompt("custom", "   ")).toBe(
+      "Enter custom summary instructions.",
+    );
+    expect(
+      validateMeetingSummaryCustomPrompt(
+        "custom",
+        "x".repeat(MEETING_SUMMARY_CUSTOM_PROMPT_MAX_CHARS),
+      ),
+    ).toBeNull();
+    expect(
+      validateMeetingSummaryCustomPrompt(
+        "custom",
+        "x".repeat(MEETING_SUMMARY_CUSTOM_PROMPT_MAX_CHARS + 1),
+      ),
+    ).toContain("8,000 characters or fewer");
+    expect(validateMeetingSummaryCustomPrompt("balanced", "")).toBeNull();
+  });
+
+  it("preserves custom instructions while switching summary prompt presets", () => {
+    const customConfig = {
+      ...buildMeetingSummaryConfig("profile"),
+      promptPreset: "custom" as const,
+      customSystemPrompt: "Focus on technical tradeoffs.",
+    };
+
+    const gentleConfig = selectMeetingSummaryPromptPreset(customConfig, "gentle");
+    const restoredConfig = selectMeetingSummaryPromptPreset(gentleConfig, "custom");
+
+    expect(gentleConfig.customSystemPrompt).toBe("Focus on technical tradeoffs.");
+    expect(restoredConfig.customSystemPrompt).toBe("Focus on technical tradeoffs.");
   });
 
   it("classifies a fresh source signal above the threshold as receiving", () => {

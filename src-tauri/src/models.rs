@@ -680,6 +680,17 @@ pub enum MeetingSummaryTrigger {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+pub enum MeetingSummaryPromptPreset {
+    Balanced,
+    Professional,
+    Gentle,
+    Detailed,
+    Timeline,
+    Custom,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum TranscriptScope {
     Source,
     Translated,
@@ -703,6 +714,8 @@ pub struct MeetingSummaryConfig {
     pub trigger: MeetingSummaryTrigger,
     pub transcript_scope: TranscriptScope,
     pub output_language: String,
+    pub prompt_preset: MeetingSummaryPromptPreset,
+    pub custom_system_prompt: String,
     pub sections: MeetingSummarySections,
     pub max_transcript_chars: usize,
     pub rolling_memory_enabled: bool,

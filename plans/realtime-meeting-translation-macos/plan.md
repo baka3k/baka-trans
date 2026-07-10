@@ -254,6 +254,8 @@ Meeting summary agent config:
 - summary trigger: `manual`, `session_end`, optional interval
 - transcript scope: source text, translated text, or both
 - output language
+- summary prompt preset: `balanced`, `professional`, `gentle`, `detailed`, `timeline`, or `custom`
+- custom system prompt text when the `custom` preset is selected
 - enabled sections: summary, decisions, action items, blockers, follow-ups, facts to remember
 - maximum transcript chars per run
 - rolling memory enabled flag
@@ -410,6 +412,13 @@ Session status:
    - Keep speaker attribution neutral until phase 15 supplies real diarization labels.
    - See `phase-16-conversation-translation-ui-redesign.md`.
 
+17. Summary Agent prompt presets and custom instructions
+   - Add selectable balanced, professional, gentle, detailed, and timeline-oriented summary styles.
+   - Add a custom system-prompt option with a dedicated editor in Summary Agent settings.
+   - Compose the selected instructions with immutable structured-output and transcript-grounding rules in Rust.
+   - Keep preset/custom selection compatible with every existing LLM provider profile.
+   - See `phase-17-summary-agent-prompt-presets-custom.md`.
+
 ## Acceptance Criteria
 
 - The user can select source/target languages, input device, and output device.
@@ -440,6 +449,9 @@ Session status:
 - The user can create a Gemini summary provider profile and run the meeting-summary agent without OpenAI.
 - LLM profiles support OpenAI and OpenAI-compatible endpoints, including local Ollama through either `http://localhost:11434/v1` OpenAI-provider mode or an ADK/LiteLLM-compatible model naming path.
 - The user can run a meeting-summary agent over the current transcript and receive summary, decisions, action items, blockers, and points to remember.
+- The user can choose a built-in Summary Agent style for balanced, professional, gentle, detailed, or timeline-oriented meeting notes.
+- The user can enter a custom Summary Agent system prompt, preview/edit it in the settings panel, and use it for the next summary run.
+- Preset and custom instructions cannot remove the backend's structured JSON contract or transcript-grounding rules.
 - The summary agent exposes progress/error state and never blocks live audio capture, translation, playback, or manual boundary controls.
 - The user can enable optional speaker diarization without delaying realtime translation or translated audio playback.
 - Speaker diarization labels source transcript items asynchronously and clearly marks uncertain labels for review.
@@ -454,6 +466,7 @@ Session status:
 - Unit tests for source signal state transitions: waiting, receiving, silent, stale, and error.
 - Unit tests for conversation display helpers, pending translation placeholders, optional speaker-label fallback, and scrolled-away transcript behavior.
 - Unit tests for LLM provider config validation, OpenAI-compatible request building, Ollama base URL normalization, summary-agent output parsing, and transcript scope selection.
+- Unit tests for Summary Agent preset resolution, custom-prompt validation, invariant prompt composition, and frontend preset/config helpers.
 - Unit tests for provider selection, Google credential lookup, Google setup payload construction, Google audio message construction, and Google event parsing.
 - Unit tests for Google language metadata, including `zh-Hans`/`zh-Hant` and `pt-BR`/`pt-PT` handling if exposed in the UI.
 - Unit tests for session-rotation decisions, GoAway event handling, context-compression config, and `echoTargetLanguage` config.
@@ -484,6 +497,7 @@ Session status:
 - Overactive motion or status chips can distract during live meetings, so feedback must stay compact and state-driven.
 - Provider config can become confusing if translation and summary settings are mixed together; the UI should name them as separate concerns and allow explicit sharing only when selected by the user.
 - Ollama/OpenAI-compatible providers vary in JSON output reliability and tool-call behavior; summary-agent parsing must tolerate fenced text, invalid JSON, and retries before surfacing an error.
+- Custom summary instructions can conflict with the structured response contract or request unsupported/invented content; compose them after explicit invariant rules, enforce length/non-empty validation, and keep schema validation authoritative.
 - Bundling a full ADK runtime inside a desktop app may add packaging complexity. Keep the agent contract independent of ADK and treat an ADK sidecar as an adapter, not the only execution path.
 - Google Live API and ephemeral tokens are Preview, so schema or endpoint changes may require quick adapters.
 - Google Live Translation does not support text input or tools in translation mode, so translation style prompts cannot be carried over from an OpenAI-style configurable prompt. Style controls must either be removed, mapped to supported Google config, or moved into a fallback non-live path.

@@ -3,6 +3,7 @@ import type {
   ConversationSentencePair,
   LlmProviderProfileDraft,
   MeetingSummaryConfig,
+  MeetingSummaryPromptPreset,
   MeetingSummaryResult,
   SessionStatus,
   SourceSignalSnapshot,
@@ -10,6 +11,82 @@ import type {
   TranscriptItem,
   TranslationActivityState,
 } from "./types";
+
+export const MEETING_SUMMARY_CUSTOM_PROMPT_MAX_CHARS = 8000;
+
+export const meetingSummaryPromptPresets: ReadonlyArray<{
+  id: MeetingSummaryPromptPreset;
+  label: string;
+  description: string;
+}> = [
+  {
+    id: "balanced",
+    label: "Balanced",
+    description: "Clear, concise meeting notes with a neutral tone.",
+  },
+  {
+    id: "professional",
+    label: "Professional",
+    description: "Business-ready decisions, risks, and accountable actions.",
+  },
+  {
+    id: "gentle",
+    label: "Gentle",
+    description: "Warm, tactful wording that keeps facts and blockers clear.",
+  },
+  {
+    id: "detailed",
+    label: "Detailed",
+    description: "More context, rationale, dependencies, questions, and nuance.",
+  },
+  {
+    id: "timeline",
+    label: "Timeline",
+    description: "Chronological events and milestones using transcript-sourced timing only.",
+  },
+  {
+    id: "custom",
+    label: "Custom",
+    description: "Your own instructions within the structured, grounded summary contract.",
+  },
+];
+
+export function meetingSummaryCustomPromptLength(value: string): number {
+  return Array.from(value.trim()).length;
+}
+
+export function validateMeetingSummaryCustomPrompt(
+  promptPreset: MeetingSummaryPromptPreset,
+  customSystemPrompt: string,
+): string | null {
+  if (promptPreset !== "custom") {
+    return null;
+  }
+
+  const length = meetingSummaryCustomPromptLength(customSystemPrompt);
+  if (length === 0) {
+    return "Enter custom summary instructions.";
+  }
+  if (length > MEETING_SUMMARY_CUSTOM_PROMPT_MAX_CHARS) {
+    return `Custom summary instructions must be ${MEETING_SUMMARY_CUSTOM_PROMPT_MAX_CHARS.toLocaleString()} characters or fewer.`;
+  }
+  return null;
+}
+
+export function meetingSummaryPromptPresetDescription(
+  promptPreset: MeetingSummaryPromptPreset,
+): string {
+  return (
+    meetingSummaryPromptPresets.find((preset) => preset.id === promptPreset)?.description ?? ""
+  );
+}
+
+export function selectMeetingSummaryPromptPreset(
+  config: MeetingSummaryConfig,
+  promptPreset: MeetingSummaryPromptPreset,
+): MeetingSummaryConfig {
+  return { ...config, promptPreset };
+}
 
 export function mergeTranscriptDelta(
   items: TranscriptItem[],
@@ -272,6 +349,8 @@ export function buildMeetingSummaryConfig(
     trigger: "manual",
     transcriptScope: "both",
     outputLanguage: "Vietnamese",
+    promptPreset: "balanced",
+    customSystemPrompt: "",
     sections: {
       summary: true,
       decisions: true,
