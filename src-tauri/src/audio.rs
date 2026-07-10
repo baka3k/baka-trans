@@ -12,7 +12,9 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
 
-pub const REALTIME_SAMPLE_RATE: u32 = 24_000;
+pub const OPENAI_REALTIME_SAMPLE_RATE: u32 = 24_000;
+pub const GOOGLE_LIVE_INPUT_SAMPLE_RATE: u32 = 16_000;
+pub const GOOGLE_LIVE_OUTPUT_SAMPLE_RATE: u32 = 24_000;
 
 pub struct CaptureRuntime {
     stop_tx: std_mpsc::Sender<()>,
@@ -82,6 +84,20 @@ pub fn start_capture(
     input_device_id: &str,
     monitor_tx: Option<std_mpsc::SyncSender<Vec<i16>>>,
 ) -> AppResult<(CaptureRuntime, mpsc::Receiver<Vec<i16>>)> {
+    start_capture_at_sample_rate(
+        app,
+        input_device_id,
+        monitor_tx,
+        OPENAI_REALTIME_SAMPLE_RATE,
+    )
+}
+
+pub fn start_capture_at_sample_rate(
+    app: AppHandle,
+    input_device_id: &str,
+    monitor_tx: Option<std_mpsc::SyncSender<Vec<i16>>>,
+    target_sample_rate: u32,
+) -> AppResult<(CaptureRuntime, mpsc::Receiver<Vec<i16>>)> {
     let (tx, rx) = mpsc::channel::<Vec<i16>>(24);
     let (stop_tx, stop_rx) = std_mpsc::channel::<()>();
     let (ready_tx, ready_rx) = std_mpsc::channel::<AppResult<()>>();
@@ -89,7 +105,15 @@ pub fn start_capture(
     let thread_device_id = device_id.clone();
 
     let join_handle = thread::spawn(move || {
-        run_capture_thread(app, tx, monitor_tx, thread_device_id, stop_rx, ready_tx)
+        run_capture_thread(
+            app,
+            tx,
+            monitor_tx,
+            thread_device_id,
+            target_sample_rate,
+            stop_rx,
+            ready_tx,
+        )
     });
 
     match ready_rx.recv_timeout(Duration::from_secs(3)) {
@@ -189,13 +213,35 @@ pub fn start_playback_with_channel(
     output_device_id: &str,
     output_channel: AudioOutputChannel,
 ) -> AppResult<PlaybackRuntime> {
+    start_playback_with_channel_at_sample_rate(
+        app,
+        output_device_id,
+        output_channel,
+        OPENAI_REALTIME_SAMPLE_RATE,
+    )
+}
+
+pub fn start_playback_with_channel_at_sample_rate(
+    app: AppHandle,
+    output_device_id: &str,
+    output_channel: AudioOutputChannel,
+    source_sample_rate: u32,
+) -> AppResult<PlaybackRuntime> {
     let (audio_tx, audio_rx) = std_mpsc::sync_channel::<Vec<i16>>(24);
     let (stop_tx, stop_rx) = std_mpsc::channel::<()>();
     let (ready_tx, ready_rx) = std_mpsc::channel::<AppResult<()>>();
     let device_id = output_device_id.to_string();
 
     let join_handle = thread::spawn(move || {
-        run_playback_thread(app, device_id, output_channel, audio_rx, stop_rx, ready_tx)
+        run_playback_thread(
+            app,
+            device_id,
+            output_channel,
+            source_sample_rate,
+            audio_rx,
+            stop_rx,
+            ready_tx,
+        )
     });
 
     match ready_rx.recv_timeout(Duration::from_secs(3)) {
@@ -235,6 +281,7 @@ fn handle_input(
     monitor_tx: Option<&std_mpsc::SyncSender<Vec<i16>>>,
     app: &AppHandle,
     input_device_id: &str,
+    target_sample_rate: u32,
 ) {
     if data.is_empty() || channels == 0 {
         return;
@@ -242,7 +289,7 @@ fn handle_input(
 
     let mono = downmix_to_mono(data, channels);
     let (rms, peak) = level(&mono);
-    let resampled = resample_linear(&mono, sample_rate, REALTIME_SAMPLE_RATE);
+    let resampled = resample_linear(&mono, sample_rate, target_sample_rate);
     let pcm = f32_to_pcm16(&resampled);
     if let Some(monitor_tx) = monitor_tx {
         let _ = tx.try_send(pcm.clone());
@@ -265,6 +312,7 @@ fn run_capture_thread(
     tx: mpsc::Sender<Vec<i16>>,
     monitor_tx: Option<std_mpsc::SyncSender<Vec<i16>>>,
     device_id: String,
+    target_sample_rate: u32,
     stop_rx: std_mpsc::Receiver<()>,
     ready_tx: std_mpsc::Sender<AppResult<()>>,
 ) {
@@ -309,6 +357,7 @@ fn run_capture_thread(
                         monitor_tx.as_ref(),
                         &app,
                         &device_id,
+                        target_sample_rate,
                     )
                 },
                 err_fn,
@@ -334,6 +383,7 @@ fn run_capture_thread(
                         monitor_tx.as_ref(),
                         &app,
                         &device_id,
+                        target_sample_rate,
                     );
                 },
                 err_fn,
@@ -359,6 +409,7 @@ fn run_capture_thread(
                         monitor_tx.as_ref(),
                         &app,
                         &device_id,
+                        target_sample_rate,
                     );
                 },
                 err_fn,
@@ -396,6 +447,7 @@ fn run_playback_thread(
     app: AppHandle,
     device_id: String,
     output_channel: AudioOutputChannel,
+    source_sample_rate: u32,
     audio_rx: std_mpsc::Receiver<Vec<i16>>,
     stop_rx: std_mpsc::Receiver<()>,
     ready_tx: std_mpsc::Sender<AppResult<()>>,
@@ -437,6 +489,7 @@ fn run_playback_thread(
                         data,
                         channels,
                         output_channel,
+                        source_sample_rate,
                         output_sample_rate,
                         &audio_rx,
                         &mut queue,
@@ -455,6 +508,7 @@ fn run_playback_thread(
                         data,
                         channels,
                         output_channel,
+                        source_sample_rate,
                         output_sample_rate,
                         &audio_rx,
                         &mut queue,
@@ -473,6 +527,7 @@ fn run_playback_thread(
                         data,
                         channels,
                         output_channel,
+                        source_sample_rate,
                         output_sample_rate,
                         &audio_rx,
                         &mut queue,
@@ -513,11 +568,18 @@ fn fill_output_f32(
     data: &mut [f32],
     channels: usize,
     output_channel: AudioOutputChannel,
+    source_sample_rate: u32,
     output_sample_rate: u32,
     rx: &std_mpsc::Receiver<Vec<i16>>,
     queue: &mut VecDeque<i16>,
 ) {
-    refill_output_queue(rx, queue, data.len() / channels, output_sample_rate);
+    refill_output_queue(
+        rx,
+        queue,
+        data.len() / channels,
+        source_sample_rate,
+        output_sample_rate,
+    );
     for frame in data.chunks_mut(channels) {
         let sample = queue.pop_front().unwrap_or_default() as f32 / i16::MAX as f32;
         write_frame_f32(frame, output_channel, sample);
@@ -528,11 +590,18 @@ fn fill_output_i16(
     data: &mut [i16],
     channels: usize,
     output_channel: AudioOutputChannel,
+    source_sample_rate: u32,
     output_sample_rate: u32,
     rx: &std_mpsc::Receiver<Vec<i16>>,
     queue: &mut VecDeque<i16>,
 ) {
-    refill_output_queue(rx, queue, data.len() / channels, output_sample_rate);
+    refill_output_queue(
+        rx,
+        queue,
+        data.len() / channels,
+        source_sample_rate,
+        output_sample_rate,
+    );
     for frame in data.chunks_mut(channels) {
         let sample = queue.pop_front().unwrap_or_default();
         write_frame_i16(frame, output_channel, sample);
@@ -543,11 +612,18 @@ fn fill_output_u16(
     data: &mut [u16],
     channels: usize,
     output_channel: AudioOutputChannel,
+    source_sample_rate: u32,
     output_sample_rate: u32,
     rx: &std_mpsc::Receiver<Vec<i16>>,
     queue: &mut VecDeque<i16>,
 ) {
-    refill_output_queue(rx, queue, data.len() / channels, output_sample_rate);
+    refill_output_queue(
+        rx,
+        queue,
+        data.len() / channels,
+        source_sample_rate,
+        output_sample_rate,
+    );
     for frame in data.chunks_mut(channels) {
         let sample = queue.pop_front().unwrap_or_default();
         write_frame_u16(frame, output_channel, pcm16_to_u16(sample));
@@ -558,13 +634,14 @@ fn refill_output_queue(
     rx: &std_mpsc::Receiver<Vec<i16>>,
     queue: &mut VecDeque<i16>,
     target_frames: usize,
+    source_sample_rate: u32,
     output_sample_rate: u32,
 ) {
     while queue.len() < target_frames * 3 {
         match rx.try_recv() {
             Ok(chunk) => queue.extend(resample_pcm16_chunk(
                 &chunk,
-                REALTIME_SAMPLE_RATE,
+                source_sample_rate,
                 output_sample_rate,
             )),
             Err(_) => break,

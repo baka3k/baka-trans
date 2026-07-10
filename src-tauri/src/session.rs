@@ -304,32 +304,36 @@ impl AppState {
 
     fn start_pipeline(&self, app: AppHandle, config: SessionConfig) -> AppResult<()> {
         let api_key = security::load_translation_api_key(config.translation_provider)?;
-        if config.translation_provider == TranslationProvider::GoogleLiveTranslate {
-            return Err(AppError::new(
-                "google_live_pipeline_not_implemented",
-                "Google Live Translation credentials are configured, but the live audio pipeline is scheduled for phase 12.",
-            ));
-        }
-        let playback = audio::start_playback_with_channel(
+        let capture_sample_rate = capture_sample_rate(config.translation_provider);
+        let translated_output_sample_rate =
+            translated_output_sample_rate(config.translation_provider);
+        let playback = audio::start_playback_with_channel_at_sample_rate(
             app.clone(),
             &config.output_device_id,
             config.translation_output_channel,
+            translated_output_sample_rate,
         )?;
         let playback_tx = playback.sender();
         let monitor_playback = if should_start_original_monitor(&config) {
-            Some(audio::start_playback_with_channel(
+            Some(audio::start_playback_with_channel_at_sample_rate(
                 app.clone(),
                 &config.monitor_output_device_id,
                 config.monitor_output_channel,
+                capture_sample_rate,
             )?)
         } else {
             None
         };
         let monitor_tx = monitor_playback.as_ref().map(PlaybackRuntime::sender);
-        let (capture, audio_rx) =
-            audio::start_capture(app.clone(), &config.input_device_id, monitor_tx)?;
+        let (capture, audio_rx) = audio::start_capture_at_sample_rate(
+            app.clone(),
+            &config.input_device_id,
+            monitor_tx,
+            capture_sample_rate,
+        )?;
         let (control_tx, control_rx) = mpsc::channel(8);
         let transcript_store = Arc::clone(&self.transcript);
+        let provider = config.translation_provider;
         *self.capture.lock().map_err(lock_error)? = Some(capture);
         *self.playback.lock().map_err(lock_error)? = Some(playback);
         *self.monitor_playback.lock().map_err(lock_error)? = monitor_playback;
@@ -341,16 +345,32 @@ impl AppState {
         self.set_status(&app, SessionStatus::Listening)?;
 
         tauri::async_runtime::spawn(async move {
-            let result = ai::run_realtime_translation(
-                app.clone(),
-                config,
-                api_key,
-                audio_rx,
-                control_rx,
-                playback_tx,
-                transcript_store,
-            )
-            .await;
+            let result = match provider {
+                TranslationProvider::OpenaiRealtime => {
+                    ai::run_realtime_translation(
+                        app.clone(),
+                        config,
+                        api_key,
+                        audio_rx,
+                        control_rx,
+                        playback_tx,
+                        transcript_store,
+                    )
+                    .await
+                }
+                TranslationProvider::GoogleLiveTranslate => {
+                    ai::run_google_live_translation(
+                        app.clone(),
+                        config,
+                        api_key,
+                        audio_rx,
+                        control_rx,
+                        playback_tx,
+                        transcript_store,
+                    )
+                    .await
+                }
+            };
             let state = app.state::<AppState>();
             state.finish_pipeline(&app, result);
         });
@@ -528,6 +548,20 @@ fn render_markdown(items: &[TranscriptItem]) -> String {
         ));
     }
     content
+}
+
+fn capture_sample_rate(provider: TranslationProvider) -> u32 {
+    match provider {
+        TranslationProvider::OpenaiRealtime => audio::OPENAI_REALTIME_SAMPLE_RATE,
+        TranslationProvider::GoogleLiveTranslate => audio::GOOGLE_LIVE_INPUT_SAMPLE_RATE,
+    }
+}
+
+fn translated_output_sample_rate(provider: TranslationProvider) -> u32 {
+    match provider {
+        TranslationProvider::OpenaiRealtime => audio::OPENAI_REALTIME_SAMPLE_RATE,
+        TranslationProvider::GoogleLiveTranslate => audio::GOOGLE_LIVE_OUTPUT_SAMPLE_RATE,
+    }
 }
 
 fn lock_error<T>(_: std::sync::PoisonError<T>) -> AppError {
