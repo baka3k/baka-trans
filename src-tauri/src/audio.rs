@@ -27,6 +27,11 @@ pub struct PlaybackRuntime {
     join_handle: Option<thread::JoinHandle<()>>,
 }
 
+pub struct TestToneRuntime {
+    stop_tx: std_mpsc::Sender<()>,
+    join_handle: Option<thread::JoinHandle<()>>,
+}
+
 impl PlaybackRuntime {
     pub fn sender(&self) -> std_mpsc::SyncSender<Vec<i16>> {
         self.audio_tx.clone()
@@ -43,6 +48,15 @@ impl Drop for PlaybackRuntime {
 }
 
 impl Drop for CaptureRuntime {
+    fn drop(&mut self) {
+        let _ = self.stop_tx.send(());
+        if let Some(join_handle) = self.join_handle.take() {
+            let _ = join_handle.join();
+        }
+    }
+}
+
+impl Drop for TestToneRuntime {
     fn drop(&mut self) {
         let _ = self.stop_tx.send(());
         if let Some(join_handle) = self.join_handle.take() {
@@ -140,9 +154,59 @@ pub fn start_capture_at_sample_rate(
     }
 }
 
-pub fn play_test_tone(output_device_id: &str, output_channel: AudioOutputChannel) -> AppResult<()> {
-    let device = find_device(output_device_id, DeviceKind::Output)?;
-    let supported = device.default_output_config()?;
+pub fn start_test_tone(
+    output_device_id: &str,
+    output_channel: AudioOutputChannel,
+) -> AppResult<TestToneRuntime> {
+    let (stop_tx, stop_rx) = std_mpsc::channel::<()>();
+    let (ready_tx, ready_rx) = std_mpsc::channel::<AppResult<()>>();
+    let device_id = output_device_id.to_string();
+
+    let join_handle = thread::spawn(move || {
+        run_test_tone_thread(device_id, output_channel, stop_rx, ready_tx)
+    });
+
+    match ready_rx.recv_timeout(Duration::from_secs(3)) {
+        Ok(Ok(())) => Ok(TestToneRuntime {
+            stop_tx,
+            join_handle: Some(join_handle),
+        }),
+        Ok(Err(error)) => {
+            let _ = stop_tx.send(());
+            let _ = join_handle.join();
+            Err(error)
+        }
+        Err(_) => {
+            let _ = stop_tx.send(());
+            let _ = join_handle.join();
+            Err(AppError::new(
+                "audio_playback_error",
+                "Timed out while starting the test tone.",
+            ))
+        }
+    }
+}
+
+fn run_test_tone_thread(
+    output_device_id: String,
+    output_channel: AudioOutputChannel,
+    stop_rx: std_mpsc::Receiver<()>,
+    ready_tx: std_mpsc::Sender<AppResult<()>>,
+) {
+    let device = match find_device(&output_device_id, DeviceKind::Output) {
+        Ok(device) => device,
+        Err(error) => {
+            let _ = ready_tx.send(Err(error));
+            return;
+        }
+    };
+    let supported = match device.default_output_config() {
+        Ok(config) => config,
+        Err(error) => {
+            let _ = ready_tx.send(Err(error.into()));
+            return;
+        }
+    };
     let channels = supported.channels() as usize;
     let sample_rate = supported.sample_rate().0 as f32;
     let config: StreamConfig = supported.clone().into();
@@ -157,7 +221,7 @@ pub fn play_test_tone(output_device_id: &str, output_channel: AudioOutputChannel
             },
             err_fn,
             None,
-        )?,
+        ),
         SampleFormat::I16 => device.build_output_stream(
             &config,
             move |data: &mut [i16], _| {
@@ -175,7 +239,7 @@ pub fn play_test_tone(output_device_id: &str, output_channel: AudioOutputChannel
             },
             err_fn,
             None,
-        )?,
+        ),
         SampleFormat::U16 => device.build_output_stream(
             &config,
             move |data: &mut [u16], _| {
@@ -193,19 +257,32 @@ pub fn play_test_tone(output_device_id: &str, output_channel: AudioOutputChannel
             },
             err_fn,
             None,
-        )?,
+        ),
         other => {
-            return Err(AppError::new(
+            let _ = ready_tx.send(Err(AppError::new(
                 "unsupported_audio_format",
                 format!("Unsupported output sample format: {other:?}"),
-            ))
+            )));
+            return;
         }
     };
 
-    stream.play()?;
-    std::thread::sleep(Duration::from_millis(650));
+    let stream = match stream {
+        Ok(stream) => stream,
+        Err(error) => {
+            let _ = ready_tx.send(Err(error.into()));
+            return;
+        }
+    };
+
+    if let Err(error) = stream.play() {
+        let _ = ready_tx.send(Err(error.into()));
+        return;
+    }
+
+    let _ = ready_tx.send(Ok(()));
+    let _ = stop_rx.recv();
     drop(stream);
-    Ok(())
 }
 
 pub fn start_playback_with_channel(

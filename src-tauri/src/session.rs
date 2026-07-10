@@ -1,4 +1,4 @@
-use crate::audio::{self, CaptureRuntime, PlaybackRuntime};
+use crate::audio::{self, CaptureRuntime, PlaybackRuntime, TestToneRuntime};
 use crate::error::{AppError, AppResult};
 use crate::models::{
     AppStatus, AudioOutputChannel, ExportFormat, ExportRequest, ExportedTranscript,
@@ -17,6 +17,7 @@ pub struct AppState {
     capture: Mutex<Option<CaptureRuntime>>,
     playback: Mutex<Option<PlaybackRuntime>>,
     monitor_playback: Mutex<Option<PlaybackRuntime>>,
+    test_tone: Mutex<Option<TestToneRuntime>>,
     local_monitor_capture: Mutex<Option<CaptureRuntime>>,
     local_monitor_playback: Mutex<Option<PlaybackRuntime>>,
     realtime_control: Mutex<Option<mpsc::Sender<ai::RealtimeControl>>>,
@@ -32,6 +33,7 @@ impl AppState {
             capture: Mutex::new(None),
             playback: Mutex::new(None),
             monitor_playback: Mutex::new(None),
+            test_tone: Mutex::new(None),
             local_monitor_capture: Mutex::new(None),
             local_monitor_playback: Mutex::new(None),
             realtime_control: Mutex::new(None),
@@ -79,6 +81,7 @@ impl AppState {
                 "Stop the mic monitor test before starting translation.",
             ));
         }
+        self.clear_test_tone();
 
         config.validate_translation_target_language()?;
 
@@ -138,6 +141,7 @@ impl AppState {
         if self.local_monitor_active()? {
             return Ok(());
         }
+        self.clear_test_tone();
         if input_device_id.trim().is_empty() {
             return Err(AppError::new(
                 "missing_input_device",
@@ -158,6 +162,41 @@ impl AppState {
 
         *self.local_monitor_capture.lock().map_err(lock_error)? = Some(capture);
         *self.local_monitor_playback.lock().map_err(lock_error)? = Some(playback);
+        Ok(())
+    }
+
+    pub fn start_test_tone(
+        &self,
+        output_device_id: &str,
+        output_channel: AudioOutputChannel,
+    ) -> AppResult<()> {
+        if self.status()? != SessionStatus::Idle {
+            return Err(AppError::new(
+                "session_busy",
+                "Stop translation before testing audio output.",
+            ));
+        }
+        if self.local_monitor_active()? {
+            return Err(AppError::new(
+                "local_monitor_active",
+                "Stop the mic monitor before testing audio output.",
+            ));
+        }
+        if output_device_id.trim().is_empty() {
+            return Err(AppError::new(
+                "missing_output_device",
+                "Choose a speaker or headphones before testing audio output.",
+            ));
+        }
+
+        self.clear_test_tone();
+        let tone = audio::start_test_tone(output_device_id, output_channel)?;
+        *self.test_tone.lock().map_err(lock_error)? = Some(tone);
+        Ok(())
+    }
+
+    pub fn stop_test_tone(&self) -> AppResult<()> {
+        self.clear_test_tone();
         Ok(())
     }
 
@@ -439,6 +478,13 @@ impl AppState {
             .local_monitor_playback
             .lock()
             .map(|mut playback| *playback = None);
+    }
+
+    fn clear_test_tone(&self) {
+        let _ = self
+            .test_tone
+            .lock()
+            .map(|mut test_tone| *test_tone = None);
     }
 }
 

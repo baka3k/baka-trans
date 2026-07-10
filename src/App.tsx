@@ -35,6 +35,7 @@ import {
   saveTranslationApiKey,
   startLocalMonitor,
   startSession,
+  stopTestTone,
   stopLocalMonitor,
   stopSession,
   testLlmProfile,
@@ -248,6 +249,7 @@ export default function App() {
     !localMonitorActive &&
     inputDeviceId.length > 0 &&
     outputDeviceId.length > 0 &&
+    testingTone === null &&
     (!monitorOriginalAudio || monitorOutputDeviceId.length > 0);
   const sessionActive = activeSessionStatuses.includes(status);
   const canForceBoundary =
@@ -255,10 +257,14 @@ export default function App() {
   const canPause = canForceBoundary;
   const canResume = status === "paused";
   const canStop = status !== "idle" && status !== "stopping";
-  const canTestAudio = status === "idle" && !busy && !localMonitorActive;
+  const testToneActive = testingTone !== null;
+  const translationToneActive = testingTone === "translation";
+  const monitorToneActive = testingTone === "monitor";
+  const canTestAudio = status === "idle" && !busy && !localMonitorActive && !testToneActive;
   const canToggleLocalMonitor =
     status === "idle" &&
     !busy &&
+    !testToneActive &&
     (localMonitorActive || (inputDeviceId.length > 0 && outputDeviceId.length > 0));
   const inputSignalPercent = Math.round(visibleSourceLevel.peak * 100);
   const inputSignalRmsPercent = Math.round(visibleSourceLevel.rms * 100);
@@ -746,11 +752,19 @@ export default function App() {
     setTestingTone(kind);
     setError(null);
     try {
+      if (testingTone === kind) {
+        await stopTestTone();
+        setTestingTone(null);
+        return;
+      }
+      if (testingTone !== null) {
+        await stopTestTone();
+      }
+      setTestingTone(kind);
       await playTestTone(deviceId, outputChannel);
     } catch (cause) {
-      setError(normalizeError(cause));
-    } finally {
       setTestingTone(null);
+      setError(normalizeError(cause));
     }
   }
 
@@ -1059,14 +1073,11 @@ export default function App() {
               <div className="meter-row">
                 <Volume2 size={17} />
                 <button
-                  className="small-button"
-                  onClick={() =>
-                    outputDeviceId &&
-                    testTone("translation", outputDeviceId, translationOutputChannel)
-                  }
-                  disabled={!outputDeviceId || !canTestAudio || testingTone === "translation"}
+                  className={translationToneActive ? "small-button danger" : "small-button"}
+                  onClick={() => testTone("translation", outputDeviceId, translationOutputChannel)}
+                  disabled={!translationToneActive && (!outputDeviceId || !canTestAudio)}
                 >
-                  {testingTone === "translation" ? "Testing" : "Test translated"}
+                  {translationToneActive ? "Stop translated" : "Test translated"}
                 </button>
               </div>
               <div className="monitor-test-row">
@@ -1086,19 +1097,14 @@ export default function App() {
               </div>
               <div className="button-row compact">
                 <button
-                  className="small-button"
-                  onClick={() =>
-                    monitorOutputDeviceId &&
-                    testTone("monitor", monitorOutputDeviceId, monitorOutputChannel)
-                  }
+                  className={monitorToneActive ? "small-button danger" : "small-button"}
+                  onClick={() => testTone("monitor", monitorOutputDeviceId, monitorOutputChannel)}
                   disabled={
-                    !effectiveMonitorOriginalAudio ||
-                    !monitorOutputDeviceId ||
-                    !canTestAudio ||
-                    testingTone === "monitor"
+                    !monitorToneActive &&
+                    (!effectiveMonitorOriginalAudio || !monitorOutputDeviceId || !canTestAudio)
                   }
                 >
-                  {testingTone === "monitor" ? "Testing" : "Test original"}
+                  {monitorToneActive ? "Stop original" : "Test original"}
                 </button>
                 {lastRefreshedAt ? (
                   <span className="refresh-note">
@@ -1574,6 +1580,16 @@ function ConversationEmptyState({
 }
 
 function UtteranceCard({ item }: { item: ConversationDisplayItem }) {
+  const sentencePairs =
+    item.sentencePairs.length > 0
+      ? item.sentencePairs
+      : [
+          {
+            sourceText: item.sourceText,
+            translatedText: item.translatedText,
+          },
+        ];
+
   return (
     <article
       aria-live={item.status === "final" ? "polite" : "off"}
@@ -1593,25 +1609,35 @@ function UtteranceCard({ item }: { item: ConversationDisplayItem }) {
           <span>{Math.round(item.speakerConfidence * 100)}% speaker confidence</span>
         ) : null}
       </header>
-      <p className="utterance-source">
-        {item.sourceText || (item.status === "partial" ? "Listening..." : "No source text")}
-      </p>
-      <div
-        className={`translation-line ${
-          item.hasPendingTranslation ? "pending" : item.status === "error" ? "error" : ""
-        }`}
-      >
-        <span>Translation</span>
-        {item.status === "error" ? (
-          <p>
-            <AlertTriangle size={15} />
-            {item.translatedText || "Translation failed for this utterance."}
-          </p>
-        ) : item.translatedText ? (
-          <p>{item.translatedText}</p>
-        ) : (
-          <p className="translation-placeholder">Translating</p>
-        )}
+      <div className="sentence-pair-list">
+        <div className="sentence-pair-heading" aria-hidden="true">
+          <span>Original</span>
+          <span>Translation</span>
+        </div>
+        {sentencePairs.map((pair, index) => (
+          <div className="sentence-pair-row" key={`${item.id}-${index}`}>
+            <p className="utterance-source">
+              {pair.sourceText ||
+                (item.status === "partial" ? "Listening..." : "No source text")}
+            </p>
+            <div
+              className={`translation-line ${
+                item.hasPendingTranslation ? "pending" : item.status === "error" ? "error" : ""
+              }`}
+            >
+              {item.status === "error" ? (
+                <p>
+                  <AlertTriangle size={15} />
+                  {pair.translatedText || "Translation failed for this utterance."}
+                </p>
+              ) : pair.translatedText ? (
+                <p>{pair.translatedText}</p>
+              ) : (
+                <p className="translation-placeholder">Translating</p>
+              )}
+            </div>
+          </div>
+        ))}
       </div>
     </article>
   );

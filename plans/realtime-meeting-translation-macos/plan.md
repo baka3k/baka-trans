@@ -5,7 +5,7 @@ Created: 2026-07-08
 Source spec: `/Users/hieplq1.rpm/AI/baka-trans/note.md`
 Mode: `hi-plan --full`
 Blocked by: none
-Blocks: none
+Blocks: `plans/transparent-ocr-overlay-macos`
 
 ## Objective
 
@@ -23,6 +23,7 @@ Build a lightweight macOS desktop app that captures Microsoft Teams meeting audi
 - 2026-07-09 OpenAI realtime language-selector update: `mind_mcp` default collection was missing and the project collection returned empty passages. `graph_mcp` found the current selector in `src/App.tsx` and `targetLanguages = languages.filter(...)`; local source confirms both the React `Language` union in `src/types.ts` and Rust `Language` enum in `src-tauri/src/models.rs` are still limited to `auto`, `en`, `ja`, and `vi`. The new scope should update the existing realtime translation plan rather than create a separate plan.
 - 2026-07-10 Google migration update: `mind_mcp`, `graph_mcp`, and `serena` were not exposed in this session, so the search chain fast-failed to local `rg`/file reads. Local source now has a concrete OpenAI Realtime implementation in `src-tauri/src/ai.rs`, OpenAI-specific translation secrets in `src-tauri/src/security.rs`, OpenAI target-language assumptions in `src/languages.ts` and `src-tauri/src/models.rs`, and OpenAI-compatible summary profiles in `src-tauri/src/llm.rs`. The Google migration should update this active plan, not create a separate feature plan.
 - 2026-07-10 Conversation UI redesign update: `mind_mcp`, `graph_mcp`, and `serena` were not exposed in this session, so the search chain fast-failed to local `rg`/file reads. Local source shows `src/App.tsx` already renders status, routing, audio levels, summary controls, and a two-column transcript table. The new scope should redesign that transcript area into a chat-style conversation feed while reusing existing transcript, audio-level, and session events.
+- 2026-07-10 Transparent OCR overlay update: user requested a "xuyen thau" mode that opens a semi-transparent movable/resizable window and translates text under it. `graph_mcp` found the current Tauri/React bridge and transcript UI symbols, while local source confirms translation provider settings, Tauri commands, and app state are already centralized. This should be tracked as `plans/transparent-ocr-overlay-macos` and implemented as a separate screen-capture/OCR/text-translation runtime that depends on this app foundation rather than extending the audio session runtime.
 
 ## Official API Notes
 

@@ -161,6 +161,7 @@ export interface ConversationDisplayItem {
   timestampMs: number;
   sourceText: string;
   translatedText: string;
+  sentencePairs: ConversationSentencePair[];
   status: TranscriptStatus;
   latencyMs?: number;
   speakerLabel?: string;
@@ -168,6 +169,11 @@ export interface ConversationDisplayItem {
   speakerConfidence?: number;
   speakerDisplayLabel: string;
   hasPendingTranslation: boolean;
+}
+
+export interface ConversationSentencePair {
+  sourceText: string;
+  translatedText: string;
 }
 
 export interface TranslatedAudioLevelEvent {

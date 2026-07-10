@@ -107,6 +107,10 @@ export function playTestTone(outputDeviceId: string, outputChannel: AudioOutputC
   return invoke<void>("play_test_tone", { outputDeviceId, outputChannel });
 }
 
+export function stopTestTone() {
+  return invoke<void>("stop_test_tone");
+}
+
 export function startLocalMonitor(
   inputDeviceId: string,
   outputDeviceId: string,

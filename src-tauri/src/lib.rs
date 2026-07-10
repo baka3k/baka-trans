@@ -13,7 +13,8 @@ use commands::{
     has_translation_api_key, list_audio_devices, list_llm_profiles, pause_session, play_test_tone,
     resume_session, run_meeting_summary_agent, save_api_key, save_llm_profile,
     save_translation_api_key, start_local_monitor, start_session, stop_local_monitor, stop_session,
-    test_api_key, test_llm_profile, test_translation_api_key, translation_credential_status,
+    stop_test_tone, test_api_key, test_llm_profile, test_translation_api_key,
+    translation_credential_status,
 };
 use session::AppState;
 
@@ -43,6 +44,7 @@ pub fn run() {
             run_meeting_summary_agent,
             export_transcript,
             play_test_tone,
+            stop_test_tone,
             start_local_monitor,
             stop_local_monitor
         ])

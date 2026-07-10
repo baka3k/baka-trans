@@ -30,6 +30,35 @@ describe("transcript helpers", () => {
     expect(merged[0].sourceText).toBe("Hello world");
   });
 
+  it("repairs missing spaces between streamed word chunks", () => {
+    const merged = mergeTranscriptDelta(
+      [
+        {
+          ...base,
+          sourceText: "To test your",
+          translatedText: "De kiem tra",
+        },
+      ],
+      {
+        ...base,
+        id: "2",
+        sourceText: "call quality,",
+        translatedText: "",
+      },
+    );
+
+    const translated = mergeTranscriptDelta(merged, {
+      ...base,
+      id: "3",
+      sourceText: "",
+      translatedText: "chat luong cuoc goi",
+    });
+
+    expect(translated).toHaveLength(1);
+    expect(translated[0].sourceText).toBe("To test your call quality,");
+    expect(translated[0].translatedText).toBe("De kiem tra chat luong cuoc goi");
+  });
+
   it("merges final translation-only deltas into the current row", () => {
     const merged = mergeTranscriptDelta([base], {
       ...base,
@@ -183,6 +212,32 @@ describe("transcript helpers", () => {
       speakerDisplayLabel: "Source",
       hasPendingTranslation: false,
     });
+  });
+
+  it("pairs source and translated sentences for readable display", () => {
+    const [item] = deriveConversationItems([
+      {
+        ...base,
+        sourceText:
+          "To test your call quality, record a short message after the beep. Then your message will be played back to you.",
+        translatedText:
+          "De kiem tra chat luong cuoc goi, hay ghi am mot tin nhan ngan sau tieng bip. Sau do tin nhan cua ban se duoc phat lai cho ban.",
+        status: "final",
+      },
+    ]);
+
+    expect(item.sentencePairs).toEqual([
+      {
+        sourceText:
+          "To test your call quality, record a short message after the beep.",
+        translatedText:
+          "De kiem tra chat luong cuoc goi, hay ghi am mot tin nhan ngan sau tieng bip.",
+      },
+      {
+        sourceText: "Then your message will be played back to you.",
+        translatedText: "Sau do tin nhan cua ban se duoc phat lai cho ban.",
+      },
+    ]);
   });
 
   it("marks source-only items as pending translation", () => {

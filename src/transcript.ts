@@ -1,5 +1,6 @@
 import type {
   ConversationDisplayItem,
+  ConversationSentencePair,
   LlmProviderProfileDraft,
   MeetingSummaryConfig,
   MeetingSummaryResult,
@@ -47,7 +48,10 @@ function appendTranscriptText(current: string, delta: string, breakAfterSentence
     return delta;
   }
   if (breakAfterSentence && shouldStartNewTranscriptLine(current, delta)) {
-    return `${current}\n${delta.trimStart()}`;
+    return `${current.trimEnd()}\n${delta.trimStart()}`;
+  }
+  if (shouldInsertSpaceBetweenChunks(current, delta)) {
+    return `${current.trimEnd()} ${delta.trimStart()}`;
   }
   return `${current}${delta}`;
 }
@@ -55,6 +59,35 @@ function appendTranscriptText(current: string, delta: string, breakAfterSentence
 function shouldStartNewTranscriptLine(current: string, delta: string) {
   const next = delta.trimStart();
   return /[.!?。！？]\s*$/.test(current) && next.length > 0 && !/^[,.;:!?)]/.test(next);
+}
+
+function shouldInsertSpaceBetweenChunks(current: string, delta: string) {
+  const trimmedCurrent = current.trimEnd();
+  const trimmedDelta = delta.trimStart();
+  const previous = trimmedCurrent[trimmedCurrent.length - 1];
+  const next = trimmedDelta[0];
+  if (!previous || !next) {
+    return false;
+  }
+  if (/\s/.test(current[current.length - 1] ?? "") || /\s/.test(delta[0] ?? "")) {
+    return false;
+  }
+  if (isClosingPunctuation(next) || isOpeningPunctuation(previous)) {
+    return false;
+  }
+  return isWordCharacter(previous) && isWordCharacter(next);
+}
+
+function isWordCharacter(value: string) {
+  return /[\p{L}\p{N}]/u.test(value);
+}
+
+function isClosingPunctuation(value: string) {
+  return /[,.;:!?%)]/.test(value);
+}
+
+function isOpeningPunctuation(value: string) {
+  return /[(\[]/.test(value);
 }
 
 export function renderTranscript(
@@ -67,32 +100,27 @@ export function renderTranscript(
     const transcript = [
       "# Baka Trans Transcript",
       "",
-      ...items.map(
-        (item) =>
-          `## ${new Date(item.timestampMs).toLocaleTimeString()} (${item.status})\n\n**Source:** ${item.sourceText}\n\n**Translation:** ${item.translatedText}\n`,
-      ),
+      ...items.map((item) => renderTranscriptItem(item, "markdown")),
     ].join("\n");
     return notes ? `${transcript}\n\n${notes}` : transcript;
   }
 
   const transcript = items
-    .map(
-      (item) =>
-        `[${new Date(item.timestampMs).toLocaleTimeString()}]\nSource: ${item.sourceText}\nTranslation: ${item.translatedText}\n`,
-    )
+    .map((item) => renderTranscriptItem(item, "text"))
     .join("\n");
   return notes ? `${transcript}\n\n${notes}` : transcript;
 }
 
 export function deriveConversationItems(items: TranscriptItem[]): ConversationDisplayItem[] {
   return items.map((item) => {
-    const sourceText = item.sourceText.trim();
-    const translatedText = item.translatedText.trim();
+    const sourceText = normalizeTranscriptWhitespace(item.sourceText);
+    const translatedText = normalizeTranscriptWhitespace(item.translatedText);
     return {
       id: item.id,
       timestampMs: item.timestampMs,
       sourceText,
       translatedText,
+      sentencePairs: pairTranscriptSentences(sourceText, translatedText),
       status: item.status,
       latencyMs: item.latencyMs,
       speakerLabel: item.speakerLabel,
@@ -103,6 +131,64 @@ export function deriveConversationItems(items: TranscriptItem[]): ConversationDi
         item.status !== "error" && sourceText.length > 0 && translatedText.length === 0,
     };
   });
+}
+
+function renderTranscriptItem(item: TranscriptItem, format: "text" | "markdown") {
+  const timestamp = new Date(item.timestampMs).toLocaleTimeString();
+  const sourceText = normalizeTranscriptWhitespace(item.sourceText);
+  const translatedText = normalizeTranscriptWhitespace(item.translatedText);
+  const pairs = pairTranscriptSentences(sourceText, translatedText);
+
+  if (format === "markdown") {
+    const lines = pairs.flatMap((pair) => [
+      `**Original:** ${pair.sourceText || "_No source text_"}`,
+      `**Translation:** ${pair.translatedText || "_No translation yet_"}`,
+      "",
+    ]);
+    return [`## ${timestamp} (${item.status})`, "", ...lines].join("\n");
+  }
+
+  const lines = pairs.flatMap((pair) => [
+    `Original: ${pair.sourceText || "No source text"}`,
+    `Translation: ${pair.translatedText || "No translation yet"}`,
+    "",
+  ]);
+  return [`[${timestamp}]`, ...lines].join("\n");
+}
+
+export function pairTranscriptSentences(
+  sourceText: string,
+  translatedText: string,
+): ConversationSentencePair[] {
+  const sourceSentences = splitTranscriptSentences(sourceText);
+  const translatedSentences = splitTranscriptSentences(translatedText);
+  const pairCount = Math.max(sourceSentences.length, translatedSentences.length);
+
+  return Array.from({ length: pairCount }, (_, index) => ({
+    sourceText: sourceSentences[index] ?? "",
+    translatedText: translatedSentences[index] ?? "",
+  }));
+}
+
+export function splitTranscriptSentences(text: string) {
+  const normalized = normalizeTranscriptWhitespace(text).replace(/\n+/g, " ");
+  if (!normalized) {
+    return [];
+  }
+
+  const matches = normalized.match(/[^.!?。！？]+[.!?。！？]+["')\]]*|[^.!?。！？]+$/g);
+  return (matches ?? [normalized])
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+}
+
+function normalizeTranscriptWhitespace(text: string) {
+  return text
+    .replace(/[ \t]*\n[ \t]*/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\s+([,.;:!?%)\]])/g, "$1")
+    .replace(/([([])\s+/g, "$1")
+    .trim();
 }
 
 export function deriveSourceSignalState(

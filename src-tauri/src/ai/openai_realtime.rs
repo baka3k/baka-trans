@@ -717,7 +717,7 @@ fn merge_transcript_delta(transcript: &mut Vec<TranscriptItem>, item: Transcript
     }
 
     if !item.source_text.is_empty() && item.translated_text.is_empty() {
-        last.source_text.push_str(&item.source_text);
+        append_transcript_text(&mut last.source_text, &item.source_text, false);
         last.status = item.status;
         return;
     }
@@ -740,8 +740,19 @@ fn append_transcript_text(current: &mut String, delta: &str, break_after_sentenc
     if delta.is_empty() {
         return;
     }
+    if current.is_empty() {
+        current.push_str(delta);
+        return;
+    }
     if break_after_sentence && should_start_new_transcript_line(current, delta) {
+        current.truncate(current.trim_end().len());
         current.push('\n');
+        current.push_str(delta.trim_start());
+        return;
+    }
+    if should_insert_space_between_chunks(current, delta) {
+        current.truncate(current.trim_end().len());
+        current.push(' ');
         current.push_str(delta.trim_start());
         return;
     }
@@ -760,6 +771,30 @@ fn should_start_new_transcript_line(current: &str, delta: &str) -> bool {
             .chars()
             .next()
             .is_some_and(|ch| matches!(ch, ',' | '.' | ';' | ':' | '!' | '?' | ')'))
+}
+
+fn should_insert_space_between_chunks(current: &str, delta: &str) -> bool {
+    let previous = current.trim_end().chars().next_back();
+    let next = delta.trim_start().chars().next();
+
+    if previous.is_none() || next.is_none() {
+        return false;
+    }
+    if current
+        .chars()
+        .next_back()
+        .is_some_and(char::is_whitespace)
+        || delta.chars().next().is_some_and(char::is_whitespace)
+    {
+        return false;
+    }
+
+    let previous = previous.unwrap();
+    let next = next.unwrap();
+    previous.is_alphanumeric()
+        && next.is_alphanumeric()
+        && !matches!(next, ',' | '.' | ';' | ':' | '!' | '?' | '%' | ')')
+        && !matches!(previous, '(' | '[')
 }
 
 fn now_ms() -> u64 {
@@ -839,6 +874,48 @@ mod tests {
         assert_eq!(transcript[0].source_text, "Hello");
         assert_eq!(transcript[0].translated_text, "Xin chao");
         assert_eq!(transcript[0].status, TranscriptStatus::Final);
+    }
+
+    #[test]
+    fn repairs_missing_spaces_between_streamed_word_chunks() {
+        let mut transcript = vec![TranscriptItem {
+            id: "1".to_string(),
+            timestamp_ms: 1,
+            source_text: "To test your".to_string(),
+            translated_text: "De kiem tra".to_string(),
+            status: TranscriptStatus::Partial,
+            latency_ms: None,
+        }];
+
+        merge_transcript_delta(
+            &mut transcript,
+            TranscriptItem {
+                id: "2".to_string(),
+                timestamp_ms: 2,
+                source_text: "call quality,".to_string(),
+                translated_text: String::new(),
+                status: TranscriptStatus::Partial,
+                latency_ms: None,
+            },
+        );
+        merge_transcript_delta(
+            &mut transcript,
+            TranscriptItem {
+                id: "3".to_string(),
+                timestamp_ms: 3,
+                source_text: String::new(),
+                translated_text: "chat luong cuoc goi".to_string(),
+                status: TranscriptStatus::Partial,
+                latency_ms: None,
+            },
+        );
+
+        assert_eq!(transcript.len(), 1);
+        assert_eq!(transcript[0].source_text, "To test your call quality,");
+        assert_eq!(
+            transcript[0].translated_text,
+            "De kiem tra chat luong cuoc goi"
+        );
     }
 
     #[test]

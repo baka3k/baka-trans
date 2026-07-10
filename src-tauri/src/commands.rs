@@ -173,10 +173,16 @@ pub fn export_transcript(
 
 #[tauri::command]
 pub fn play_test_tone(
+    state: State<'_, AppState>,
     output_device_id: String,
     output_channel: AudioOutputChannel,
 ) -> AppResult<()> {
-    audio::play_test_tone(&output_device_id, output_channel)
+    state.start_test_tone(&output_device_id, output_channel)
+}
+
+#[tauri::command]
+pub fn stop_test_tone(state: State<'_, AppState>) -> AppResult<()> {
+    state.stop_test_tone()
 }
 
 #[tauri::command]
