@@ -695,8 +695,16 @@ export default function App() {
     try {
       const submittedApiKey = profileKeyDraft.trim();
       const saved = await saveLlmProfile({
-        ...profileDraft,
+        id: profileDraft.id,
+        name: profileDraft.name.trim(),
+        kind: profileDraft.kind,
+        model: profileDraft.model.trim(),
+        baseUrl: profileDraft.baseUrl?.trim() || undefined,
         apiKey: submittedApiKey || undefined,
+        timeoutSeconds: profileDraft.timeoutSeconds,
+        maxOutputTokens: profileDraft.maxOutputTokens,
+        temperature: profileDraft.temperature,
+        enabled: profileDraft.enabled,
       });
       const profiles = await listLlmProfiles();
       const persisted = profiles.find((profile) => profile.id === saved.id);
@@ -720,9 +728,11 @@ export default function App() {
         setProfileKeyDraft("");
       }
       setProfileTestMessage(
-        persisted.hasApiKey
-          ? `Profile and LLM key saved ${persisted.apiKeyFingerprint ?? ""}.`
-          : "Profile saved.",
+        submittedApiKey
+          ? `Profile settings and LLM key saved ${persisted.apiKeyFingerprint ?? ""}.`
+          : persisted.hasApiKey
+            ? `Profile settings saved. LLM key ${persisted.apiKeyFingerprint ?? ""} remains stored.`
+            : "Profile settings saved.",
       );
     } catch (cause) {
       setError(normalizeError(cause));
@@ -1511,27 +1521,19 @@ export default function App() {
 
                 <label className="field profile-key-field">
                   <span>LLM API key</span>
-                  <div className="key-row">
-                    <input
-                      type="password"
-                      value={profileKeyDraft}
-                      placeholder={
-                        selectedProfile?.hasApiKey
-                          ? `Saved LLM key ${selectedProfile.apiKeyFingerprint ?? ""}`
-                          : profileDraft.kind === "ollama"
-                            ? "Ollama API key, optional for local"
-                            : "LLM provider API key"
-                      }
-                      onChange={(event) => setProfileKeyDraft(event.currentTarget.value)}
-                    />
-                    <button
-                      onClick={saveSummaryProfile}
-                      disabled={busy || profileDraftErrors.length > 0}
-                    >
-                      <Save size={17} /> {selectedProfile?.hasApiKey ? "Replace" : "Save"}
-                    </button>
-                  </div>
-                  <small>Stored separately from translation API keys.</small>
+                  <input
+                    type="password"
+                    value={profileKeyDraft}
+                    placeholder={
+                      selectedProfile?.hasApiKey
+                        ? `Saved LLM key ${selectedProfile.apiKeyFingerprint ?? ""}`
+                        : profileDraft.kind === "ollama"
+                          ? "Ollama API key, optional for local"
+                          : "LLM provider API key"
+                    }
+                    onChange={(event) => setProfileKeyDraft(event.currentTarget.value)}
+                  />
+                  <small>Saved with the profile and stored separately from profile settings.</small>
                   <div className={`key-status ${selectedProfile?.hasApiKey ? "ok" : ""}`}>
                     {selectedProfile?.hasApiKey
                       ? `Saved LLM key ${selectedProfile.apiKeyFingerprint ?? ""}`
@@ -1542,6 +1544,13 @@ export default function App() {
                 </label>
 
                 <div className="profile-actions">
+                  <button
+                    className="small-button"
+                    onClick={saveSummaryProfile}
+                    disabled={busy || profileDraftErrors.length > 0}
+                  >
+                    <Save size={14} /> Save profile
+                  </button>
                   <button
                     className="small-button"
                     onClick={testSelectedProfile}
