@@ -923,11 +923,11 @@ export default function App() {
             className="icon-button overlay-launch-button"
             onClick={showTransparentOverlay}
             disabled={busy}
-            title="Xuyen thau"
-            aria-label="Open transparent OCR overlay"
+            title="Look through"
+            aria-label="Open look through OCR overlay"
           >
             <ScanText size={18} />
-            <span>Xuyen thau</span>
+            <span>Look through</span>
           </button>
           <button
             className="icon-button"
