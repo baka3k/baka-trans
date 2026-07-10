@@ -93,8 +93,8 @@ impl OverlayState {
             WebviewUrl::App("index.html?overlay=transparent".into()),
         )
         .title("Baka Trans Overlay")
-        .inner_size(360.0, 360.0)
-        .min_inner_size(240.0, 180.0)
+        .inner_size(480.0, 560.0)
+        .min_inner_size(360.0, 420.0)
         .transparent(true)
         .decorations(false)
         .content_protected(true)

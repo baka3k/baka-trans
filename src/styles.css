@@ -1874,6 +1874,44 @@ h2 {
     background: rgb(237 244 241 / 0.32);
   }
 
+  .look-through-window-root {
+    background: rgb(16 29 23 / var(--overlay-opacity));
+  }
+
+  .look-through-status-strip,
+  .look-through-meta-bar {
+    background: rgb(24 39 32 / 0.9);
+  }
+
+  .look-through-settings {
+    background: rgb(25 48 37 / 0.88);
+    border-color: rgb(194 226 210 / 0.16);
+  }
+
+  .look-through-workspace {
+    background: rgb(10 23 17 / 0.58);
+  }
+
+  .look-through-panel {
+    background: rgb(23 38 31 / 0.88);
+    border-color: rgb(194 226 210 / 0.18);
+  }
+
+  .look-through-panel > header {
+    border-color: rgb(194 226 210 / 0.14);
+  }
+
+  .look-through-live-button {
+    background: #78d4aa;
+    border-color: #78d4aa;
+    color: #10271c;
+  }
+
+  .look-through-live-button:hover:not(:disabled) {
+    background: #93dfbc;
+    border-color: #93dfbc;
+  }
+
   .look-help-window-root {
     background: rgb(17 27 37 / var(--overlay-opacity));
   }
@@ -1914,6 +1952,26 @@ h2 {
 }
 
 @media (max-width: 500px) {
+  .look-through-window-root {
+    grid-template-rows: 38px auto auto minmax(0, 1fr) 32px;
+  }
+
+  .look-through-status-strip {
+    grid-template-columns: 9px minmax(0, 1fr) auto;
+  }
+
+  .look-through-status-strip small {
+    display: none;
+  }
+
+  .look-through-workspace {
+    grid-template-rows: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  }
+
+  .look-through-source-panel .look-through-panel-empty span {
+    display: none;
+  }
+
   .look-help-window-root {
     grid-template-rows: 38px auto auto minmax(0, 1fr) 32px;
   }

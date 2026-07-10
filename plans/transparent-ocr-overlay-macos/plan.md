@@ -1,6 +1,6 @@
 # Transparent OCR Translation Overlay for macOS
 
-Status: active
+Status: completed
 Created: 2026-07-10
 Source spec: user request in Codex thread, Vietnamese: add a "xuyen thau" button that opens a semi-transparent square window; wherever the user moves/resizes it, text underneath is translated and shown inside the window.
 Mode: `hi-plan --fast`
@@ -215,6 +215,15 @@ Overlay translation result:
 - Unit tests for OCR text normalization/dedupe and overlay state reducer.
 - Rust tests for model serialization and text hash/debounce behavior.
 - App build/test: `npm run build`, `npm test`, and `cargo test` from `src-tauri`.
+
+Phase 05 validation completed on 2026-07-10:
+
+- `npm test`: 26 tests passed.
+- `npm run build`: TypeScript and Vite production build passed.
+- `cargo fmt --check`: passed.
+- `cargo test`: 49 tests passed and 2 live-provider smoke tests remained intentionally ignored.
+- Browser layout checks passed at 480x560 and the 360x420 minimum size, including opacity settings expanded. Both text panels stayed separated, the root stayed within the viewport, and toolbar actions did not start window dragging.
+- Native Screen Recording, Vision OCR, and Gemini translation still require a manual Tauri runtime check with macOS permission and a configured Google credential. The realtime backend loop itself was not changed in Phase 05.
 
 ## References
 

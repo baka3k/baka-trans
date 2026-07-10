@@ -176,7 +176,7 @@ function beginOverlayDrag(event: React.MouseEvent<HTMLElement>) {
 
 function beginOverlayActionsDrag(event: React.MouseEvent<HTMLElement>) {
   const target = event.target;
-  if (target instanceof HTMLElement && target.closest("button,input,select,textarea,a")) {
+  if (target instanceof Element && target.closest("button,input,select,textarea,a")) {
     event.stopPropagation();
     return;
   }
