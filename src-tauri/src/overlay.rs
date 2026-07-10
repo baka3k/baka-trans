@@ -438,21 +438,25 @@ pub(crate) async fn capture_and_ocr_text(
     minimum_confidence: f32,
     window_id: Option<u32>,
 ) -> AppResult<String> {
-    if !screen_recording_permission_granted() {
-        return Err(AppError::new(
-            "screen_recording_permission_needed",
-            "Baka Trans is not allowed to record the screen yet. Turn on Screen & System Audio Recording for Baka Trans, then quit and reopen the app if macOS still reports this.",
-        ));
-    }
-
     #[cfg(target_os = "macos")]
     {
+        let permission_hint = screen_recording_permission_granted();
         let geometry = geometry.clone();
-        return tauri::async_runtime::spawn_blocking(move || {
+        let result = tauri::async_runtime::spawn_blocking(move || {
             capture_and_ocr_text_blocking(&geometry, minimum_confidence, window_id)
         })
         .await
         .map_err(|err| AppError::new("overlay_ocr_join_error", err.to_string()))?;
+        return result.map_err(|error| {
+            if !permission_hint && error.code == "overlay_capture_empty" {
+                AppError::new(
+                    "screen_recording_permission_needed",
+                    "Baka Trans could not capture the screen. Confirm Screen & System Audio Recording is enabled for this exact Baka Trans app, then quit and reopen it if macOS still reports this.",
+                )
+            } else {
+                error
+            }
+        });
     }
 
     #[cfg(not(target_os = "macos"))]
