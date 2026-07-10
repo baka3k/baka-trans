@@ -146,7 +146,7 @@ export default function App() {
   const [translationProvider, setTranslationProvider] =
     useState<TranslationProvider>("google_live_translate");
   const [sourceLanguage, setSourceLanguage] = useState<Language>("auto");
-  const [targetLanguage, setTargetLanguage] = useState<Language>("en");
+  const [targetLanguage, setTargetLanguage] = useState<Language>("vi");
   const [inputDeviceId, setInputDeviceId] = useState("");
   const [outputDeviceId, setOutputDeviceId] = useState("");
   const [translationOutputChannel, setTranslationOutputChannel] =
@@ -249,8 +249,9 @@ export default function App() {
     inputDeviceId.length > 0 &&
     outputDeviceId.length > 0 &&
     (!monitorOriginalAudio || monitorOutputDeviceId.length > 0);
+  const sessionActive = activeSessionStatuses.includes(status);
   const canForceBoundary =
-    translationProvider === "openai_realtime" && activeSessionStatuses.includes(status);
+    translationProvider === "openai_realtime" && sessionActive;
   const canPause = canForceBoundary;
   const canResume = status === "paused";
   const canStop = status !== "idle" && status !== "stopping";
@@ -276,7 +277,7 @@ export default function App() {
   const translationOutLevel = localMonitorActive
     ? inputSignalPercent
     : Math.round(translatedLevel.peak * 100);
-  const monitorOutLevel = effectiveMonitorOriginalAudio && canForceBoundary ? inputSignalPercent : 0;
+  const monitorOutLevel = effectiveMonitorOriginalAudio && sessionActive ? inputSignalPercent : 0;
   const audioLineRows: AudioLineRow[] = [
     {
       id: "input",
@@ -287,7 +288,7 @@ export default function App() {
           ? "signal"
           : localMonitorActive
             ? "listening"
-            : canForceBoundary
+            : sessionActive
               ? "listening"
               : "idle",
       leftLevel: inputSignalPercent,
@@ -304,7 +305,7 @@ export default function App() {
           : "armed"
         : status === "speaking"
           ? "speaking"
-          : canForceBoundary
+          : sessionActive
             ? "armed"
             : "idle",
       leftLevel: channelLevel(translationOutputChannel, "left", translationOutLevel),
@@ -321,11 +322,10 @@ export default function App() {
       disabled: !effectiveMonitorOriginalAudio || !selectedMonitorOutput,
     },
   ];
-  const readinessLabel = canStart
-    ? "Ready"
-    : status === "idle"
-      ? "Setup needed"
-      : labelStatus(status);
+  const readinessLabel =
+    status === "idle" ? (canStart ? "Ready" : "Setup needed") : labelStatus(status);
+  const sessionPanelHealthy =
+    (status === "idle" && canStart) || status === "starting" || sessionActive;
   const selectedProfile = llmProfiles.find((profile) => profile.id === selectedProfileId);
   const profileDraftErrors = validateLlmProfileDraft(profileDraft);
   const canRunSummary =
@@ -414,7 +414,7 @@ export default function App() {
 
   useEffect(() => {
     if (!targetLanguageOptions.some((option) => option.value === targetLanguage)) {
-      setTargetLanguage(targetLanguageOptions[0]?.value ?? "en");
+      setTargetLanguage(targetLanguageOptions[0]?.value ?? "vi");
     }
   }, [targetLanguage, targetLanguageOptions]);
 
@@ -520,6 +520,14 @@ export default function App() {
 
   function applyRoutingProfile(profile: RoutingProfile, shouldPersist = false) {
     const previousProfile = routingProfileRef.current;
+    const routingProfileChanged =
+      previousProfile.inputDeviceId !== profile.inputDeviceId ||
+      previousProfile.outputDeviceId !== profile.outputDeviceId ||
+      previousProfile.translationOutputChannel !== profile.translationOutputChannel ||
+      previousProfile.monitorOutputDeviceId !== profile.monitorOutputDeviceId ||
+      previousProfile.monitorOutputChannel !== profile.monitorOutputChannel ||
+      previousProfile.monitorOriginalAudio !== profile.monitorOriginalAudio;
+
     routingProfileRef.current = profile;
     setInputDeviceId(profile.inputDeviceId);
     setOutputDeviceId(profile.outputDeviceId);
@@ -527,7 +535,7 @@ export default function App() {
     setMonitorOutputDeviceId(profile.monitorOutputDeviceId);
     setMonitorOutputChannel(profile.monitorOutputChannel);
     setMonitorOriginalAudio(profile.monitorOriginalAudio);
-    if (shouldPersist && !sameRoutingProfile(previousProfile, profile)) {
+    if (shouldPersist && routingProfileChanged) {
       persistRoutingProfile(profile);
     }
   }
@@ -894,7 +902,7 @@ export default function App() {
             <div className="panel controls-panel">
               <div className="panel-header">
                 <h2>Session</h2>
-                <span className={`panel-state ${canStart ? "ok" : ""}`}>{readinessLabel}</span>
+                <span className={`panel-state ${sessionPanelHealthy ? "ok" : ""}`}>{readinessLabel}</span>
               </div>
               <div className="field-grid two">
                 <SelectField
@@ -1165,9 +1173,6 @@ export default function App() {
                 </button>
                 {keyTestMessage ? <span>{keyTestMessage}</span> : null}
               </div>
-              {translationProvider === "google_live_translate" ? (
-                <InlineWarning text="Google credentials are ready for migration; live audio starts in phase 12." />
-              ) : null}
               <div className="setup-list">
                 <div>
                   <strong>1. Route</strong>
@@ -1835,17 +1840,6 @@ function resolveRoutingProfile(
     monitorOutputChannel: storedRouting?.monitorOutputChannel ?? "all",
     monitorOriginalAudio: storedRouting?.monitorOriginalAudio ?? false,
   };
-}
-
-function sameRoutingProfile(left: RoutingProfile, right: RoutingProfile) {
-  return (
-    left.inputDeviceId === right.inputDeviceId &&
-    left.outputDeviceId === right.outputDeviceId &&
-    left.translationOutputChannel === right.translationOutputChannel &&
-    left.monitorOutputDeviceId === right.monitorOutputDeviceId &&
-    left.monitorOutputChannel === right.monitorOutputChannel &&
-    left.monitorOriginalAudio === right.monitorOriginalAudio
-  );
 }
 
 function labelStatus(status: SessionStatus) {

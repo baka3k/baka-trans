@@ -121,6 +121,7 @@ describe("transcript helpers", () => {
 
     expect(config.providerProfileId).toBe("profile");
     expect(config.transcriptScope).toBe("both");
+    expect(config.outputLanguage).toBe("Vietnamese");
     expect(config.sections.actionItems).toBe(true);
   });
 

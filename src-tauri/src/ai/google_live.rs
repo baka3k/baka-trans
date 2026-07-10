@@ -1,4 +1,4 @@
-use crate::audio::pcm16_to_le_bytes;
+use crate::audio::{pcm16_to_le_bytes, GOOGLE_LIVE_INPUT_SAMPLE_RATE};
 use crate::error::{AppError, AppResult};
 use crate::models::{
     ManualBoundaryEvent, ManualBoundaryStatus, SessionConfig, SessionStatus, TranscriptItem,
@@ -6,11 +6,12 @@ use crate::models::{
 };
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use serde_json::{json, Value};
 use std::sync::{mpsc as std_mpsc, Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
+use tokio::time::{timeout, Duration};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 use uuid::Uuid;
@@ -20,8 +21,15 @@ use super::openai_realtime::RealtimeControl;
 const GOOGLE_LIVE_TRANSLATE_MODEL: &str = "models/gemini-3.5-live-translate-preview";
 const GOOGLE_LIVE_TRANSLATE_WS: &str = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
 const GOOGLE_AUDIO_MIME_TYPE: &str = "audio/pcm;rate=16000";
+const GOOGLE_AUDIO_CHUNK_MS: usize = 100;
+const GOOGLE_SETUP_TIMEOUT_SECS: u64 = 2;
 
 pub async fn test_live_translation_connection(api_key: &str) -> AppResult<()> {
+    test_google_models_key(api_key).await?;
+    test_live_translation_setup(api_key, "vi").await
+}
+
+async fn test_google_models_key(api_key: &str) -> AppResult<()> {
     let response = reqwest::Client::new()
         .get("https://generativelanguage.googleapis.com/v1beta/models")
         .query(&[("key", api_key.trim())])
@@ -38,6 +46,28 @@ pub async fn test_live_translation_connection(api_key: &str) -> AppResult<()> {
         let message = extract_google_error_message(&body).unwrap_or(body);
         return Err(AppError::new("google_live_key_test_error", message));
     }
+
+    Ok(())
+}
+
+async fn test_live_translation_setup(api_key: &str, target_language: &str) -> AppResult<()> {
+    let request_url = live_translate_url(api_key);
+    let (socket, _) = connect_async(&request_url).await.map_err(|err| {
+        AppError::new(
+            "google_live_connect_error",
+            redact_api_key(&err.to_string(), api_key),
+        )
+    })?;
+    let (mut writer, mut reader) = socket.split();
+
+    writer
+        .send(Message::Text(
+            google_setup_message(target_language).to_string().into(),
+        ))
+        .await
+        .map_err(|err| AppError::new("google_live_send_error", err.to_string()))?;
+    wait_for_google_setup_complete(&mut reader).await?;
+    let _ = writer.send(Message::Close(None)).await;
 
     Ok(())
 }
@@ -59,6 +89,7 @@ pub async fn run_live_translation(
         )
     })?;
     let (mut writer, mut reader) = socket.split();
+    let mut pending_audio = Vec::<i16>::new();
 
     writer
         .send(Message::Text(
@@ -69,6 +100,7 @@ pub async fn run_live_translation(
         .await
         .map_err(|err| AppError::new("google_live_send_error", err.to_string()))?;
 
+    wait_for_google_setup_complete(&mut reader).await?;
     let _ = app.emit("session-status", SessionStatus::Listening);
 
     loop {
@@ -76,12 +108,14 @@ pub async fn run_live_translation(
             maybe_audio = audio_rx.recv() => {
                 match maybe_audio {
                     Some(samples) => {
-                        writer
-                            .send(Message::Text(google_audio_message(&samples).to_string().into()))
-                            .await
-                            .map_err(|err| AppError::new("google_live_send_error", err.to_string()))?;
+                        for chunk in drain_complete_google_audio_chunks(&mut pending_audio, &samples) {
+                            send_google_audio(&mut writer, &chunk).await?;
+                        }
                     }
                     None => {
+                        if let Some(chunk) = drain_remaining_google_audio(&mut pending_audio) {
+                            send_google_audio(&mut writer, &chunk).await?;
+                        }
                         let _ = writer
                             .send(Message::Text(google_audio_stream_end_message().to_string().into()))
                             .await;
@@ -112,8 +146,7 @@ pub async fn run_live_translation(
             maybe_message = reader.next() => {
                 match maybe_message {
                     Some(Ok(Message::Text(text))) => {
-                        let event = serde_json::from_str::<Value>(&text)
-                            .map_err(|err| AppError::new("google_live_event_parse_error", err.to_string()))?;
+                        let event = parse_google_event_text(text.as_ref())?;
                         handle_google_live_event(
                             &app,
                             &event,
@@ -121,8 +154,21 @@ pub async fn run_live_translation(
                             &transcript_store,
                         )?;
                     }
-                    Some(Ok(Message::Binary(_))) => {}
-                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(Message::Binary(bytes))) => {
+                        let event = parse_google_event_text(bytes.as_ref())?;
+                        handle_google_live_event(
+                            &app,
+                            &event,
+                            &playback_tx,
+                            &transcript_store,
+                        )?;
+                    }
+                    Some(Ok(Message::Close(frame))) => {
+                        return Err(unexpected_google_close_error(frame.map(|frame| frame.to_string())));
+                    }
+                    None => {
+                        return Err(unexpected_google_close_error(None));
+                    }
                     Some(Ok(_)) => {}
                     Some(Err(err)) => {
                         return Err(AppError::new("google_live_receive_error", err.to_string()));
@@ -135,6 +181,83 @@ pub async fn run_live_translation(
     Ok(())
 }
 
+async fn send_google_audio<W>(writer: &mut W, samples: &[i16]) -> AppResult<()>
+where
+    W: Sink<Message> + Unpin,
+    <W as Sink<Message>>::Error: std::fmt::Display,
+{
+    if samples.is_empty() {
+        return Ok(());
+    }
+
+    writer
+        .send(Message::Text(
+            google_audio_message(samples).to_string().into(),
+        ))
+        .await
+        .map_err(|err| AppError::new("google_live_send_error", err.to_string()))
+}
+
+async fn wait_for_google_setup_complete<R>(reader: &mut R) -> AppResult<()>
+where
+    R: Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+{
+    wait_for_google_setup_complete_with_timeout(
+        reader,
+        Duration::from_secs(GOOGLE_SETUP_TIMEOUT_SECS),
+    )
+    .await
+}
+
+async fn wait_for_google_setup_complete_with_timeout<R>(
+    reader: &mut R,
+    wait_duration: Duration,
+) -> AppResult<()>
+where
+    R: Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+{
+    let result = timeout(wait_duration, async {
+        loop {
+            match reader.next().await {
+                Some(Ok(Message::Text(text))) => {
+                    let event = parse_google_event_text(text.as_ref())?;
+                    if let Some(message) = google_error_message(&event) {
+                        return Err(AppError::new("google_live_api_error", message));
+                    }
+                    if event.get("setupComplete").is_some() {
+                        return Ok(());
+                    }
+                }
+                Some(Ok(Message::Binary(bytes))) => {
+                    let event = parse_google_event_text(bytes.as_ref())?;
+                    if let Some(message) = google_error_message(&event) {
+                        return Err(AppError::new("google_live_api_error", message));
+                    }
+                    if event.get("setupComplete").is_some() {
+                        return Ok(());
+                    }
+                }
+                Some(Ok(Message::Close(frame))) => {
+                    return Err(unexpected_google_close_error(
+                        frame.map(|frame| frame.to_string()),
+                    ));
+                }
+                None => return Err(unexpected_google_close_error(None)),
+                Some(Ok(_)) => {}
+                Some(Err(err)) => {
+                    return Err(AppError::new("google_live_receive_error", err.to_string()));
+                }
+            }
+        }
+    })
+    .await;
+
+    match result {
+        Ok(setup_result) => setup_result,
+        Err(_) => Ok(()),
+    }
+}
+
 fn live_translate_url(api_key: &str) -> String {
     let encoded_key =
         url::form_urlencoded::byte_serialize(api_key.trim().as_bytes()).collect::<String>();
@@ -145,10 +268,10 @@ fn google_setup_message(target_language: &str) -> Value {
     json!({
         "setup": {
             "model": GOOGLE_LIVE_TRANSLATE_MODEL,
+            "inputAudioTranscription": {},
+            "outputAudioTranscription": {},
             "generationConfig": {
                 "responseModalities": ["AUDIO"],
-                "inputAudioTranscription": {},
-                "outputAudioTranscription": {},
                 "translationConfig": {
                     "targetLanguageCode": target_language,
                     "echoTargetLanguage": false
@@ -169,12 +292,63 @@ fn google_audio_message(samples: &[i16]) -> Value {
     })
 }
 
+fn drain_complete_google_audio_chunks(
+    pending_audio: &mut Vec<i16>,
+    samples: &[i16],
+) -> Vec<Vec<i16>> {
+    pending_audio.extend_from_slice(samples);
+    let chunk_size = google_audio_chunk_sample_count();
+    let complete_len = (pending_audio.len() / chunk_size) * chunk_size;
+    if complete_len == 0 {
+        return Vec::new();
+    }
+
+    pending_audio
+        .drain(..complete_len)
+        .collect::<Vec<_>>()
+        .chunks(chunk_size)
+        .map(|chunk| chunk.to_vec())
+        .collect()
+}
+
+fn drain_remaining_google_audio(pending_audio: &mut Vec<i16>) -> Option<Vec<i16>> {
+    if pending_audio.is_empty() {
+        return None;
+    }
+
+    Some(std::mem::take(pending_audio))
+}
+
+fn google_audio_chunk_sample_count() -> usize {
+    (GOOGLE_LIVE_INPUT_SAMPLE_RATE as usize * GOOGLE_AUDIO_CHUNK_MS) / 1000
+}
+
 fn google_audio_stream_end_message() -> Value {
     json!({
         "realtimeInput": {
             "audioStreamEnd": true
         }
     })
+}
+
+fn unexpected_google_close_error(reason: Option<String>) -> AppError {
+    let detail = reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|reason| !reason.is_empty())
+        .unwrap_or("the remote socket closed without a close reason");
+
+    AppError::new(
+        "google_live_connection_closed",
+        format!("Google Live closed the translation connection unexpectedly: {detail}."),
+    )
+}
+
+fn parse_google_event_text(bytes: &[u8]) -> AppResult<Value> {
+    let text = std::str::from_utf8(bytes)
+        .map_err(|err| AppError::new("google_live_event_parse_error", err.to_string()))?;
+    serde_json::from_str::<Value>(text)
+        .map_err(|err| AppError::new("google_live_event_parse_error", err.to_string()))
 }
 
 fn handle_google_live_event(
@@ -412,6 +586,90 @@ mod tests {
     }
 
     #[test]
+    fn unexpected_google_close_frame_is_an_error() {
+        let error = unexpected_google_close_error(Some("policy violation".to_string()));
+
+        assert_eq!(error.code, "google_live_connection_closed");
+        assert!(error.message.contains("policy violation"));
+    }
+
+    #[tokio::test]
+    async fn accepts_google_setup_complete_event() {
+        let events: Vec<Result<Message, tokio_tungstenite::tungstenite::Error>> =
+            vec![Ok(Message::Text(r#"{"setupComplete":{}}"#.into()))];
+        let mut reader = futures_util::stream::iter(events);
+
+        wait_for_google_setup_complete(&mut reader)
+            .await
+            .expect("setupComplete should pass");
+    }
+
+    #[tokio::test]
+    async fn accepts_binary_google_setup_complete_event() {
+        let events: Vec<Result<Message, tokio_tungstenite::tungstenite::Error>> = vec![Ok(
+            Message::Binary(r#"{"setupComplete":{}}"#.as_bytes().to_vec().into()),
+        )];
+        let mut reader = futures_util::stream::iter(events);
+
+        wait_for_google_setup_complete(&mut reader)
+            .await
+            .expect("binary setupComplete should pass");
+    }
+
+    #[tokio::test]
+    async fn setup_waiter_surfaces_google_api_error() {
+        let events: Vec<Result<Message, tokio_tungstenite::tungstenite::Error>> = vec![Ok(
+            Message::Text(r#"{"error":{"message":"Invalid setup"}}"#.into()),
+        )];
+        let mut reader = futures_util::stream::iter(events);
+
+        let error = wait_for_google_setup_complete(&mut reader)
+            .await
+            .expect_err("Google API errors should fail setup");
+
+        assert_eq!(error.code, "google_live_api_error");
+        assert_eq!(error.message, "Invalid setup");
+    }
+
+    #[tokio::test]
+    async fn setup_waiter_allows_open_socket_without_confirmation() {
+        let mut reader = futures_util::stream::pending::<
+            Result<Message, tokio_tungstenite::tungstenite::Error>,
+        >();
+
+        wait_for_google_setup_complete_with_timeout(&mut reader, Duration::from_millis(1))
+            .await
+            .expect("quiet open sockets should be allowed to start audio");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires GEMINI_API_KEY and live Google network access"]
+    async fn google_live_translation_setup_smoke_test() {
+        let api_key =
+            std::env::var("GEMINI_API_KEY").expect("set GEMINI_API_KEY to run this smoke test");
+
+        test_live_translation_connection(&api_key)
+            .await
+            .expect("Google Live Translation setup should complete");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires GEMINI_API_KEY, macOS say, ffmpeg, and live Google network access"]
+    async fn google_live_translation_output_smoke_test() {
+        let api_key =
+            std::env::var("GEMINI_API_KEY").expect("set GEMINI_API_KEY to run this smoke test");
+        let samples = speech_fixture_samples();
+        let result = live_translation_smoke_result(&api_key, "vi", &samples)
+            .await
+            .expect("Google Live Translation should return translated text or audio");
+
+        assert!(
+            result.audio_sample_count > 0 || !result.output_text.trim().is_empty(),
+            "expected translated audio samples or output transcript, got {result:?}"
+        );
+    }
+
+    #[test]
     fn builds_live_translate_setup_payload() {
         let payload = google_setup_message("vi");
 
@@ -419,6 +677,26 @@ mod tests {
             payload.pointer("/setup/model").and_then(Value::as_str),
             Some(GOOGLE_LIVE_TRANSLATE_MODEL)
         );
+        assert_eq!(
+            payload
+                .pointer("/setup/inputAudioTranscription")
+                .and_then(Value::as_object)
+                .map(serde_json::Map::is_empty),
+            Some(true)
+        );
+        assert_eq!(
+            payload
+                .pointer("/setup/outputAudioTranscription")
+                .and_then(Value::as_object)
+                .map(serde_json::Map::is_empty),
+            Some(true)
+        );
+        assert!(payload
+            .pointer("/setup/generationConfig/inputAudioTranscription")
+            .is_none());
+        assert!(payload
+            .pointer("/setup/generationConfig/outputAudioTranscription")
+            .is_none());
         assert_eq!(
             payload
                 .pointer("/setup/generationConfig/translationConfig/targetLanguageCode")
@@ -450,6 +728,38 @@ mod tests {
             Some("AQD+/w==")
         );
         assert_eq!(crate::audio::GOOGLE_LIVE_INPUT_SAMPLE_RATE, 16_000);
+    }
+
+    #[test]
+    fn batches_google_audio_into_100_ms_chunks() {
+        let mut pending_audio = Vec::new();
+        let chunks = drain_complete_google_audio_chunks(&mut pending_audio, &vec![1; 900]);
+
+        assert!(chunks.is_empty());
+        assert_eq!(pending_audio.len(), 900);
+
+        let chunks = drain_complete_google_audio_chunks(&mut pending_audio, &vec![2; 2300]);
+
+        assert_eq!(google_audio_chunk_sample_count(), 1600);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].len(), 1600);
+        assert_eq!(chunks[1].len(), 1600);
+        assert!(pending_audio.is_empty());
+    }
+
+    #[test]
+    fn keeps_partial_google_audio_until_flush() {
+        let mut pending_audio = Vec::new();
+        let chunks = drain_complete_google_audio_chunks(&mut pending_audio, &vec![1; 1700]);
+
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].len(), 1600);
+        assert_eq!(pending_audio.len(), 100);
+
+        let remainder = drain_remaining_google_audio(&mut pending_audio);
+
+        assert_eq!(remainder.expect("remaining audio").len(), 100);
+        assert!(pending_audio.is_empty());
     }
 
     #[test]
@@ -486,5 +796,176 @@ mod tests {
 
         let error = audio_parts(&event).expect_err("odd PCM16 bytes should fail");
         assert_eq!(error.code, "google_live_audio_format_error");
+    }
+
+    #[derive(Debug, Default)]
+    struct LiveTranslationSmokeResult {
+        input_text: String,
+        output_text: String,
+        audio_sample_count: usize,
+    }
+
+    async fn live_translation_smoke_result(
+        api_key: &str,
+        target_language: &str,
+        samples: &[i16],
+    ) -> AppResult<LiveTranslationSmokeResult> {
+        let request_url = live_translate_url(api_key);
+        let (socket, _) = connect_async(&request_url).await.map_err(|err| {
+            AppError::new(
+                "google_live_connect_error",
+                redact_api_key(&err.to_string(), api_key),
+            )
+        })?;
+        let (mut writer, mut reader) = socket.split();
+
+        writer
+            .send(Message::Text(
+                google_setup_message(target_language).to_string().into(),
+            ))
+            .await
+            .map_err(|err| AppError::new("google_live_send_error", err.to_string()))?;
+        wait_for_google_setup_complete(&mut reader).await?;
+
+        for chunk in samples.chunks(google_audio_chunk_sample_count()) {
+            send_google_audio(&mut writer, chunk).await?;
+            tokio::time::sleep(Duration::from_millis(GOOGLE_AUDIO_CHUNK_MS as u64)).await;
+        }
+        writer
+            .send(Message::Text(
+                google_audio_stream_end_message().to_string().into(),
+            ))
+            .await
+            .map_err(|err| AppError::new("google_live_send_error", err.to_string()))?;
+
+        let result = wait_for_translated_smoke_output(&mut reader).await;
+        let _ = writer.send(Message::Close(None)).await;
+        result
+    }
+
+    async fn wait_for_translated_smoke_output<R>(
+        reader: &mut R,
+    ) -> AppResult<LiveTranslationSmokeResult>
+    where
+        R: Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+    {
+        let result = timeout(Duration::from_secs(45), async {
+            let mut smoke = LiveTranslationSmokeResult::default();
+            loop {
+                match reader.next().await {
+                    Some(Ok(Message::Text(text))) => {
+                        let event = parse_google_event_text(text.as_ref())?;
+                        if let Some(message) = google_error_message(&event) {
+                            return Err(AppError::new("google_live_api_error", message));
+                        }
+                        if let Some(text) = transcript_text(&event, true) {
+                            smoke.input_text.push_str(&text);
+                        }
+                        if let Some(text) = transcript_text(&event, false) {
+                            smoke.output_text.push_str(&text);
+                        }
+                        for samples in audio_parts(&event)? {
+                            smoke.audio_sample_count += samples.len();
+                        }
+                        if smoke.audio_sample_count > 0 || !smoke.output_text.trim().is_empty() {
+                            return Ok(smoke);
+                        }
+                    }
+                    Some(Ok(Message::Binary(bytes))) => {
+                        let event = parse_google_event_text(bytes.as_ref())?;
+                        if let Some(message) = google_error_message(&event) {
+                            return Err(AppError::new("google_live_api_error", message));
+                        }
+                        if let Some(text) = transcript_text(&event, true) {
+                            smoke.input_text.push_str(&text);
+                        }
+                        if let Some(text) = transcript_text(&event, false) {
+                            smoke.output_text.push_str(&text);
+                        }
+                        for samples in audio_parts(&event)? {
+                            smoke.audio_sample_count += samples.len();
+                        }
+                        if smoke.audio_sample_count > 0 || !smoke.output_text.trim().is_empty() {
+                            return Ok(smoke);
+                        }
+                    }
+                    Some(Ok(Message::Close(frame))) => {
+                        return Err(unexpected_google_close_error(
+                            frame.map(|frame| frame.to_string()),
+                        ));
+                    }
+                    Some(Ok(_)) => {}
+                    Some(Err(err)) => {
+                        return Err(AppError::new("google_live_receive_error", err.to_string()));
+                    }
+                    None => return Err(unexpected_google_close_error(None)),
+                }
+            }
+        })
+        .await;
+
+        match result {
+            Ok(output) => output,
+            Err(_) => Err(AppError::new(
+                "google_live_translation_output_timeout",
+                "Google Live did not return translated audio or output transcript for the smoke fixture.",
+            )),
+        }
+    }
+
+    fn speech_fixture_samples() -> Vec<i16> {
+        let temp_dir = std::env::temp_dir();
+        let prefix = format!("baka-trans-google-live-{}", Uuid::new_v4());
+        let aiff_path = temp_dir.join(format!("{prefix}.aiff"));
+        let pcm_path = temp_dir.join(format!("{prefix}.pcm"));
+
+        let say_status = std::process::Command::new("say")
+            .args([
+                "-v",
+                "Samantha",
+                "-o",
+                aiff_path.to_string_lossy().as_ref(),
+                "Hello everyone. This is a live translation test.",
+            ])
+            .status()
+            .expect("macOS say command is required for this smoke test");
+        assert!(
+            say_status.success(),
+            "say failed to generate speech fixture"
+        );
+
+        let ffmpeg_status = std::process::Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                aiff_path.to_string_lossy().as_ref(),
+                "-ac",
+                "1",
+                "-ar",
+                "16000",
+                "-f",
+                "s16le",
+                "-acodec",
+                "pcm_s16le",
+                pcm_path.to_string_lossy().as_ref(),
+            ])
+            .status()
+            .expect("ffmpeg is required for this smoke test");
+        assert!(
+            ffmpeg_status.success(),
+            "ffmpeg failed to convert speech fixture"
+        );
+
+        let bytes = std::fs::read(&pcm_path).expect("read generated PCM fixture");
+        let _ = std::fs::remove_file(aiff_path);
+        let _ = std::fs::remove_file(pcm_path);
+
+        bytes
+            .chunks_exact(2)
+            .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]))
+            .collect()
     }
 }

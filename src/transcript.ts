@@ -185,7 +185,7 @@ export function buildMeetingSummaryConfig(
     providerProfileId,
     trigger: "manual",
     transcriptScope: "both",
-    outputLanguage: "English",
+    outputLanguage: "Vietnamese",
     sections: {
       summary: true,
       decisions: true,
