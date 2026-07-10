@@ -519,6 +519,7 @@ export default function App() {
   }
 
   function applyRoutingProfile(profile: RoutingProfile, shouldPersist = false) {
+    const previousProfile = routingProfileRef.current;
     routingProfileRef.current = profile;
     setInputDeviceId(profile.inputDeviceId);
     setOutputDeviceId(profile.outputDeviceId);
@@ -526,7 +527,7 @@ export default function App() {
     setMonitorOutputDeviceId(profile.monitorOutputDeviceId);
     setMonitorOutputChannel(profile.monitorOutputChannel);
     setMonitorOriginalAudio(profile.monitorOriginalAudio);
-    if (shouldPersist) {
+    if (shouldPersist && !sameRoutingProfile(previousProfile, profile)) {
       persistRoutingProfile(profile);
     }
   }
@@ -1834,6 +1835,17 @@ function resolveRoutingProfile(
     monitorOutputChannel: storedRouting?.monitorOutputChannel ?? "all",
     monitorOriginalAudio: storedRouting?.monitorOriginalAudio ?? false,
   };
+}
+
+function sameRoutingProfile(left: RoutingProfile, right: RoutingProfile) {
+  return (
+    left.inputDeviceId === right.inputDeviceId &&
+    left.outputDeviceId === right.outputDeviceId &&
+    left.translationOutputChannel === right.translationOutputChannel &&
+    left.monitorOutputDeviceId === right.monitorOutputDeviceId &&
+    left.monitorOutputChannel === right.monitorOutputChannel &&
+    left.monitorOriginalAudio === right.monitorOriginalAudio
+  );
 }
 
 function labelStatus(status: SessionStatus) {
