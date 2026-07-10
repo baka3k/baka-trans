@@ -1784,6 +1784,7 @@ function TransparentOverlayWindow() {
   const [translation, setTranslation] = useState<OverlayTranslationUpdate | null>(null);
   const [opacity, setOpacity] = useState(0.72);
   const [copied, setCopied] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [statusMessage, setStatusMessage] = useState("Starting overlay");
   const config: OverlayConfig = status?.config ?? {
     sourceLanguage: "auto",
@@ -1896,7 +1897,7 @@ function TransparentOverlayWindow() {
 
   return (
     <main
-      className="overlay-window-root"
+      className="overlay-window-root look-through-window-root"
       style={{ "--overlay-opacity": opacity } as React.CSSProperties}
     >
       <header
@@ -1910,11 +1911,11 @@ function TransparentOverlayWindow() {
         <div className="overlay-window-actions" onMouseDown={beginOverlayActionsDrag}>
           <button
             className="icon-button tight"
-            onClick={togglePaused}
-            title={status?.isPaused ? "Resume scanning" : "Pause scanning"}
-            aria-label={status?.isPaused ? "Resume scanning" : "Pause scanning"}
+            onClick={() => setSettingsOpen((current) => !current)}
+            title={settingsOpen ? "Hide settings" : "Show settings"}
+            aria-label={settingsOpen ? "Hide settings" : "Show settings"}
           >
-            {status?.isPaused ? <Play size={14} /> : <Pause size={14} />}
+            <Settings2 size={14} />
           </button>
           <button
             className="icon-button tight"
@@ -1927,68 +1928,122 @@ function TransparentOverlayWindow() {
         </div>
       </header>
 
-      <section className={`overlay-status-strip overlay-${statusKind}`}>
+      <section className={`overlay-status-strip look-through-status-strip overlay-${statusKind}`}>
         <span className={`status-dot status-${statusKind}`} />
         <span>{overlayStatusLabel(statusKind)}</span>
         <small>{statusMessage}</small>
+        <button className="look-through-live-button" onClick={() => void togglePaused()}>
+          {status?.isPaused ? <Play size={15} /> : <Pause size={15} />}
+          {status?.isPaused ? "Resume" : "Pause"}
+        </button>
       </section>
 
-      <section className="overlay-translation-surface" aria-live="polite">
-        {translatedText ? (
-          <p>{translatedText}</p>
-        ) : statusKind === "permission_needed" ? (
-          <div className="overlay-empty">
-            <AlertTriangle size={24} />
-            <strong>{statusMessage}</strong>
-            <button onClick={() => void openScreenRecordingSettings()}>
-              <Settings2 size={15} /> Open Privacy Settings
-            </button>
-          </div>
-        ) : statusKind === "error" ? (
-          <div className="overlay-empty">
-            <AlertTriangle size={24} />
-            <strong>{statusMessage}</strong>
-          </div>
-        ) : (
-          <div className="overlay-empty">
-            <ScanText size={26} />
-            <strong>{status?.isPaused ? "Paused" : "Scanning"}</strong>
-          </div>
-        )}
-      </section>
-
-      {sourceText ? (
-        <details className="overlay-source-preview">
-          <summary>Source</summary>
-          <p>{sourceText}</p>
-        </details>
+      {settingsOpen ? (
+        <section className="look-through-settings" aria-label="Look Through settings">
+          <label>
+            <span>Opacity</span>
+            <input
+              type="range"
+              min="0.35"
+              max="0.92"
+              step="0.01"
+              value={opacity}
+              onChange={(event) => {
+                const nextOpacity = Number(event.currentTarget.value);
+                updateTransparentConfig({ ...config, opacity: nextOpacity });
+              }}
+            />
+          </label>
+        </section>
       ) : null}
 
-      <footer className="overlay-controls">
-        <label>
-          <span>Opacity</span>
-          <input
-            type="range"
-            min="0.35"
-            max="0.92"
-            step="0.01"
-            value={opacity}
-            onChange={(event) => {
-              const nextOpacity = Number(event.currentTarget.value);
-              updateTransparentConfig({ ...config, opacity: nextOpacity });
-            }}
-          />
-        </label>
-        <button
-          className="icon-button tight"
-          onClick={copyTranslation}
-          disabled={!translatedText}
-          title="Copy translation"
-          aria-label="Copy translation"
-        >
-          <Copy size={14} />
-        </button>
-        <span>{copied ? "Copied" : config.targetLanguage.toUpperCase()}</span>
+      <section className="look-through-workspace">
+        <article className="look-through-panel look-through-source-panel">
+          <header>
+            <strong>Detected screen</strong>
+            <small>{sourceText ? `${sourceText.length} characters` : "Live OCR"}</small>
+          </header>
+          <div className="look-through-panel-body">
+            {sourceText ? (
+              <p>{sourceText}</p>
+            ) : (
+              <div className="look-through-panel-empty">
+                <ScanText size={22} />
+                <strong>
+                  {status?.isPaused ? "Realtime detection paused." : "Watching this region."}
+                </strong>
+                <span>Move or resize the window to detect visible text.</span>
+              </div>
+            )}
+          </div>
+        </article>
+
+        <article className="look-through-panel look-through-result-panel" aria-live="polite">
+          <header>
+            <strong>Translation</strong>
+            <button
+              className="icon-button tight"
+              onClick={copyTranslation}
+              disabled={!translatedText}
+              title="Copy translation"
+              aria-label="Copy translation"
+            >
+              <Copy size={14} />
+            </button>
+          </header>
+          <div className="look-through-panel-body look-through-result-body">
+            {translatedText ? (
+              <p>{translatedText}</p>
+            ) : statusKind === "permission_needed" ? (
+              <div className="look-through-panel-empty">
+                <AlertTriangle size={22} />
+                <strong>{statusMessage}</strong>
+                <button onClick={() => void openScreenRecordingSettings()}>
+                  <Settings2 size={15} /> Open Privacy Settings
+                </button>
+              </div>
+            ) : statusKind === "error" ? (
+              <div className="look-through-panel-empty">
+                <AlertTriangle size={22} />
+                <strong>{statusMessage}</strong>
+              </div>
+            ) : statusKind === "no_text" ? (
+              <div className="look-through-panel-empty">
+                <ScanText size={22} />
+                <strong>No readable text detected.</strong>
+                <span>Realtime scanning will continue automatically.</span>
+              </div>
+            ) : status?.isPaused ? (
+              <div className="look-through-panel-empty">
+                <Pause size={22} />
+                <strong>Realtime detection paused.</strong>
+              </div>
+            ) : (
+              <div className="look-through-panel-empty">
+                <ScanText size={22} />
+                <strong>
+                  {statusKind === "translating"
+                    ? "Translating detected text"
+                    : "Detecting visible text"}
+                </strong>
+                <span>Updates appear automatically.</span>
+              </div>
+            )}
+          </div>
+        </article>
+      </section>
+
+      <footer className="look-through-meta-bar">
+        <span>
+          {config.sourceLanguage.toUpperCase()} to {config.targetLanguage.toUpperCase()}
+        </span>
+        <span>
+          {copied
+            ? "Translation copied"
+            : status?.isPaused
+              ? "Realtime paused"
+              : "Realtime detection"}
+        </span>
       </footer>
     </main>
   );

@@ -1,6 +1,6 @@
 # Transparent OCR Translation Overlay for macOS
 
-Status: planned
+Status: active
 Created: 2026-07-10
 Source spec: user request in Codex thread, Vietnamese: add a "xuyen thau" button that opens a semi-transparent square window; wherever the user moves/resizes it, text underneath is translated and shown inside the window.
 Mode: `hi-plan --fast`
@@ -161,6 +161,17 @@ Overlay translation result:
 2. Phase 02: Screen capture permission, region capture, and OCR spike
 3. Phase 03: Text translation pipeline, dedupe, UI polish, and tests
 4. Phase 04: Windows capture/OCR backend after macOS MVP
+5. Phase 05: Realtime overlay workspace redesign
+
+### Phase 05: Realtime Workspace Redesign
+
+- Preserve the existing polling, OCR, dedupe, Gemini translation, and pause/resume runtime. Look through remains realtime and does not gain a manual Capture action.
+- Replace the single translation surface and collapsible source preview with two persistent regions: **Detected screen** and **Translation**.
+- Give both text regions independent scrolling areas so title, status, settings, and metadata controls cannot cover text.
+- Move pause/resume into the realtime status row and keep close/settings controls in the title bar.
+- Move opacity into a compact collapsible settings row and keep copy translation in the Translation panel header.
+- Increase the default and minimum overlay size for the two-region workspace while retaining an explicit compact-window layout.
+- Keep Look through visually related to Look & Help while preserving its green realtime identity and distinct capture behavior.
 
 ## Scope Decisions
 
@@ -189,6 +200,9 @@ Overlay translation result:
 - The app detects missing Screen Recording permission and shows overlay status instead of failing silently.
 - Moving/resizing the overlay changes the capture region.
 - Text visible under the overlay is OCRed and translated into the selected target language.
+- Detected OCR text and translated output remain visible in separate regions during realtime updates.
+- Pause/resume stops and restarts realtime detection without changing the workspace layout.
+- Toolbars remain outside the scrollable text regions and do not obscure content at the minimum window size.
 - Repeated identical OCR text does not trigger repeated translation requests.
 - Captured screenshots are not persisted to disk by default.
 - Overlay can be closed without stopping the existing audio translation session.
