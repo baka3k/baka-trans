@@ -34,6 +34,15 @@ export type LlmProviderKind = "openai" | "openai_compatible" | "ollama" | "adk_l
 export type MeetingSummaryTrigger = "manual" | "end_of_session";
 export type TranscriptScope = "source" | "translated" | "both";
 export type MeetingSummaryStatus = "running" | "complete" | "error";
+export type OverlayStatusKind =
+  | "idle"
+  | "permission_needed"
+  | "scanning"
+  | "translating"
+  | "translated"
+  | "no_text"
+  | "paused"
+  | "error";
 
 export interface AudioDeviceInfo {
   id: string;
@@ -63,6 +72,46 @@ export interface SessionConfig {
   monitorOriginalAudio: boolean;
   voiceId: string;
   fallbackEnabled: boolean;
+}
+
+export interface OverlayConfig {
+  sourceLanguage: Language;
+  targetLanguage: Language;
+  captureIntervalMs: number;
+  minimumConfidence: number;
+  opacity: number;
+  geminiModel: string;
+}
+
+export interface OverlayGeometry {
+  displayId?: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  scaleFactor: number;
+  updatedAtMs: number;
+}
+
+export interface OverlayStatus {
+  isOpen: boolean;
+  isPaused: boolean;
+  status: OverlayStatusKind;
+  message: string;
+  config: OverlayConfig;
+  geometry?: OverlayGeometry;
+}
+
+export interface OverlayTranslationUpdate {
+  sourceText: string;
+  translatedText: string;
+  status: OverlayStatusKind;
+  message: string;
+  confidence?: number;
+  latencyMs?: number;
+  provider: string;
+  model: string;
+  updatedAtMs: number;
 }
 
 export interface AppStatus {

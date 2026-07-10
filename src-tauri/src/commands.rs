@@ -4,10 +4,11 @@ use crate::models::{
     ApiKeyTestResult, AppStatus, AudioDevices, AudioOutputChannel, ExportRequest,
     ExportedTranscript, LlmProviderProfile, LlmProviderProfileDraft, LlmProviderTestResult,
     ManualBoundaryRequest, MeetingSummaryConfig, MeetingSummaryResult, MeetingSummaryStatus,
-    MeetingSummaryStatusEvent, SessionConfig, TranslationCredentialStatus, TranslationProvider,
+    MeetingSummaryStatusEvent, OverlayConfig, OverlayGeometry, OverlayStatus, SessionConfig,
+    TranslationCredentialStatus, TranslationProvider,
 };
 use crate::session::AppState;
-use crate::{ai, llm, security, summary_agent};
+use crate::{ai, llm, overlay, security, summary_agent};
 use tauri::{AppHandle, Emitter, State};
 
 #[tauri::command]
@@ -199,4 +200,52 @@ pub fn start_local_monitor(
 #[tauri::command]
 pub fn stop_local_monitor(state: State<'_, AppState>) -> AppResult<()> {
     state.stop_local_monitor()
+}
+
+#[tauri::command]
+pub fn open_overlay_window(
+    app: AppHandle,
+    state: State<'_, overlay::OverlayState>,
+    config: OverlayConfig,
+) -> AppResult<()> {
+    state.open_overlay_window(app, config)
+}
+
+#[tauri::command]
+pub fn close_overlay_window(
+    app: AppHandle,
+    state: State<'_, overlay::OverlayState>,
+) -> AppResult<()> {
+    state.close_overlay_window(app)
+}
+
+#[tauri::command]
+pub fn overlay_status(
+    app: AppHandle,
+    state: State<'_, overlay::OverlayState>,
+) -> AppResult<OverlayStatus> {
+    state.status(&app)
+}
+
+#[tauri::command]
+pub fn update_overlay_geometry(
+    app: AppHandle,
+    state: State<'_, overlay::OverlayState>,
+    geometry: OverlayGeometry,
+) -> AppResult<()> {
+    state.update_geometry(&app, geometry)
+}
+
+#[tauri::command]
+pub fn set_overlay_paused(
+    app: AppHandle,
+    state: State<'_, overlay::OverlayState>,
+    paused: bool,
+) -> AppResult<()> {
+    state.set_paused(app, paused)
+}
+
+#[tauri::command]
+pub fn open_screen_recording_settings() -> AppResult<()> {
+    overlay::open_screen_recording_settings()
 }

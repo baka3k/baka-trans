@@ -294,6 +294,98 @@ pub struct SessionConfig {
     pub fallback_enabled: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverlayConfig {
+    pub source_language: Language,
+    pub target_language: Language,
+    pub capture_interval_ms: u64,
+    pub minimum_confidence: f32,
+    pub opacity: f32,
+    pub gemini_model: String,
+}
+
+impl Default for OverlayConfig {
+    fn default() -> Self {
+        Self {
+            source_language: Language::Auto,
+            target_language: Language::Vi,
+            capture_interval_ms: 800,
+            minimum_confidence: 0.45,
+            opacity: 0.72,
+            gemini_model: "models/gemini-2.5-flash".to_string(),
+        }
+    }
+}
+
+impl OverlayConfig {
+    pub fn normalized(self) -> Self {
+        let gemini_model = if self.gemini_model.trim().is_empty() {
+            "models/gemini-2.5-flash".to_string()
+        } else {
+            self.gemini_model.trim().to_string()
+        };
+        Self {
+            source_language: self.source_language,
+            target_language: self.target_language,
+            capture_interval_ms: self.capture_interval_ms.clamp(500, 3_000),
+            minimum_confidence: self.minimum_confidence.clamp(0.0, 1.0),
+            opacity: self.opacity.clamp(0.35, 0.92),
+            gemini_model,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverlayGeometry {
+    pub display_id: Option<String>,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub scale_factor: f64,
+    pub updated_at_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OverlayStatusKind {
+    Idle,
+    PermissionNeeded,
+    Scanning,
+    Translating,
+    Translated,
+    NoText,
+    Paused,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverlayStatus {
+    pub is_open: bool,
+    pub is_paused: bool,
+    pub status: OverlayStatusKind,
+    pub message: String,
+    pub config: OverlayConfig,
+    pub geometry: Option<OverlayGeometry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverlayTranslationUpdate {
+    pub source_text: String,
+    pub translated_text: String,
+    pub status: OverlayStatusKind,
+    pub message: String,
+    pub confidence: Option<f32>,
+    pub latency_ms: Option<u64>,
+    pub provider: String,
+    pub model: String,
+    pub updated_at_ms: u64,
+}
+
 impl SessionConfig {
     pub fn validate_translation_target_language(&self) -> AppResult<()> {
         if self

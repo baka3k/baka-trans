@@ -11,6 +11,9 @@ import type {
   ManualBoundaryReason,
   MeetingSummaryConfig,
   MeetingSummaryResult,
+  OverlayConfig,
+  OverlayGeometry,
+  OverlayStatus,
   SessionConfig,
   TranslationCredentialStatus,
   TranslationProvider,
@@ -125,4 +128,28 @@ export function startLocalMonitor(
 
 export function stopLocalMonitor() {
   return invoke<void>("stop_local_monitor");
+}
+
+export function openOverlayWindow(config: OverlayConfig) {
+  return invoke<void>("open_overlay_window", { config });
+}
+
+export function closeOverlayWindow() {
+  return invoke<void>("close_overlay_window");
+}
+
+export function overlayStatus() {
+  return invoke<OverlayStatus>("overlay_status");
+}
+
+export function updateOverlayGeometry(geometry: OverlayGeometry) {
+  return invoke<void>("update_overlay_geometry", { geometry });
+}
+
+export function setOverlayPaused(paused: boolean) {
+  return invoke<void>("set_overlay_paused", { paused });
+}
+
+export function openScreenRecordingSettings() {
+  return invoke<void>("open_screen_recording_settings");
 }

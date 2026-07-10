@@ -1,32 +1,41 @@
 import { listen } from "@tauri-apps/api/event";
+import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Activity,
   AlertTriangle,
   Bot,
   Check,
+  Copy,
   Download,
   FileText,
   Headphones,
   KeyRound,
   Mic,
+  Move,
   Pause,
   Play,
   RefreshCw,
   Save,
+  ScanText,
   Send,
   Settings2,
   Square,
   Trash2,
   Volume2,
+  X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   exportTranscript,
   forceTranslateBoundary,
   getAppStatus,
+  closeOverlayWindow,
   deleteLlmProfile,
   listAudioDevices,
   listLlmProfiles,
+  openOverlayWindow,
+  openScreenRecordingSettings,
+  overlayStatus,
   pauseSession,
   playTestTone,
   resumeSession,
@@ -38,9 +47,11 @@ import {
   stopTestTone,
   stopLocalMonitor,
   stopSession,
+  setOverlayPaused,
   testLlmProfile,
   testTranslationApiKey,
   translationCredentialStatus,
+  updateOverlayGeometry,
 } from "./api";
 import {
   buildMeetingSummaryConfig,
@@ -69,6 +80,9 @@ import type {
   MeetingSummaryConfig,
   MeetingSummaryResult,
   MeetingSummaryStatusEvent,
+  OverlayConfig,
+  OverlayStatus,
+  OverlayTranslationUpdate,
   SessionConfig,
   SessionStatus,
   SourceSignalSnapshot,
@@ -111,6 +125,8 @@ const transcriptScopeOptions: Array<{ value: TranscriptScope; label: string }> =
 const routingStorageKey = "baka-trans-routing-profile-v1";
 const activeSessionStatuses: SessionStatus[] = ["listening", "translating", "speaking"];
 const deviceAutoRefreshIntervalMs = 5000;
+const isTransparentOverlayRoute =
+  new URLSearchParams(window.location.search).get("overlay") === "transparent";
 
 interface AudioLineRow {
   id: string;
@@ -143,6 +159,10 @@ const emptyProfileDraft: LlmProviderProfileDraft = {
 };
 
 export default function App() {
+  if (isTransparentOverlayRoute) {
+    return <TransparentOverlayWindow />;
+  }
+
   const [devices, setDevices] = useState<AudioDevices>({ inputs: [], outputs: [] });
   const [translationProvider, setTranslationProvider] =
     useState<TranslationProvider>("google_live_translate");
@@ -788,6 +808,25 @@ export default function App() {
     }
   }
 
+  async function showTransparentOverlay() {
+    setBusy(true);
+    setError(null);
+    try {
+      await openOverlayWindow({
+        sourceLanguage,
+        targetLanguage,
+        captureIntervalMs: 800,
+        minimumConfidence: 0.45,
+        opacity: 0.72,
+        geminiModel: "models/gemini-2.5-flash",
+      });
+    } catch (cause) {
+      setError(normalizeError(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function doExport(format: "text" | "markdown") {
     const localContent = renderTranscript(transcript, format, meetingNotes);
     try {
@@ -880,6 +919,16 @@ export default function App() {
           </div>
         </div>
         <div className="top-actions">
+          <button
+            className="icon-button overlay-launch-button"
+            onClick={showTransparentOverlay}
+            disabled={busy}
+            title="Xuyen thau"
+            aria-label="Open transparent OCR overlay"
+          >
+            <ScanText size={18} />
+            <span>Xuyen thau</span>
+          </button>
           <button
             className="icon-button"
             onClick={() => void refreshAudioDevices()}
@@ -1471,6 +1520,201 @@ export default function App() {
   );
 }
 
+function TransparentOverlayWindow() {
+  const [status, setStatus] = useState<OverlayStatus | null>(null);
+  const [translation, setTranslation] = useState<OverlayTranslationUpdate | null>(null);
+  const [opacity, setOpacity] = useState(0.72);
+  const [copied, setCopied] = useState(false);
+  const [statusMessage, setStatusMessage] = useState("Starting overlay");
+  const config: OverlayConfig = status?.config ?? {
+    sourceLanguage: "auto",
+    targetLanguage: "vi",
+    captureIntervalMs: 800,
+    minimumConfidence: 0.45,
+    opacity,
+    geminiModel: "models/gemini-2.5-flash",
+  };
+
+  useEffect(() => {
+    document.body.classList.add("overlay-body");
+    return () => document.body.classList.remove("overlay-body");
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    const appWindow = getCurrentWindow();
+
+    async function reportGeometry() {
+      try {
+        const [position, size, scaleFactor, monitor] = await Promise.all([
+          appWindow.innerPosition(),
+          appWindow.innerSize(),
+          appWindow.scaleFactor(),
+          currentMonitor(),
+        ]);
+        if (disposed) {
+          return;
+        }
+        await updateOverlayGeometry({
+          displayId: monitor?.name ?? undefined,
+          x: position.x,
+          y: position.y,
+          width: size.width,
+          height: size.height,
+          scaleFactor,
+          updatedAtMs: Date.now(),
+        });
+      } catch {
+        setStatusMessage("Waiting for window geometry");
+      }
+    }
+
+    const unlisten = Promise.all([
+      listen<OverlayStatus>("overlay-status-update", (event) => {
+        setStatus(event.payload);
+        setStatusMessage(event.payload.message);
+      }),
+      listen<OverlayTranslationUpdate>("overlay-translation-update", (event) => {
+        setTranslation(event.payload);
+        setStatusMessage(event.payload.message);
+      }),
+      appWindow.onMoved(() => void reportGeometry()),
+      appWindow.onResized(() => void reportGeometry()),
+    ]);
+
+    void overlayStatus()
+      .then((payload) => {
+        setStatus(payload);
+        setOpacity(payload.config.opacity);
+        setStatusMessage(payload.message);
+      })
+      .catch(() => setStatusMessage("Overlay status unavailable"));
+    void reportGeometry();
+    const interval = window.setInterval(reportGeometry, 1200);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(interval);
+      void unlisten.then((callbacks) => callbacks.forEach((callback) => callback()));
+    };
+  }, []);
+
+  async function togglePaused() {
+    const paused = !(status?.isPaused ?? false);
+    setStatus((current) => (current ? { ...current, isPaused: paused } : current));
+    await setOverlayPaused(paused);
+  }
+
+  async function copyTranslation() {
+    if (!translation?.translatedText) {
+      return;
+    }
+    await navigator.clipboard.writeText(translation.translatedText);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1200);
+  }
+
+  const statusKind = status?.status ?? "idle";
+  const translatedText = translation?.translatedText.trim();
+  const sourceText = translation?.sourceText.trim();
+
+  return (
+    <main
+      className="overlay-window-root"
+      style={{ "--overlay-opacity": opacity } as React.CSSProperties}
+    >
+      <header
+        className="overlay-titlebar"
+        onMouseDown={() => void getCurrentWindow().startDragging()}
+      >
+        <div>
+          <Move size={15} />
+          <strong>Xuyen thau</strong>
+        </div>
+        <div className="overlay-window-actions" onMouseDown={(event) => event.stopPropagation()}>
+          <button
+            className="icon-button tight"
+            onClick={togglePaused}
+            title={status?.isPaused ? "Resume scanning" : "Pause scanning"}
+            aria-label={status?.isPaused ? "Resume scanning" : "Pause scanning"}
+          >
+            {status?.isPaused ? <Play size={14} /> : <Pause size={14} />}
+          </button>
+          <button
+            className="icon-button tight"
+            onClick={() => void closeOverlayWindow()}
+            title="Close overlay"
+            aria-label="Close overlay"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      </header>
+
+      <section className={`overlay-status-strip overlay-${statusKind}`}>
+        <span className={`status-dot status-${statusKind}`} />
+        <span>{overlayStatusLabel(statusKind)}</span>
+        <small>{statusMessage}</small>
+      </section>
+
+      <section className="overlay-translation-surface" aria-live="polite">
+        {translatedText ? (
+          <p>{translatedText}</p>
+        ) : statusKind === "permission_needed" ? (
+          <div className="overlay-empty">
+            <AlertTriangle size={24} />
+            <strong>Screen Recording needed</strong>
+            <button onClick={() => void openScreenRecordingSettings()}>
+              <Settings2 size={15} /> Open Settings
+            </button>
+          </div>
+        ) : statusKind === "error" ? (
+          <div className="overlay-empty">
+            <AlertTriangle size={24} />
+            <strong>OCR backend unavailable</strong>
+          </div>
+        ) : (
+          <div className="overlay-empty">
+            <ScanText size={26} />
+            <strong>{status?.isPaused ? "Paused" : "Scanning"}</strong>
+          </div>
+        )}
+      </section>
+
+      {sourceText ? (
+        <details className="overlay-source-preview">
+          <summary>Source</summary>
+          <p>{sourceText}</p>
+        </details>
+      ) : null}
+
+      <footer className="overlay-controls">
+        <label>
+          <span>Opacity</span>
+          <input
+            type="range"
+            min="0.35"
+            max="0.92"
+            step="0.01"
+            value={opacity}
+            onChange={(event) => setOpacity(Number(event.currentTarget.value))}
+          />
+        </label>
+        <button
+          className="icon-button tight"
+          onClick={copyTranslation}
+          disabled={!translatedText}
+          title="Copy translation"
+          aria-label="Copy translation"
+        >
+          <Copy size={14} />
+        </button>
+        <span>{copied ? "Copied" : config.targetLanguage.toUpperCase()}</span>
+      </footer>
+    </main>
+  );
+}
+
 function LiveStatusRail({
   sourceSignalState,
   sourceLevelPercent,
@@ -1869,6 +2113,10 @@ function resolveRoutingProfile(
 }
 
 function labelStatus(status: SessionStatus) {
+  return status.replace(/_/g, " ");
+}
+
+function overlayStatusLabel(status: OverlayStatus["status"]) {
   return status.replace(/_/g, " ");
 }
 
