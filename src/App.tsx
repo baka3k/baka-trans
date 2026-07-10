@@ -12,6 +12,8 @@ import {
   KeyRound,
   Mic,
   Move,
+  PanelLeftClose,
+  PanelLeftOpen,
   Pause,
   Play,
   RefreshCw,
@@ -233,6 +235,7 @@ export default function App() {
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [hasNewTranslations, setHasNewTranslations] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(true);
   const [busy, setBusy] = useState(false);
   const [testingKey, setTestingKey] = useState(false);
   const [testingTone, setTestingTone] = useState<"translation" | "monitor" | null>(null);
@@ -976,6 +979,17 @@ export default function App() {
         </div>
         <div className="top-actions">
           <button
+            className="icon-button"
+            onClick={() => setSettingsOpen((open) => !open)}
+            title={settingsOpen ? "Hide settings" : "Show settings"}
+            aria-label={settingsOpen ? "Hide settings" : "Show settings"}
+            aria-controls="session-settings"
+            aria-expanded={settingsOpen}
+            type="button"
+          >
+            {settingsOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
+          </button>
+          <button
             className="icon-button overlay-launch-button"
             onClick={showTransparentOverlay}
             disabled={busy}
@@ -1025,8 +1039,13 @@ export default function App() {
         </div>
       </header>
 
-      <div className="workspace-layout">
-        <aside className="settings-column" aria-label="Session settings">
+      <div className={`workspace-layout${settingsOpen ? "" : " settings-collapsed"}`}>
+        <aside
+          className="settings-column"
+          id="session-settings"
+          aria-label="Session settings"
+          hidden={!settingsOpen}
+        >
           <section className="control-grid">
             <div className="panel controls-panel">
               <div className="panel-header">
