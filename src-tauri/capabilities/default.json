@@ -2,6 +2,6 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default permissions for the main application window",
-  "windows": ["main", "transparent-overlay"],
-  "permissions": ["core:default"]
+  "windows": ["main", "transparent-overlay", "look-help-overlay"],
+  "permissions": ["core:default", "core:window:allow-start-dragging"]
 }

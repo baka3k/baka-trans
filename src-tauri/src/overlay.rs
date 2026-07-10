@@ -439,10 +439,9 @@ pub(crate) async fn capture_and_ocr_text(
     window_id: Option<u32>,
 ) -> AppResult<String> {
     if !screen_recording_permission_granted() {
-        let _ = request_screen_recording_permission();
         return Err(AppError::new(
             "screen_recording_permission_needed",
-            "Allow Screen Recording for Baka Trans in macOS Settings, then reopen the overlay.",
+            "Baka Trans is not allowed to record the screen yet. Turn on Screen & System Audio Recording for Baka Trans, then quit and reopen the app if macOS still reports this.",
         ));
     }
 
@@ -629,7 +628,6 @@ fn lock_error<T>(_: std::sync::PoisonError<T>) -> AppError {
 #[link(name = "CoreGraphics", kind = "framework")]
 extern "C" {
     fn CGPreflightScreenCaptureAccess() -> bool;
-    fn CGRequestScreenCaptureAccess() -> bool;
 }
 
 #[cfg(target_os = "macos")]
@@ -639,16 +637,6 @@ fn screen_recording_permission_granted() -> bool {
 
 #[cfg(not(target_os = "macos"))]
 fn screen_recording_permission_granted() -> bool {
-    false
-}
-
-#[cfg(target_os = "macos")]
-fn request_screen_recording_permission() -> bool {
-    unsafe { CGRequestScreenCaptureAccess() }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn request_screen_recording_permission() -> bool {
     false
 }
 

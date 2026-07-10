@@ -1402,6 +1402,9 @@ h2 {
 .overlay-empty strong {
   color: var(--text);
   font-size: 13px;
+  line-height: 1.35;
+  max-width: 34ch;
+  overflow-wrap: anywhere;
 }
 
 .overlay-empty button {

@@ -481,10 +481,7 @@ impl AppState {
     }
 
     fn clear_test_tone(&self) {
-        let _ = self
-            .test_tone
-            .lock()
-            .map(|mut test_tone| *test_tone = None);
+        let _ = self.test_tone.lock().map(|mut test_tone| *test_tone = None);
     }
 }
 

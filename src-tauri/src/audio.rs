@@ -162,9 +162,8 @@ pub fn start_test_tone(
     let (ready_tx, ready_rx) = std_mpsc::channel::<AppResult<()>>();
     let device_id = output_device_id.to_string();
 
-    let join_handle = thread::spawn(move || {
-        run_test_tone_thread(device_id, output_channel, stop_rx, ready_tx)
-    });
+    let join_handle =
+        thread::spawn(move || run_test_tone_thread(device_id, output_channel, stop_rx, ready_tx));
 
     match ready_rx.recv_timeout(Duration::from_secs(3)) {
         Ok(Ok(())) => Ok(TestToneRuntime {

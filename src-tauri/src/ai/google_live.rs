@@ -547,10 +547,7 @@ fn should_insert_space_between_chunks(current: &str, delta: &str) -> bool {
     if previous.is_none() || next.is_none() {
         return false;
     }
-    if current
-        .chars()
-        .next_back()
-        .is_some_and(char::is_whitespace)
+    if current.chars().next_back().is_some_and(char::is_whitespace)
         || delta.chars().next().is_some_and(char::is_whitespace)
     {
         return false;

@@ -1813,9 +1813,9 @@ function TransparentOverlayWindow() {
         ) : statusKind === "permission_needed" ? (
           <div className="overlay-empty">
             <AlertTriangle size={24} />
-            <strong>Screen Recording needed</strong>
+            <strong>{statusMessage}</strong>
             <button onClick={() => void openScreenRecordingSettings()}>
-              <Settings2 size={15} /> Open Settings
+              <Settings2 size={15} /> Open Privacy Settings
             </button>
           </div>
         ) : statusKind === "error" ? (
@@ -2063,9 +2063,9 @@ function LookHelpOverlayWindow() {
         ) : statusKind === "permission_needed" ? (
           <div className="overlay-empty">
             <AlertTriangle size={24} />
-            <strong>Screen Recording needed</strong>
+            <strong>{statusMessage}</strong>
             <button onClick={() => void openScreenRecordingSettings()}>
-              <Settings2 size={15} /> Open Settings
+              <Settings2 size={15} /> Open Privacy Settings
             </button>
           </div>
         ) : statusKind === "error" ? (
