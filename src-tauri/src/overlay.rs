@@ -27,11 +27,17 @@ use objc2_vision::{
     VNImageOption, VNImageRequestHandler, VNRecognizeTextRequest, VNRequest,
     VNRequestTextRecognitionLevel,
 };
+#[cfg(target_os = "macos")]
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const OVERLAY_LABEL: &str = "transparent-overlay";
 const STATUS_EVENT: &str = "overlay-status-update";
 const TRANSLATION_EVENT: &str = "overlay-translation-update";
 const CACHE_LIMIT: usize = 24;
+const SCREEN_RECORDING_PERMISSION_MESSAGE: &str = "Baka Trans needs Screen & System Audio Recording access to read text from browsers and other apps. Allow access for this exact Baka Trans app, then quit and reopen it.";
+
+#[cfg(target_os = "macos")]
+static SCREEN_RECORDING_PERMISSION_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 pub struct OverlayState {
     inner: Mutex<OverlayInner>,
@@ -440,23 +446,15 @@ pub(crate) async fn capture_and_ocr_text(
 ) -> AppResult<String> {
     #[cfg(target_os = "macos")]
     {
-        let permission_hint = screen_recording_permission_granted();
+        let permission_granted =
+            screen_recording_permission_granted() || request_screen_recording_permission_once();
+        require_screen_recording_permission(permission_granted)?;
         let geometry = geometry.clone();
-        let result = tauri::async_runtime::spawn_blocking(move || {
+        return tauri::async_runtime::spawn_blocking(move || {
             capture_and_ocr_text_blocking(&geometry, minimum_confidence, window_id)
         })
         .await
         .map_err(|err| AppError::new("overlay_ocr_join_error", err.to_string()))?;
-        return result.map_err(|error| {
-            if !permission_hint && error.code == "overlay_capture_empty" {
-                AppError::new(
-                    "screen_recording_permission_needed",
-                    "Baka Trans could not capture the screen. Confirm Screen & System Audio Recording is enabled for this exact Baka Trans app, then quit and reopen it if macOS still reports this.",
-                )
-            } else {
-                error
-            }
-        });
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -628,10 +626,22 @@ fn lock_error<T>(_: std::sync::PoisonError<T>) -> AppError {
     AppError::new("state_lock_error", "Overlay state lock was poisoned.")
 }
 
+fn require_screen_recording_permission(permission_granted: bool) -> AppResult<()> {
+    if permission_granted {
+        Ok(())
+    } else {
+        Err(AppError::new(
+            "screen_recording_permission_needed",
+            SCREEN_RECORDING_PERMISSION_MESSAGE,
+        ))
+    }
+}
+
 #[cfg(target_os = "macos")]
 #[link(name = "CoreGraphics", kind = "framework")]
 extern "C" {
     fn CGPreflightScreenCaptureAccess() -> bool;
+    fn CGRequestScreenCaptureAccess() -> bool;
 }
 
 #[cfg(target_os = "macos")]
@@ -642,6 +652,15 @@ fn screen_recording_permission_granted() -> bool {
 #[cfg(not(target_os = "macos"))]
 fn screen_recording_permission_granted() -> bool {
     false
+}
+
+#[cfg(target_os = "macos")]
+fn request_screen_recording_permission_once() -> bool {
+    if SCREEN_RECORDING_PERMISSION_REQUESTED.swap(true, Ordering::AcqRel) {
+        return false;
+    }
+
+    unsafe { CGRequestScreenCaptureAccess() }
 }
 
 #[cfg(test)]
@@ -660,6 +679,14 @@ mod tests {
     #[test]
     fn text_hash_changes_with_text() {
         assert_ne!(text_hash("hello"), text_hash("hello!"));
+    }
+
+    #[test]
+    fn screen_recording_permission_gate_rejects_privacy_limited_capture() {
+        let error = require_screen_recording_permission(false).unwrap_err();
+
+        assert_eq!(error.code, "screen_recording_permission_needed");
+        assert!(require_screen_recording_permission(true).is_ok());
     }
 
     #[test]
