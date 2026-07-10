@@ -109,6 +109,7 @@ const transcriptScopeOptions: Array<{ value: TranscriptScope; label: string }> =
 ];
 const routingStorageKey = "baka-trans-routing-profile-v1";
 const activeSessionStatuses: SessionStatus[] = ["listening", "translating", "speaking"];
+const deviceAutoRefreshIntervalMs = 5000;
 
 interface AudioLineRow {
   id: string;
@@ -171,6 +172,8 @@ export default function App() {
   const [testingKey, setTestingKey] = useState(false);
   const [testingTone, setTestingTone] = useState<"translation" | "monitor" | null>(null);
   const [localMonitorActive, setLocalMonitorActive] = useState(false);
+  const [refreshingDevices, setRefreshingDevices] = useState(false);
+  const [autoRefreshDevices, setAutoRefreshDevices] = useState(true);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
   const [llmProfiles, setLlmProfiles] = useState<LlmProviderProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState("");
@@ -188,6 +191,15 @@ export default function App() {
   const conversationFeedRef = useRef<HTMLDivElement | null>(null);
   const feedAtBottomRef = useRef(true);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+  const deviceRefreshInFlightRef = useRef(false);
+  const routingProfileRef = useRef<RoutingProfile>({
+    inputDeviceId: "",
+    outputDeviceId: "",
+    translationOutputChannel: "all",
+    monitorOutputDeviceId: "",
+    monitorOutputChannel: "all",
+    monitorOriginalAudio: false,
+  });
 
   const selectedInput = devices.inputs.find((device) => device.id === inputDeviceId);
   const selectedOutput = devices.outputs.find((device) => device.id === outputDeviceId);
@@ -411,6 +423,17 @@ export default function App() {
   }, [translationProvider]);
 
   useEffect(() => {
+    if (!autoRefreshDevices) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      void refreshAudioDevices({ silent: true });
+    }, deviceAutoRefreshIntervalMs);
+    return () => window.clearInterval(interval);
+  }, [autoRefreshDevices]);
+
+  useEffect(() => {
     setSourceLevel(null);
     setNowMs(Date.now());
   }, [inputDeviceId]);
@@ -462,20 +485,55 @@ export default function App() {
       applyProfiles(profiles);
       setKeyTestMessage("");
       const storedRouting = readRoutingProfile();
-      setInputDeviceId(resolveStoredDevice(deviceList.inputs, storedRouting?.inputDeviceId));
-      setOutputDeviceId(resolveStoredDevice(deviceList.outputs, storedRouting?.outputDeviceId));
-      setTranslationOutputChannel(storedRouting?.translationOutputChannel ?? "all");
-      setMonitorOutputDeviceId(
-        resolveStoredDevice(deviceList.outputs, storedRouting?.monitorOutputDeviceId),
-      );
-      setMonitorOutputChannel(storedRouting?.monitorOutputChannel ?? "all");
-      setMonitorOriginalAudio(storedRouting?.monitorOriginalAudio ?? false);
+      applyRoutingProfile(resolveRoutingProfile(deviceList, storedRouting), true);
       setLastRefreshedAt(Date.now());
     } catch (cause) {
       setError(normalizeError(cause));
     } finally {
       setBusy(false);
     }
+  }
+
+  async function refreshAudioDevices({ silent = false }: { silent?: boolean } = {}) {
+    if (deviceRefreshInFlightRef.current) {
+      return;
+    }
+
+    deviceRefreshInFlightRef.current = true;
+    if (!silent) {
+      setRefreshingDevices(true);
+    }
+    try {
+      const deviceList = await listAudioDevices();
+      setDevices(deviceList);
+      applyRoutingProfile(resolveRoutingProfile(deviceList, routingProfileRef.current), true);
+      setLastRefreshedAt(Date.now());
+    } catch (cause) {
+      setError(normalizeError(cause));
+    } finally {
+      deviceRefreshInFlightRef.current = false;
+      if (!silent) {
+        setRefreshingDevices(false);
+      }
+    }
+  }
+
+  function applyRoutingProfile(profile: RoutingProfile, shouldPersist = false) {
+    routingProfileRef.current = profile;
+    setInputDeviceId(profile.inputDeviceId);
+    setOutputDeviceId(profile.outputDeviceId);
+    setTranslationOutputChannel(profile.translationOutputChannel);
+    setMonitorOutputDeviceId(profile.monitorOutputDeviceId);
+    setMonitorOutputChannel(profile.monitorOutputChannel);
+    setMonitorOriginalAudio(profile.monitorOriginalAudio);
+    if (shouldPersist) {
+      persistRoutingProfile(profile);
+    }
+  }
+
+  function saveRoutingProfile(profile: RoutingProfile) {
+    routingProfileRef.current = profile;
+    persistRoutingProfile(profile);
   }
 
   function applyProfiles(profiles: LlmProviderProfile[]) {
@@ -721,74 +779,38 @@ export default function App() {
 
   function updateInputDevice(deviceId: string) {
     setInputDeviceId(deviceId);
-    persistRoutingProfile({
-      inputDeviceId: deviceId,
-      outputDeviceId,
-      translationOutputChannel,
-      monitorOutputDeviceId,
-      monitorOutputChannel,
-      monitorOriginalAudio,
-    });
+    saveRoutingProfile({ ...routingProfileRef.current, inputDeviceId: deviceId });
   }
 
   function updateOutputDevice(deviceId: string) {
     setOutputDeviceId(deviceId);
-    persistRoutingProfile({
-      inputDeviceId,
-      outputDeviceId: deviceId,
-      translationOutputChannel,
-      monitorOutputDeviceId,
-      monitorOutputChannel,
-      monitorOriginalAudio,
-    });
+    saveRoutingProfile({ ...routingProfileRef.current, outputDeviceId: deviceId });
   }
 
   function updateTranslationOutputChannel(outputChannel: AudioOutputChannel) {
     setTranslationOutputChannel(outputChannel);
-    persistRoutingProfile({
-      inputDeviceId,
-      outputDeviceId,
+    saveRoutingProfile({
+      ...routingProfileRef.current,
       translationOutputChannel: outputChannel,
-      monitorOutputDeviceId,
-      monitorOutputChannel,
-      monitorOriginalAudio,
     });
   }
 
   function updateMonitorOutputDevice(deviceId: string) {
     setMonitorOutputDeviceId(deviceId);
-    persistRoutingProfile({
-      inputDeviceId,
-      outputDeviceId,
-      translationOutputChannel,
-      monitorOutputDeviceId: deviceId,
-      monitorOutputChannel,
-      monitorOriginalAudio,
-    });
+    saveRoutingProfile({ ...routingProfileRef.current, monitorOutputDeviceId: deviceId });
   }
 
   function updateMonitorOutputChannel(outputChannel: AudioOutputChannel) {
     setMonitorOutputChannel(outputChannel);
-    persistRoutingProfile({
-      inputDeviceId,
-      outputDeviceId,
-      translationOutputChannel,
-      monitorOutputDeviceId,
+    saveRoutingProfile({
+      ...routingProfileRef.current,
       monitorOutputChannel: outputChannel,
-      monitorOriginalAudio,
     });
   }
 
   function updateMonitorEnabled(enabled: boolean) {
     setMonitorOriginalAudio(enabled);
-    persistRoutingProfile({
-      inputDeviceId,
-      outputDeviceId,
-      translationOutputChannel,
-      monitorOutputDeviceId,
-      monitorOutputChannel,
-      monitorOriginalAudio: enabled,
-    });
+    saveRoutingProfile({ ...routingProfileRef.current, monitorOriginalAudio: enabled });
   }
 
   function handleConversationScroll() {
@@ -837,12 +859,12 @@ export default function App() {
         <div className="top-actions">
           <button
             className="icon-button"
-            onClick={hydrate}
-            disabled={busy}
+            onClick={() => void refreshAudioDevices()}
+            disabled={busy || refreshingDevices}
             title="Refresh devices"
             aria-label="Refresh devices"
           >
-            <RefreshCw size={18} />
+            <RefreshCw className={refreshingDevices ? "spin-icon" : ""} size={18} />
           </button>
           <button
             className="icon-button"
@@ -934,6 +956,29 @@ export default function App() {
             <div className="panel devices-panel">
               <div className="panel-header">
                 <h2>Audio routing</h2>
+                <div className="panel-actions">
+                  <label
+                    className="auto-refresh-control"
+                    title="Auto refresh audio devices every 5 seconds"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={autoRefreshDevices}
+                      onChange={(event) => setAutoRefreshDevices(event.currentTarget.checked)}
+                    />
+                    <RefreshCw size={14} />
+                    <span>Auto</span>
+                  </label>
+                  <button
+                    className="icon-button tight"
+                    onClick={() => void refreshAudioDevices()}
+                    disabled={refreshingDevices}
+                    title="Refresh audio devices"
+                    aria-label="Refresh audio devices"
+                  >
+                    <RefreshCw className={refreshingDevices ? "spin-icon" : ""} size={16} />
+                  </button>
+                </div>
               </div>
               <DeviceSelect
                 icon={<Mic size={17} />}
@@ -1047,7 +1092,10 @@ export default function App() {
                   {testingTone === "monitor" ? "Testing" : "Test original"}
                 </button>
                 {lastRefreshedAt ? (
-                  <span className="refresh-note">Refreshed {formatClock(lastRefreshedAt)}</span>
+                  <span className="refresh-note">
+                    {refreshingDevices ? "Refreshing" : "Refreshed"} {formatClock(lastRefreshedAt)}
+                    {autoRefreshDevices ? " | Auto 5s" : ""}
+                  </span>
                 ) : null}
               </div>
               <RoutingSummary
@@ -1769,6 +1817,23 @@ function resolveStoredDevice(devices: AudioDeviceInfo[], storedId?: string) {
     (device) => normalizeDeviceName(device.name) === normalizeDeviceName(storedName),
   );
   return sameName?.id ?? selectDefaultDevice(devices);
+}
+
+function resolveRoutingProfile(
+  deviceList: AudioDevices,
+  storedRouting?: RoutingProfile | null,
+): RoutingProfile {
+  return {
+    inputDeviceId: resolveStoredDevice(deviceList.inputs, storedRouting?.inputDeviceId),
+    outputDeviceId: resolveStoredDevice(deviceList.outputs, storedRouting?.outputDeviceId),
+    translationOutputChannel: storedRouting?.translationOutputChannel ?? "all",
+    monitorOutputDeviceId: resolveStoredDevice(
+      deviceList.outputs,
+      storedRouting?.monitorOutputDeviceId,
+    ),
+    monitorOutputChannel: storedRouting?.monitorOutputChannel ?? "all",
+    monitorOriginalAudio: storedRouting?.monitorOriginalAudio ?? false,
+  };
 }
 
 function labelStatus(status: SessionStatus) {

@@ -286,6 +286,22 @@ h2 {
   padding: 0 10px;
 }
 
+.icon-button.tight {
+  height: 30px;
+  min-width: 30px;
+  padding: 0;
+}
+
+.spin-icon {
+  animation: refresh-spin 0.9s linear infinite;
+}
+
+@keyframes refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .button-text {
   font-size: 12px;
   font-weight: 800;
@@ -308,8 +324,35 @@ h2 {
 .panel-header {
   align-items: center;
   display: flex;
+  gap: 10px;
   justify-content: space-between;
   margin-bottom: 13px;
+}
+
+.panel-actions {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+}
+
+.auto-refresh-control {
+  align-items: center;
+  background: var(--panel-subtle);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text-muted);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 5px;
+  height: 30px;
+  padding: 0 9px;
+}
+
+.auto-refresh-control input {
+  accent-color: var(--accent);
+  height: 14px;
+  width: 14px;
 }
 
 .panel-state {
