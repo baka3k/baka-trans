@@ -276,7 +276,7 @@ async fn look_help_loop(app: AppHandle) {
         }
 
         let Some(geometry) = geometry else {
-            let _ = set_status(
+            let _ = invalidate_and_set_status(
                 &app,
                 OverlayStatusKind::Scanning,
                 "Waiting for overlay geometry.",
@@ -289,10 +289,18 @@ async fn look_help_loop(app: AppHandle) {
             Ok(raw_text) => {
                 let normalized = overlay::normalize_ocr_text(&raw_text);
                 if normalized.is_empty() {
-                    let _ = set_status(&app, OverlayStatusKind::NoText, "No readable text found.");
+                    let _ = invalidate_and_set_status(
+                        &app,
+                        OverlayStatusKind::NoText,
+                        "No readable text found.",
+                    );
                 } else {
                     if let Err(error) = handle_ocr_text(&app, &config, normalized).await {
-                        let _ = set_status(&app, OverlayStatusKind::Error, error.message);
+                        let _ = invalidate_and_set_status(
+                            &app,
+                            OverlayStatusKind::Error,
+                            error.message,
+                        );
                     }
                 }
             }
@@ -302,7 +310,7 @@ async fn look_help_loop(app: AppHandle) {
                 } else {
                     OverlayStatusKind::Error
                 };
-                let _ = set_status(&app, status, error.message);
+                let _ = invalidate_and_set_status(&app, status, error.message);
             }
         }
 
@@ -442,9 +450,7 @@ fn look_help_hash(profile_id: &str, system_prompt: &str, source_text: &str) -> u
 }
 
 fn merge_open_config(mut stored: LookHelpConfig, requested: LookHelpConfig) -> LookHelpConfig {
-    if stored.provider_profile_id.trim().is_empty()
-        && !requested.provider_profile_id.trim().is_empty()
-    {
+    if !requested.provider_profile_id.trim().is_empty() {
         stored.provider_profile_id = requested.provider_profile_id;
     }
     stored.normalized()
@@ -458,6 +464,23 @@ fn set_status(
     let payload = {
         let state = app.state::<LookHelpState>();
         let mut inner = state.inner.lock().map_err(lock_error)?;
+        inner.status = status;
+        inner.message = message.into();
+        inner.status_payload()
+    };
+    emit_status(app, payload)
+}
+
+fn invalidate_and_set_status(
+    app: &AppHandle,
+    status: OverlayStatusKind,
+    message: impl Into<String>,
+) -> AppResult<()> {
+    let payload = {
+        let state = app.state::<LookHelpState>();
+        let mut inner = state.inner.lock().map_err(lock_error)?;
+        inner.active_request_id = inner.active_request_id.saturating_add(1);
+        inner.last_request_hash = None;
         inner.status = status;
         inner.message = message.into();
         inner.status_payload()
