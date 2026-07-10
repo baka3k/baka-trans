@@ -310,10 +310,15 @@ pub fn normalize_chat_completions_url(base_url: &str) -> AppResult<String> {
             "Enter a provider base URL.",
         ));
     }
-    if trimmed.ends_with("/chat/completions") {
-        return Ok(trimmed.to_string());
+    let normalized = match trimmed.strip_prefix("http://ollama.com") {
+        Some("") => "https://ollama.com".to_string(),
+        Some(path) if path.starts_with('/') => format!("https://ollama.com{path}"),
+        _ => trimmed.to_string(),
+    };
+    if normalized.ends_with("/chat/completions") {
+        return Ok(normalized);
     }
-    Ok(format!("{trimmed}/chat/completions"))
+    Ok(format!("{normalized}/chat/completions"))
 }
 
 pub fn parse_json_object(text: &str) -> AppResult<Value> {
@@ -591,6 +596,12 @@ mod tests {
         let endpoint =
             normalize_chat_completions_url("https://example.test/v1/chat/completions").unwrap();
         assert_eq!(endpoint, "https://example.test/v1/chat/completions");
+    }
+
+    #[test]
+    fn upgrades_ollama_cloud_base_url_to_https() {
+        let endpoint = normalize_chat_completions_url("http://ollama.com/v1").unwrap();
+        assert_eq!(endpoint, "https://ollama.com/v1/chat/completions");
     }
 
     #[test]
