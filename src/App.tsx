@@ -1779,7 +1779,7 @@ function TransparentOverlayWindow() {
       >
         <div>
           <Move size={15} />
-          <strong>Xuyen thau</strong>
+          <strong>Look Through</strong>
         </div>
         <div className="overlay-window-actions" onMouseDown={beginOverlayActionsDrag}>
           <button
