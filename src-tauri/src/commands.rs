@@ -4,7 +4,7 @@ use crate::models::{
     ApiKeyTestResult, AppStatus, AudioDevices, AudioOutputChannel, ExportRequest,
     ExportedTranscript, LlmProviderProfile, LlmProviderProfileDraft, LlmProviderTestResult,
     ManualBoundaryRequest, MeetingSummaryConfig, MeetingSummaryResult, MeetingSummaryStatus,
-    MeetingSummaryStatusEvent, SessionConfig,
+    MeetingSummaryStatusEvent, SessionConfig, TranslationCredentialStatus, TranslationProvider,
 };
 use crate::session::AppState;
 use crate::{ai, llm, security, summary_agent};
@@ -59,8 +59,8 @@ pub fn save_api_key(api_key: String) -> AppResult<()> {
 }
 
 #[tauri::command]
-pub fn save_translation_api_key(api_key: String) -> AppResult<()> {
-    security::save_api_key(&api_key)
+pub fn save_translation_api_key(provider: TranslationProvider, api_key: String) -> AppResult<()> {
+    security::save_translation_api_key(provider, &api_key)
 }
 
 #[tauri::command]
@@ -69,23 +69,37 @@ pub fn has_api_key() -> bool {
 }
 
 #[tauri::command]
-pub fn has_translation_api_key() -> bool {
-    security::has_api_key()
+pub fn has_translation_api_key(provider: TranslationProvider) -> bool {
+    security::has_translation_api_key(provider)
+}
+
+#[tauri::command]
+pub fn translation_credential_status(provider: TranslationProvider) -> TranslationCredentialStatus {
+    security::translation_credential_status(provider)
 }
 
 #[tauri::command]
 pub async fn test_api_key() -> AppResult<ApiKeyTestResult> {
-    test_translation_api_key().await
+    test_translation_api_key(TranslationProvider::OpenaiRealtime).await
 }
 
 #[tauri::command]
-pub async fn test_translation_api_key() -> AppResult<ApiKeyTestResult> {
-    let info = security::load_api_key_info()?;
-    if let Err(error) = ai::test_realtime_connection(&info.key).await {
+pub async fn test_translation_api_key(
+    provider: TranslationProvider,
+) -> AppResult<ApiKeyTestResult> {
+    let info = security::load_translation_api_key_info(provider)?;
+    let test_result = match provider {
+        TranslationProvider::OpenaiRealtime => ai::test_realtime_connection(&info.key).await,
+        TranslationProvider::GoogleLiveTranslate => {
+            ai::test_google_live_translation_connection(&info.key).await
+        }
+    };
+    if let Err(error) = test_result {
         return Err(AppError::new(
             error.code,
             format!(
-                "Realtime test failed for {} key {}: {}",
+                "{} test failed for {} key {}: {}",
+                provider.label(),
                 api_key_source_label(info.source),
                 info.fingerprint,
                 error.message
@@ -93,9 +107,10 @@ pub async fn test_translation_api_key() -> AppResult<ApiKeyTestResult> {
         ));
     }
     Ok(ApiKeyTestResult {
+        provider,
         source: info.source,
         fingerprint: info.fingerprint,
-        message: "Realtime translation accepted this key.".to_string(),
+        message: format!("{} accepted this key.", provider.label()),
     })
 }
 

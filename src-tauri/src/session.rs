@@ -3,7 +3,7 @@ use crate::error::{AppError, AppResult};
 use crate::models::{
     AppStatus, AudioOutputChannel, ExportFormat, ExportRequest, ExportedTranscript,
     ManualBoundaryEvent, ManualBoundaryRequest, ManualBoundaryStatus, SessionConfig, SessionStatus,
-    TranscriptItem, TranscriptStatus,
+    TranscriptItem, TranscriptStatus, TranslationProvider,
 };
 use crate::{ai, security};
 use std::sync::{Arc, Mutex};
@@ -80,7 +80,7 @@ impl AppState {
             ));
         }
 
-        config.validate_realtime_target_language()?;
+        config.validate_translation_target_language()?;
 
         if config.target_language == config.source_language
             && config.source_language.realtime_code() != "auto"
@@ -303,7 +303,13 @@ impl AppState {
     }
 
     fn start_pipeline(&self, app: AppHandle, config: SessionConfig) -> AppResult<()> {
-        let api_key = security::load_api_key()?;
+        let api_key = security::load_translation_api_key(config.translation_provider)?;
+        if config.translation_provider == TranslationProvider::GoogleLiveTranslate {
+            return Err(AppError::new(
+                "google_live_pipeline_not_implemented",
+                "Google Live Translation credentials are configured, but the live audio pipeline is scheduled for phase 12.",
+            ));
+        }
         let playback = audio::start_playback_with_channel(
             app.clone(),
             &config.output_device_id,
@@ -542,6 +548,7 @@ mod tests {
 
     fn session_config() -> SessionConfig {
         SessionConfig {
+            translation_provider: TranslationProvider::OpenaiRealtime,
             source_language: Language::Auto,
             target_language: Language::En,
             translation_style: TranslationStyle::TechnicalMeetingSafe,

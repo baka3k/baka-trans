@@ -1,3 +1,5 @@
+import type { TranslationProvider } from "./types";
+
 export interface LanguageMetadata {
   code: string;
   label: string;
@@ -6,7 +8,7 @@ export interface LanguageMetadata {
   isAuto: boolean;
 }
 
-const targetLanguageCodes = [
+const openaiTargetLanguageCodes = [
   "es",
   "pt",
   "fr",
@@ -21,7 +23,7 @@ const targetLanguageCodes = [
   "it",
   "en",
 ] as const;
-const targetLanguageCodeSet = new Set<string>(targetLanguageCodes);
+const openaiTargetLanguageCodeSet = new Set<string>(openaiTargetLanguageCodes);
 
 export const languageMetadata = [
   { code: "auto", label: "Auto", supportsSource: true, supportsTarget: false, isAuto: true },
@@ -34,6 +36,8 @@ export const languageMetadata = [
   { code: "bg", label: "Bulgarian", supportsSource: true, supportsTarget: false, isAuto: false },
   { code: "ca", label: "Catalan", supportsSource: true, supportsTarget: false, isAuto: false },
   { code: "zh", label: "Chinese", supportsSource: true, supportsTarget: true, isAuto: false },
+  { code: "zh-Hans", label: "Chinese (Simplified)", supportsSource: true, supportsTarget: false, isAuto: false },
+  { code: "zh-Hant", label: "Chinese (Traditional)", supportsSource: true, supportsTarget: false, isAuto: false },
   { code: "hr", label: "Croatian", supportsSource: true, supportsTarget: false, isAuto: false },
   { code: "cs", label: "Czech", supportsSource: true, supportsTarget: false, isAuto: false },
   { code: "da", label: "Danish", supportsSource: true, supportsTarget: false, isAuto: false },
@@ -79,6 +83,8 @@ export const languageMetadata = [
   { code: "nn", label: "Nynorsk", supportsSource: true, supportsTarget: false, isAuto: false },
   { code: "pl", label: "Polish", supportsSource: true, supportsTarget: false, isAuto: false },
   { code: "pt", label: "Portuguese", supportsSource: true, supportsTarget: true, isAuto: false },
+  { code: "pt-BR", label: "Portuguese (Brazil)", supportsSource: true, supportsTarget: false, isAuto: false },
+  { code: "pt-PT", label: "Portuguese (Portugal)", supportsSource: true, supportsTarget: false, isAuto: false },
   { code: "pa", label: "Punjabi", supportsSource: true, supportsTarget: false, isAuto: false },
   { code: "ro", label: "Romanian", supportsSource: true, supportsTarget: false, isAuto: false },
   { code: "ru", label: "Russian", supportsSource: true, supportsTarget: true, isAuto: false },
@@ -116,14 +122,29 @@ function toLanguageOption(language: (typeof languageMetadata)[number]): Language
 }
 
 function targetLanguageOrder(code: LanguageCode) {
-  return targetLanguageCodes.indexOf(code as (typeof targetLanguageCodes)[number]);
+  return openaiTargetLanguageCodes.indexOf(code as (typeof openaiTargetLanguageCodes)[number]);
 }
 
 export const sourceLanguageOptions = languageMetadata
   .filter((language) => language.supportsSource)
   .map(toLanguageOption);
 
-export const targetLanguageOptions = languageMetadata
-  .filter((language) => targetLanguageCodeSet.has(language.code) && language.supportsTarget)
-  .sort((first, second) => targetLanguageOrder(first.code) - targetLanguageOrder(second.code))
-  .map(toLanguageOption);
+function supportsTargetByProvider(
+  language: (typeof languageMetadata)[number],
+  provider: TranslationProvider,
+) {
+  if (provider === "openai_realtime") {
+    return openaiTargetLanguageCodeSet.has(language.code) && language.supportsTarget;
+  }
+  return !language.isAuto;
+}
+
+export function targetLanguageOptionsForProvider(provider: TranslationProvider) {
+  const options = languageMetadata.filter((language) => supportsTargetByProvider(language, provider));
+  if (provider === "openai_realtime") {
+    options.sort((first, second) => targetLanguageOrder(first.code) - targetLanguageOrder(second.code));
+  }
+  return options.map(toLanguageOption);
+}
+
+export const targetLanguageOptions = targetLanguageOptionsForProvider("openai_realtime");

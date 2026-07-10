@@ -12,6 +12,8 @@ import type {
   MeetingSummaryConfig,
   MeetingSummaryResult,
   SessionConfig,
+  TranslationCredentialStatus,
+  TranslationProvider,
 } from "./types";
 
 export function getAppStatus() {
@@ -51,24 +53,28 @@ export function saveApiKey(apiKey: string) {
   return invoke<void>("save_api_key", { apiKey });
 }
 
-export function saveTranslationApiKey(apiKey: string) {
-  return invoke<void>("save_translation_api_key", { apiKey });
+export function saveTranslationApiKey(provider: TranslationProvider, apiKey: string) {
+  return invoke<void>("save_translation_api_key", { provider, apiKey });
 }
 
 export function hasApiKey() {
   return invoke<boolean>("has_api_key");
 }
 
-export function hasTranslationApiKey() {
-  return invoke<boolean>("has_translation_api_key");
+export function hasTranslationApiKey(provider: TranslationProvider) {
+  return invoke<boolean>("has_translation_api_key", { provider });
 }
 
 export function testApiKey() {
   return invoke<ApiKeyTestResult>("test_api_key");
 }
 
-export function testTranslationApiKey() {
-  return invoke<ApiKeyTestResult>("test_translation_api_key");
+export function translationCredentialStatus(provider: TranslationProvider) {
+  return invoke<TranslationCredentialStatus>("translation_credential_status", { provider });
+}
+
+export function testTranslationApiKey(provider: TranslationProvider) {
+  return invoke<ApiKeyTestResult>("test_translation_api_key", { provider });
 }
 
 export function listLlmProfiles() {

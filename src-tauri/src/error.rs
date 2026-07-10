@@ -16,13 +16,6 @@ impl AppError {
             message: message.into(),
         }
     }
-
-    pub fn missing_api_key() -> Self {
-        Self::new(
-            "missing_api_key",
-            "Save an OpenAI API key in Settings or set OPENAI_API_KEY for development.",
-        )
-    }
 }
 
 impl Display for AppError {

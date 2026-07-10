@@ -37,6 +37,35 @@ pub enum AudioOutputChannel {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+pub enum TranslationProvider {
+    OpenaiRealtime,
+    GoogleLiveTranslate,
+}
+
+impl Default for TranslationProvider {
+    fn default() -> Self {
+        TranslationProvider::GoogleLiveTranslate
+    }
+}
+
+impl TranslationProvider {
+    pub fn label(self) -> &'static str {
+        match self {
+            TranslationProvider::OpenaiRealtime => "OpenAI Realtime Translation",
+            TranslationProvider::GoogleLiveTranslate => "Google Live Translation",
+        }
+    }
+
+    pub fn env_var(self) -> &'static str {
+        match self {
+            TranslationProvider::OpenaiRealtime => "OPENAI_API_KEY",
+            TranslationProvider::GoogleLiveTranslate => "GEMINI_API_KEY",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum Language {
     Auto,
     Ar,
@@ -93,6 +122,10 @@ pub enum Language {
     Nn,
     Pl,
     Pt,
+    #[serde(rename = "pt-BR")]
+    PtBr,
+    #[serde(rename = "pt-PT")]
+    PtPt,
     Pa,
     Ro,
     Ru,
@@ -113,6 +146,10 @@ pub enum Language {
     Vi,
     Cy,
     Yo,
+    #[serde(rename = "zh-Hans")]
+    ZhHans,
+    #[serde(rename = "zh-Hant")]
+    ZhHant,
 }
 
 impl Language {
@@ -173,6 +210,8 @@ impl Language {
             Language::Nn => "nn",
             Language::Pl => "pl",
             Language::Pt => "pt",
+            Language::PtBr => "pt-BR",
+            Language::PtPt => "pt-PT",
             Language::Pa => "pa",
             Language::Ro => "ro",
             Language::Ru => "ru",
@@ -193,10 +232,12 @@ impl Language {
             Language::Vi => "vi",
             Language::Cy => "cy",
             Language::Yo => "yo",
+            Language::ZhHans => "zh-Hans",
+            Language::ZhHant => "zh-Hant",
         }
     }
 
-    pub fn is_realtime_target_supported(self) -> bool {
+    pub fn is_openai_realtime_target_supported(self) -> bool {
         matches!(
             self,
             Language::Es
@@ -214,6 +255,17 @@ impl Language {
                 | Language::En
         )
     }
+
+    pub fn is_google_live_target_supported(self) -> bool {
+        self != Language::Auto
+    }
+
+    pub fn is_target_supported_by(self, provider: TranslationProvider) -> bool {
+        match provider {
+            TranslationProvider::OpenaiRealtime => self.is_openai_realtime_target_supported(),
+            TranslationProvider::GoogleLiveTranslate => self.is_google_live_target_supported(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -227,6 +279,8 @@ pub enum TranslationStyle {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionConfig {
+    #[serde(default)]
+    pub translation_provider: TranslationProvider,
     pub source_language: Language,
     pub target_language: Language,
     pub translation_style: TranslationStyle,
@@ -241,16 +295,20 @@ pub struct SessionConfig {
 }
 
 impl SessionConfig {
-    pub fn validate_realtime_target_language(&self) -> AppResult<()> {
-        if self.target_language.is_realtime_target_supported() {
+    pub fn validate_translation_target_language(&self) -> AppResult<()> {
+        if self
+            .target_language
+            .is_target_supported_by(self.translation_provider)
+        {
             return Ok(());
         }
 
         Err(AppError::new(
             "unsupported_target_language",
             format!(
-                "Target language '{}' is not supported by OpenAI Realtime Translation.",
+                "Target language '{}' is not supported by {}.",
                 self.target_language.realtime_code(),
+                self.translation_provider.label(),
             ),
         ))
     }
@@ -333,7 +391,17 @@ pub struct AppStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TranslationCredentialStatus {
+    pub provider: TranslationProvider,
+    pub has_api_key: bool,
+    pub api_key_source: Option<ApiKeySource>,
+    pub api_key_fingerprint: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ApiKeyTestResult {
+    pub provider: TranslationProvider,
     pub source: ApiKeySource,
     pub fingerprint: String,
     pub message: String,
@@ -518,6 +586,7 @@ mod tests {
 
     fn session_config(target_language: Language) -> SessionConfig {
         SessionConfig {
+            translation_provider: TranslationProvider::OpenaiRealtime,
             source_language: Language::Auto,
             target_language,
             translation_style: TranslationStyle::TechnicalMeetingSafe,
@@ -535,14 +604,14 @@ mod tests {
     #[test]
     fn validates_realtime_target_language() {
         assert!(session_config(Language::Es)
-            .validate_realtime_target_language()
+            .validate_translation_target_language()
             .is_ok());
     }
 
     #[test]
     fn rejects_unsupported_realtime_target_language() {
         let error = session_config(Language::Ar)
-            .validate_realtime_target_language()
+            .validate_translation_target_language()
             .expect_err("Arabic should not be allowed as a target language");
 
         assert_eq!(error.code, "unsupported_target_language");
@@ -553,5 +622,26 @@ mod tests {
             "{}",
             error.message,
         );
+    }
+
+    #[test]
+    fn google_target_language_supports_regional_codes() {
+        let mut config = session_config(Language::PtBr);
+        config.translation_provider = TranslationProvider::GoogleLiveTranslate;
+
+        assert!(config.validate_translation_target_language().is_ok());
+    }
+
+    #[test]
+    fn google_target_language_rejects_auto() {
+        let mut config = session_config(Language::Auto);
+        config.translation_provider = TranslationProvider::GoogleLiveTranslate;
+
+        let error = config
+            .validate_translation_target_language()
+            .expect_err("Auto should not be allowed as a target language");
+
+        assert_eq!(error.code, "unsupported_target_language");
+        assert!(error.message.contains("Google Live Translation"));
     }
 }

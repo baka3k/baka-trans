@@ -40,6 +40,27 @@ pub async fn test_realtime_connection(api_key: &str) -> AppResult<()> {
     Ok(())
 }
 
+pub async fn test_google_live_translation_connection(api_key: &str) -> AppResult<()> {
+    let response = reqwest::Client::new()
+        .get("https://generativelanguage.googleapis.com/v1beta/models")
+        .query(&[("key", api_key.trim())])
+        .send()
+        .await
+        .map_err(|err| AppError::new("google_live_key_test_error", err.to_string()))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|err| AppError::new("google_live_key_test_error", err.to_string()))?;
+
+    if !status.is_success() {
+        let message = extract_google_error_message(&body).unwrap_or(body);
+        return Err(AppError::new("google_live_key_test_error", message));
+    }
+
+    Ok(())
+}
+
 pub async fn run_realtime_translation(
     app: AppHandle,
     config: SessionConfig,
@@ -325,6 +346,16 @@ fn decode_chunked_body(body: &str) -> AppResult<String> {
 }
 
 fn extract_openai_error_message(body: &str) -> Option<String> {
+    serde_json::from_str::<Value>(body).ok().and_then(|value| {
+        value
+            .pointer("/error/message")
+            .or_else(|| value.get("message"))
+            .and_then(Value::as_str)
+            .map(ToString::to_string)
+    })
+}
+
+fn extract_google_error_message(body: &str) -> Option<String> {
     serde_json::from_str::<Value>(body).ok().and_then(|value| {
         value
             .pointer("/error/message")

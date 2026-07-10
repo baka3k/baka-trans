@@ -4,6 +4,7 @@ export type DeviceKind = "input" | "output";
 export type AudioOutputChannel = "all" | "left" | "right";
 export type ApiKeySource = "environment" | "keychain" | "memory";
 export type Language = LanguageCode;
+export type TranslationProvider = "openai_realtime" | "google_live_translate";
 export type TranslationStyle = "literal" | "natural" | "technical_meeting_safe";
 export type ManualBoundaryReason = "user_button" | "keyboard_shortcut";
 export type ManualBoundaryStatus =
@@ -44,6 +45,7 @@ export interface AudioDevices {
 }
 
 export interface SessionConfig {
+  translationProvider: TranslationProvider;
   sourceLanguage: Language;
   targetLanguage: Language;
   translationStyle: TranslationStyle;
@@ -66,9 +68,17 @@ export interface AppStatus {
 }
 
 export interface ApiKeyTestResult {
+  provider: TranslationProvider;
   source: ApiKeySource;
   fingerprint: string;
   message: string;
+}
+
+export interface TranslationCredentialStatus {
+  provider: TranslationProvider;
+  hasApiKey: boolean;
+  apiKeySource?: ApiKeySource;
+  apiKeyFingerprint?: string;
 }
 
 export interface LlmProviderProfile {

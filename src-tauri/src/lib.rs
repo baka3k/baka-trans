@@ -13,7 +13,7 @@ use commands::{
     has_translation_api_key, list_audio_devices, list_llm_profiles, pause_session, play_test_tone,
     resume_session, run_meeting_summary_agent, save_api_key, save_llm_profile,
     save_translation_api_key, start_local_monitor, start_session, stop_local_monitor, stop_session,
-    test_api_key, test_llm_profile, test_translation_api_key,
+    test_api_key, test_llm_profile, test_translation_api_key, translation_credential_status,
 };
 use session::AppState;
 
@@ -33,6 +33,7 @@ pub fn run() {
             save_translation_api_key,
             has_api_key,
             has_translation_api_key,
+            translation_credential_status,
             test_api_key,
             test_translation_api_key,
             list_llm_profiles,

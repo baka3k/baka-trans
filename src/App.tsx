@@ -39,6 +39,7 @@ import {
   stopSession,
   testLlmProfile,
   testTranslationApiKey,
+  translationCredentialStatus,
 } from "./api";
 import {
   buildMeetingSummaryConfig,
@@ -46,7 +47,7 @@ import {
   renderTranscript,
   validateLlmProfileDraft,
 } from "./transcript";
-import { sourceLanguageOptions, targetLanguageOptions } from "./languages";
+import { sourceLanguageOptions, targetLanguageOptionsForProvider } from "./languages";
 import type {
   AppErrorPayload,
   ApiKeySource,
@@ -66,6 +67,7 @@ import type {
   SessionConfig,
   SessionStatus,
   TranscriptScope,
+  TranslationProvider,
   TranslatedAudioLevelEvent,
   TranscriptItem,
 } from "./types";
@@ -74,6 +76,18 @@ const channelOptions: Array<{ value: AudioOutputChannel; label: string }> = [
   { value: "all", label: "Both ears" },
   { value: "left", label: "Left ear" },
   { value: "right", label: "Right ear" },
+];
+const translationProviders: Array<{ value: TranslationProvider; label: string; title: string }> = [
+  {
+    value: "google_live_translate",
+    label: "Google",
+    title: "Google Live Translation",
+  },
+  {
+    value: "openai_realtime",
+    label: "OpenAI",
+    title: "OpenAI Realtime Translation",
+  },
 ];
 const providerKinds: Array<{ value: LlmProviderKind; label: string; title: string }> = [
   { value: "openai", label: "OpenAI", title: "OpenAI chat completions" },
@@ -121,6 +135,8 @@ const emptyProfileDraft: LlmProviderProfileDraft = {
 
 export default function App() {
   const [devices, setDevices] = useState<AudioDevices>({ inputs: [], outputs: [] });
+  const [translationProvider, setTranslationProvider] =
+    useState<TranslationProvider>("google_live_translate");
   const [sourceLanguage, setSourceLanguage] = useState<Language>("auto");
   const [targetLanguage, setTargetLanguage] = useState<Language>("en");
   const [inputDeviceId, setInputDeviceId] = useState("");
@@ -180,6 +196,10 @@ export default function App() {
     effectiveMonitorOriginalAudio ? selectedMonitorOutput : undefined,
     monitorOutputChannel,
   );
+  const targetLanguageOptions = useMemo(
+    () => targetLanguageOptionsForProvider(translationProvider),
+    [translationProvider],
+  );
 
   const canStart =
     (status === "idle" || status === "error") &&
@@ -187,7 +207,8 @@ export default function App() {
     inputDeviceId.length > 0 &&
     outputDeviceId.length > 0 &&
     (!monitorOriginalAudio || monitorOutputDeviceId.length > 0);
-  const canForceBoundary = activeSessionStatuses.includes(status);
+  const canForceBoundary =
+    translationProvider === "openai_realtime" && activeSessionStatuses.includes(status);
   const canPause = canForceBoundary;
   const canResume = status === "paused";
   const canStop = status !== "idle" && status !== "stopping";
@@ -267,6 +288,7 @@ export default function App() {
 
   const config: SessionConfig = useMemo(
     () => ({
+      translationProvider,
       sourceLanguage,
       targetLanguage,
       translationStyle: "technical_meeting_safe",
@@ -289,6 +311,7 @@ export default function App() {
       sourceLanguage,
       targetLanguage,
       translationOutputChannel,
+      translationProvider,
     ],
   );
 
@@ -339,6 +362,16 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!targetLanguageOptions.some((option) => option.value === targetLanguage)) {
+      setTargetLanguage(targetLanguageOptions[0]?.value ?? "en");
+    }
+  }, [targetLanguage, targetLanguageOptions]);
+
+  useEffect(() => {
+    void refreshTranslationCredentialStatus(translationProvider);
+  }, [translationProvider]);
+
+  useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ block: "end" });
   }, [transcript]);
 
@@ -366,6 +399,7 @@ export default function App() {
       setDevices(deviceList);
       setStatus(appStatus.sessionStatus);
       applyAppStatus(appStatus);
+      await refreshTranslationCredentialStatus(translationProvider);
       applyProfiles(profiles);
       setKeyTestMessage("");
       const storedRouting = readRoutingProfile();
@@ -402,15 +436,31 @@ export default function App() {
     }
   }
 
+  async function refreshTranslationCredentialStatus(provider: TranslationProvider) {
+    try {
+      const credential = await translationCredentialStatus(provider);
+      setApiKeyStored(credential.hasApiKey);
+      setApiKeySource(credential.apiKeySource ?? null);
+      setApiKeyFingerprint(credential.apiKeyFingerprint ?? "");
+    } catch (cause) {
+      setApiKeyStored(false);
+      setApiKeySource(null);
+      setApiKeyFingerprint("");
+      setError(normalizeError(cause));
+    }
+  }
+
   async function saveKey() {
     setBusy(true);
     setError(null);
     try {
-      await saveTranslationApiKey(apiKeyDraft);
-      const appStatus = await getAppStatus();
-      applyAppStatus(appStatus);
+      await saveTranslationApiKey(translationProvider, apiKeyDraft);
+      const credential = await translationCredentialStatus(translationProvider);
+      setApiKeyStored(credential.hasApiKey);
+      setApiKeySource(credential.apiKeySource ?? null);
+      setApiKeyFingerprint(credential.apiKeyFingerprint ?? "");
       setKeyTestMessage("");
-      if (appStatus.hasApiKey) {
+      if (credential.hasApiKey) {
         setApiKeyDraft("");
       } else {
         setError({
@@ -514,9 +564,7 @@ export default function App() {
   }
 
   function applyAppStatus(appStatus: Awaited<ReturnType<typeof getAppStatus>>) {
-    setApiKeyStored(appStatus.hasApiKey);
-    setApiKeySource(appStatus.apiKeySource ?? null);
-    setApiKeyFingerprint(appStatus.apiKeyFingerprint ?? "");
+    setStatus(appStatus.sessionStatus);
   }
 
   async function runCommand(command: () => Promise<void>) {
@@ -540,7 +588,7 @@ export default function App() {
     setError(null);
     setKeyTestMessage("");
     try {
-      const result = await testTranslationApiKey();
+      const result = await testTranslationApiKey(translationProvider);
       setApiKeyStored(true);
       setApiKeySource(result.source);
       setApiKeyFingerprint(result.fingerprint);
@@ -901,7 +949,7 @@ export default function App() {
                 <span>
                   {localMonitorActive
                     ? "Live mic is routed to translated audio output."
-                    : "No OpenAI call; tests mic, device, and left/right routing."}
+                    : "No translation call; tests mic, device, and left/right routing."}
                 </span>
               </div>
               <div className="button-row compact">
@@ -938,7 +986,24 @@ export default function App() {
 
             <div className="panel key-panel">
               <div className="panel-header">
-                <h2>Translation OpenAI key</h2>
+                <h2>Translation provider</h2>
+              </div>
+              <div className="segmented-control" aria-label="Translation provider">
+                {translationProviders.map((provider) => (
+                  <button
+                    type="button"
+                    className={translationProvider === provider.value ? "active" : ""}
+                    title={provider.title}
+                    key={provider.value}
+                    onClick={() => {
+                      setTranslationProvider(provider.value);
+                      setApiKeyDraft("");
+                      setKeyTestMessage("");
+                    }}
+                  >
+                    {provider.label}
+                  </button>
+                ))}
               </div>
               <div className="key-row">
                 <input
@@ -947,7 +1012,7 @@ export default function App() {
                   placeholder={
                     apiKeyStored
                       ? "Saved translation key. Paste only to replace."
-                      : "OpenAI Realtime API key"
+                      : `${labelTranslationProvider(translationProvider)} API key`
                   }
                   onChange={(event) => setApiKeyDraft(event.currentTarget.value)}
                 />
@@ -959,8 +1024,8 @@ export default function App() {
                 <KeyRound size={14} />
                 <span>
                   {apiKeyStored
-                    ? `Using ${labelApiKeySource(apiKeySource)} key ${apiKeyFingerprint || ""} for realtime translation`
-                    : "No translation OpenAI key available"}
+                    ? `Using ${labelApiKeySource(apiKeySource)} key ${apiKeyFingerprint || ""} for ${labelTranslationProvider(translationProvider)}`
+                    : `No ${labelTranslationProvider(translationProvider)} key available`}
                 </span>
               </div>
               <div className="key-test-row">
@@ -973,6 +1038,9 @@ export default function App() {
                 </button>
                 {keyTestMessage ? <span>{keyTestMessage}</span> : null}
               </div>
+              {translationProvider === "google_live_translate" ? (
+                <InlineWarning text="Google credentials are ready for migration; live audio starts in phase 12." />
+              ) : null}
               <div className="setup-list">
                 <div>
                   <strong>1. Route</strong>
@@ -1461,6 +1529,15 @@ function resolveStoredDevice(devices: AudioDeviceInfo[], storedId?: string) {
 
 function labelStatus(status: SessionStatus) {
   return status.replace(/_/g, " ");
+}
+
+function labelTranslationProvider(provider: TranslationProvider) {
+  switch (provider) {
+    case "google_live_translate":
+      return "Google Live Translation";
+    case "openai_realtime":
+      return "OpenAI Realtime Translation";
+  }
 }
 
 function normalizeDeviceName(name: string) {
