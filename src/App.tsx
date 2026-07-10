@@ -64,12 +64,18 @@ import {
   updateOverlayGeometry,
 } from "./api";
 import {
+  MEETING_SUMMARY_CUSTOM_PROMPT_MAX_CHARS,
   buildMeetingSummaryConfig,
   deriveConversationItems,
   deriveSourceSignalState,
   deriveTranslationActivity,
+  meetingSummaryCustomPromptLength,
+  meetingSummaryPromptPresetDescription,
+  meetingSummaryPromptPresets,
   mergeTranscriptDelta,
   renderTranscript,
+  selectMeetingSummaryPromptPreset,
+  validateMeetingSummaryCustomPrompt,
   validateLlmProfileDraft,
 } from "./transcript";
 import { sourceLanguageOptions, targetLanguageOptionsForProvider } from "./languages";
@@ -91,6 +97,7 @@ import type {
   ManualBoundaryEvent,
   ManualBoundaryReason,
   MeetingSummaryConfig,
+  MeetingSummaryPromptPreset,
   MeetingSummaryResult,
   MeetingSummaryStatusEvent,
   OverlayConfig,
@@ -135,6 +142,10 @@ const transcriptScopeOptions: Array<{ value: TranscriptScope; label: string }> =
   { value: "source", label: "Source" },
   { value: "translated", label: "Translated" },
 ];
+const summaryPromptPresetOptions = meetingSummaryPromptPresets.map(({ id, label }) => ({
+  value: id,
+  label,
+}));
 const routingStorageKey = "baka-trans-routing-profile-v1";
 const activeSessionStatuses: SessionStatus[] = ["listening", "translating", "speaking"];
 const deviceAutoRefreshIntervalMs = 5000;
@@ -402,9 +413,16 @@ export default function App() {
     (status === "idle" && canStart) || status === "starting" || sessionActive;
   const selectedProfile = llmProfiles.find((profile) => profile.id === selectedProfileId);
   const profileDraftErrors = validateLlmProfileDraft(profileDraft);
+  const summaryPromptValidation = validateMeetingSummaryCustomPrompt(
+    summaryConfig.promptPreset,
+    summaryConfig.customSystemPrompt,
+  );
+  const summaryPromptDescription = meetingSummaryPromptPresetDescription(summaryConfig.promptPreset);
+  const summaryPromptLength = meetingSummaryCustomPromptLength(summaryConfig.customSystemPrompt);
   const canRunSummary =
     Boolean(selectedProfileId) &&
     !summaryRunning &&
+    !summaryPromptValidation &&
     transcript.some((item) => item.sourceText.trim() || item.translatedText.trim());
 
   const config: SessionConfig = useMemo(
@@ -785,7 +803,7 @@ export default function App() {
   }
 
   async function runSummary() {
-    if (!selectedProfileId) {
+    if (!selectedProfileId || summaryPromptValidation) {
       return;
     }
     setSummaryRunning(true);
@@ -1608,6 +1626,55 @@ export default function App() {
                       }}
                     />
                   </label>
+                </div>
+                <div className="summary-prompt-control">
+                  <SelectField
+                    label="Summary style"
+                    value={summaryConfig.promptPreset}
+                    onChange={(value) =>
+                      setSummaryConfig((current) =>
+                        selectMeetingSummaryPromptPreset(
+                          current,
+                          value as MeetingSummaryPromptPreset,
+                        ),
+                      )
+                    }
+                    options={summaryPromptPresetOptions}
+                  />
+                  <p className="summary-prompt-description">{summaryPromptDescription}</p>
+                  {summaryConfig.promptPreset === "custom" ? (
+                    <div className="summary-custom-prompt">
+                      <label htmlFor="summary-custom-system-prompt">Custom system prompt</label>
+                      <textarea
+                        id="summary-custom-system-prompt"
+                        value={summaryConfig.customSystemPrompt}
+                        placeholder="Describe the tone, emphasis, or organization you want."
+                        aria-invalid={Boolean(summaryPromptValidation)}
+                        aria-describedby="summary-custom-prompt-meta"
+                        onChange={(event) => {
+                          const customSystemPrompt = event.currentTarget.value;
+                          setSummaryConfig((current) => ({
+                            ...current,
+                            customSystemPrompt,
+                          }));
+                        }}
+                      />
+                      <div id="summary-custom-prompt-meta" className="summary-prompt-meta">
+                        <div
+                          className="summary-prompt-validation"
+                          role={summaryPromptValidation ? "alert" : undefined}
+                        >
+                          {summaryPromptValidation ?? " "}
+                        </div>
+                        <div
+                          className={`summary-prompt-count${summaryPromptValidation ? " invalid" : ""}`}
+                        >
+                          {summaryPromptLength.toLocaleString()}/
+                          {MEETING_SUMMARY_CUSTOM_PROMPT_MAX_CHARS.toLocaleString()}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
                 <div className="section-toggles">
                   {(

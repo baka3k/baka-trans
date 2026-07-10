@@ -807,6 +807,63 @@ h2 {
   padding-top: 12px;
 }
 
+.summary-prompt-control,
+.summary-custom-prompt {
+  display: grid;
+  gap: 6px;
+}
+
+.summary-prompt-description {
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.35;
+  margin: -2px 0 0;
+}
+
+.summary-custom-prompt {
+  padding-top: 4px;
+}
+
+.summary-custom-prompt > label {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.summary-custom-prompt textarea {
+  line-height: 1.4;
+  min-height: 112px;
+}
+
+.summary-custom-prompt textarea[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.summary-prompt-meta {
+  align-items: start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-height: 16px;
+}
+
+.summary-prompt-validation,
+.summary-prompt-count {
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.summary-prompt-validation,
+.summary-prompt-count.invalid {
+  color: var(--danger);
+}
+
+.summary-prompt-count {
+  color: var(--text-soft);
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
 .section-toggles {
   display: grid;
   gap: 7px;
@@ -1634,6 +1691,16 @@ h2 {
   .live-status-rail,
   .line-row {
     grid-template-columns: 1fr;
+  }
+
+  .summary-prompt-meta {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .summary-prompt-count {
+    align-self: end;
   }
 
   .conversation-feed {
