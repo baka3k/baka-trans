@@ -52,6 +52,9 @@ src-tauri/target/release/bundle/macos/
 For local testing, open the generated `.dmg` or launch the generated `.app`.
 For public distribution, add Apple code signing and notarization before sharing the installer.
 
+For the versioned build, verification, tag, and GitHub Release workflow, see
+[the macOS release guide](docs/RELEASE_GUIDE.md).
+
 ## Windows Status
 
 The generated macOS `.dmg` and `.app` files do not run on Windows.
