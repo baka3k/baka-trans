@@ -5,6 +5,8 @@ import type {
   AudioOutputChannel,
   AudioDevices,
   ExportedTranscript,
+  LookHelpConfig,
+  LookHelpStatus,
   LlmProviderProfile,
   LlmProviderProfileDraft,
   LlmProviderTestResult,
@@ -134,20 +136,48 @@ export function openOverlayWindow(config: OverlayConfig) {
   return invoke<void>("open_overlay_window", { config });
 }
 
+export function openLookHelpWindow(config: LookHelpConfig) {
+  return invoke<void>("open_look_help_window", { config });
+}
+
 export function closeOverlayWindow() {
   return invoke<void>("close_overlay_window");
+}
+
+export function closeLookHelpWindow() {
+  return invoke<void>("close_look_help_window");
 }
 
 export function overlayStatus() {
   return invoke<OverlayStatus>("overlay_status");
 }
 
+export function lookHelpStatus() {
+  return invoke<LookHelpStatus>("look_help_status");
+}
+
 export function updateOverlayGeometry(geometry: OverlayGeometry) {
   return invoke<void>("update_overlay_geometry", { geometry });
 }
 
+export function updateOverlayConfig(config: OverlayConfig) {
+  return invoke<void>("update_overlay_config", { config });
+}
+
+export function updateLookHelpGeometry(geometry: OverlayGeometry) {
+  return invoke<void>("update_look_help_geometry", { geometry });
+}
+
+export function updateLookHelpConfig(config: LookHelpConfig) {
+  return invoke<void>("update_look_help_config", { config });
+}
+
 export function setOverlayPaused(paused: boolean) {
   return invoke<void>("set_overlay_paused", { paused });
+}
+
+export function setLookHelpPaused(paused: boolean) {
+  return invoke<void>("set_look_help_paused", { paused });
 }
 
 export function openScreenRecordingSettings() {

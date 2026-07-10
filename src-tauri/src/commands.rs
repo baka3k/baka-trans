@@ -3,12 +3,13 @@ use crate::error::{AppError, AppResult};
 use crate::models::{
     ApiKeyTestResult, AppStatus, AudioDevices, AudioOutputChannel, ExportRequest,
     ExportedTranscript, LlmProviderProfile, LlmProviderProfileDraft, LlmProviderTestResult,
-    ManualBoundaryRequest, MeetingSummaryConfig, MeetingSummaryResult, MeetingSummaryStatus,
-    MeetingSummaryStatusEvent, OverlayConfig, OverlayGeometry, OverlayStatus, SessionConfig,
-    TranslationCredentialStatus, TranslationProvider,
+    LookHelpConfig, LookHelpStatus, ManualBoundaryRequest, MeetingSummaryConfig,
+    MeetingSummaryResult, MeetingSummaryStatus, MeetingSummaryStatusEvent, OverlayConfig,
+    OverlayGeometry, OverlayStatus, SessionConfig, TranslationCredentialStatus,
+    TranslationProvider,
 };
 use crate::session::AppState;
-use crate::{ai, llm, overlay, security, summary_agent};
+use crate::{ai, llm, look_help, overlay, security, summary_agent};
 use tauri::{AppHandle, Emitter, State};
 
 #[tauri::command]
@@ -212,6 +213,15 @@ pub fn open_overlay_window(
 }
 
 #[tauri::command]
+pub fn open_look_help_window(
+    app: AppHandle,
+    state: State<'_, look_help::LookHelpState>,
+    config: LookHelpConfig,
+) -> AppResult<()> {
+    state.open_window(app, config)
+}
+
+#[tauri::command]
 pub fn close_overlay_window(
     app: AppHandle,
     state: State<'_, overlay::OverlayState>,
@@ -220,10 +230,26 @@ pub fn close_overlay_window(
 }
 
 #[tauri::command]
+pub fn close_look_help_window(
+    app: AppHandle,
+    state: State<'_, look_help::LookHelpState>,
+) -> AppResult<()> {
+    state.close_window(app)
+}
+
+#[tauri::command]
 pub fn overlay_status(
     app: AppHandle,
     state: State<'_, overlay::OverlayState>,
 ) -> AppResult<OverlayStatus> {
+    state.status(&app)
+}
+
+#[tauri::command]
+pub fn look_help_status(
+    app: AppHandle,
+    state: State<'_, look_help::LookHelpState>,
+) -> AppResult<LookHelpStatus> {
     state.status(&app)
 }
 
@@ -237,9 +263,45 @@ pub fn update_overlay_geometry(
 }
 
 #[tauri::command]
+pub fn update_overlay_config(
+    app: AppHandle,
+    state: State<'_, overlay::OverlayState>,
+    config: OverlayConfig,
+) -> AppResult<()> {
+    state.update_config(&app, config)
+}
+
+#[tauri::command]
+pub fn update_look_help_geometry(
+    app: AppHandle,
+    state: State<'_, look_help::LookHelpState>,
+    geometry: OverlayGeometry,
+) -> AppResult<()> {
+    state.update_geometry(&app, geometry)
+}
+
+#[tauri::command]
+pub fn update_look_help_config(
+    app: AppHandle,
+    state: State<'_, look_help::LookHelpState>,
+    config: LookHelpConfig,
+) -> AppResult<()> {
+    state.update_config(&app, config)
+}
+
+#[tauri::command]
 pub fn set_overlay_paused(
     app: AppHandle,
     state: State<'_, overlay::OverlayState>,
+    paused: bool,
+) -> AppResult<()> {
+    state.set_paused(app, paused)
+}
+
+#[tauri::command]
+pub fn set_look_help_paused(
+    app: AppHandle,
+    state: State<'_, look_help::LookHelpState>,
     paused: bool,
 ) -> AppResult<()> {
     state.set_paused(app, paused)

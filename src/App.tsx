@@ -29,10 +29,13 @@ import {
   exportTranscript,
   forceTranslateBoundary,
   getAppStatus,
+  lookHelpStatus,
   closeOverlayWindow,
+  closeLookHelpWindow,
   deleteLlmProfile,
   listAudioDevices,
   listLlmProfiles,
+  openLookHelpWindow,
   openOverlayWindow,
   openScreenRecordingSettings,
   overlayStatus,
@@ -48,9 +51,13 @@ import {
   stopLocalMonitor,
   stopSession,
   setOverlayPaused,
+  setLookHelpPaused,
   testLlmProfile,
   testTranslationApiKey,
   translationCredentialStatus,
+  updateLookHelpConfig,
+  updateLookHelpGeometry,
+  updateOverlayConfig,
   updateOverlayGeometry,
 } from "./api";
 import {
@@ -72,6 +79,9 @@ import type {
   AudioLevelEvent,
   ConversationDisplayItem,
   Language,
+  LookHelpConfig,
+  LookHelpStatus,
+  LookHelpUpdate,
   LlmProviderKind,
   LlmProviderProfile,
   LlmProviderProfileDraft,
@@ -125,8 +135,39 @@ const transcriptScopeOptions: Array<{ value: TranscriptScope; label: string }> =
 const routingStorageKey = "baka-trans-routing-profile-v1";
 const activeSessionStatuses: SessionStatus[] = ["listening", "translating", "speaking"];
 const deviceAutoRefreshIntervalMs = 5000;
-const isTransparentOverlayRoute =
-  new URLSearchParams(window.location.search).get("overlay") === "transparent";
+const overlayRoute = new URLSearchParams(window.location.search).get("overlay");
+const isTransparentOverlayRoute = overlayRoute === "transparent";
+const isLookHelpOverlayRoute = overlayRoute === "look-help";
+const defaultLookHelpSystemPrompt =
+  "You are Look & Help, a compact assistant for the visible screen region. Explain, summarize, or help with the provided OCR text. Be concise, practical, and do not invent details that are not present.";
+
+function defaultLookHelpConfig(providerProfileId = ""): LookHelpConfig {
+  return {
+    providerProfileId,
+    systemPrompt: defaultLookHelpSystemPrompt,
+    promptPanelVisible: false,
+    captureIntervalMs: 900,
+    minimumConfidence: 0.45,
+    opacity: 0.78,
+    maxOcrInputChars: 6000,
+  };
+}
+
+function beginOverlayDrag(event: React.MouseEvent<HTMLElement>) {
+  if (event.button !== 0) {
+    return;
+  }
+  void getCurrentWindow().startDragging();
+}
+
+function beginOverlayActionsDrag(event: React.MouseEvent<HTMLElement>) {
+  const target = event.target;
+  if (target instanceof HTMLElement && target.closest("button,input,select,textarea,a")) {
+    event.stopPropagation();
+    return;
+  }
+  beginOverlayDrag(event);
+}
 
 interface AudioLineRow {
   id: string;
@@ -161,6 +202,9 @@ const emptyProfileDraft: LlmProviderProfileDraft = {
 export default function App() {
   if (isTransparentOverlayRoute) {
     return <TransparentOverlayWindow />;
+  }
+  if (isLookHelpOverlayRoute) {
+    return <LookHelpOverlayWindow />;
   }
 
   const [devices, setDevices] = useState<AudioDevices>({ inputs: [], outputs: [] });
@@ -827,6 +871,18 @@ export default function App() {
     }
   }
 
+  async function showLookHelpOverlay() {
+    setBusy(true);
+    setError(null);
+    try {
+      await openLookHelpWindow(defaultLookHelpConfig(selectedProfileId));
+    } catch (cause) {
+      setError(normalizeError(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function doExport(format: "text" | "markdown") {
     const localContent = renderTranscript(transcript, format, meetingNotes);
     try {
@@ -928,6 +984,16 @@ export default function App() {
           >
             <ScanText size={18} />
             <span>Look through</span>
+          </button>
+          <button
+            className="icon-button overlay-launch-button"
+            onClick={showLookHelpOverlay}
+            disabled={busy}
+            title="Look & Help"
+            aria-label="Open Look and Help OCR assistant overlay"
+          >
+            <Bot size={18} />
+            <span>Look & Help</span>
           </button>
           <button
             className="icon-button"
@@ -1339,26 +1405,97 @@ export default function App() {
                   />
                 </label>
 
-                <div className="key-row">
-                  <input
-                    type="password"
-                    value={profileKeyDraft}
-                    placeholder={
-                      selectedProfile?.hasApiKey
-                        ? `Saved key ${selectedProfile.apiKeyFingerprint ?? ""}`
-                        : profileDraft.kind === "ollama"
-                          ? "Optional placeholder key"
-                          : "Summary provider API key"
-                    }
-                    onChange={(event) => setProfileKeyDraft(event.currentTarget.value)}
-                  />
-                  <button
-                    onClick={saveSummaryProfile}
-                    disabled={busy || profileDraftErrors.length > 0}
-                  >
-                    <Save size={17} /> Save
-                  </button>
+                <div className="field-grid two profile-tuning-grid">
+                  <label className="field">
+                    <span>Timeout (s)</span>
+                    <input
+                      type="number"
+                      min="5"
+                      max="300"
+                      step="1"
+                      value={profileNumberValue(profileDraft.timeoutSeconds)}
+                      onChange={(event) =>
+                        setProfileDraft((current) => ({
+                          ...current,
+                          timeoutSeconds: parseProfileNumberInput(event.currentTarget.value, true),
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Max tokens</span>
+                    <input
+                      type="number"
+                      min="128"
+                      max="16384"
+                      step="1"
+                      value={profileNumberValue(profileDraft.maxOutputTokens)}
+                      onChange={(event) =>
+                        setProfileDraft((current) => ({
+                          ...current,
+                          maxOutputTokens: parseProfileNumberInput(
+                            event.currentTarget.value,
+                            true,
+                          ),
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Temperature</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="2"
+                      step="0.1"
+                      value={profileNumberValue(profileDraft.temperature)}
+                      onChange={(event) =>
+                        setProfileDraft((current) => ({
+                          ...current,
+                          temperature: parseProfileNumberInput(event.currentTarget.value),
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="toggle-row profile-enabled-toggle no-margin">
+                    <input
+                      type="checkbox"
+                      checked={profileDraft.enabled ?? true}
+                      onChange={(event) =>
+                        setProfileDraft((current) => ({
+                          ...current,
+                          enabled: event.currentTarget.checked,
+                        }))
+                      }
+                    />
+                    <span>Enabled</span>
+                  </label>
                 </div>
+
+                <label className="field profile-key-field">
+                  <span>LLM API key</span>
+                  <div className="key-row">
+                    <input
+                      type="password"
+                      value={profileKeyDraft}
+                      placeholder={
+                        selectedProfile?.hasApiKey
+                          ? `Saved LLM key ${selectedProfile.apiKeyFingerprint ?? ""}`
+                          : profileDraft.kind === "ollama"
+                            ? "Ollama API key, optional for local"
+                            : "LLM provider API key"
+                      }
+                      onChange={(event) => setProfileKeyDraft(event.currentTarget.value)}
+                    />
+                    <button
+                      onClick={saveSummaryProfile}
+                      disabled={busy || profileDraftErrors.length > 0}
+                    >
+                      <Save size={17} /> Save
+                    </button>
+                  </div>
+                  <small>Stored separately from translation API keys.</small>
+                </label>
 
                 <div className="profile-actions">
                   <button
@@ -1536,8 +1673,12 @@ function TransparentOverlayWindow() {
   };
 
   useEffect(() => {
+    document.documentElement.classList.add("overlay-html");
     document.body.classList.add("overlay-body");
-    return () => document.body.classList.remove("overlay-body");
+    return () => {
+      document.documentElement.classList.remove("overlay-html");
+      document.body.classList.remove("overlay-body");
+    };
   }, []);
 
   useEffect(() => {
@@ -1572,6 +1713,7 @@ function TransparentOverlayWindow() {
     const unlisten = Promise.all([
       listen<OverlayStatus>("overlay-status-update", (event) => {
         setStatus(event.payload);
+        setOpacity(event.payload.config.opacity);
         setStatusMessage(event.payload.message);
       }),
       listen<OverlayTranslationUpdate>("overlay-translation-update", (event) => {
@@ -1614,6 +1756,14 @@ function TransparentOverlayWindow() {
     window.setTimeout(() => setCopied(false), 1200);
   }
 
+  function updateTransparentConfig(nextConfig: OverlayConfig) {
+    setStatus((current) => (current ? { ...current, config: nextConfig } : current));
+    setOpacity(nextConfig.opacity);
+    void updateOverlayConfig(nextConfig).catch((cause) =>
+      setStatusMessage(normalizeError(cause).message),
+    );
+  }
+
   const statusKind = status?.status ?? "idle";
   const translatedText = translation?.translatedText.trim();
   const sourceText = translation?.sourceText.trim();
@@ -1625,13 +1775,13 @@ function TransparentOverlayWindow() {
     >
       <header
         className="overlay-titlebar"
-        onMouseDown={() => void getCurrentWindow().startDragging()}
+        onMouseDown={beginOverlayDrag}
       >
         <div>
           <Move size={15} />
           <strong>Xuyen thau</strong>
         </div>
-        <div className="overlay-window-actions" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="overlay-window-actions" onMouseDown={beginOverlayActionsDrag}>
           <button
             className="icon-button tight"
             onClick={togglePaused}
@@ -1671,7 +1821,7 @@ function TransparentOverlayWindow() {
         ) : statusKind === "error" ? (
           <div className="overlay-empty">
             <AlertTriangle size={24} />
-            <strong>OCR backend unavailable</strong>
+            <strong>{statusMessage}</strong>
           </div>
         ) : (
           <div className="overlay-empty">
@@ -1697,7 +1847,10 @@ function TransparentOverlayWindow() {
             max="0.92"
             step="0.01"
             value={opacity}
-            onChange={(event) => setOpacity(Number(event.currentTarget.value))}
+            onChange={(event) => {
+              const nextOpacity = Number(event.currentTarget.value);
+              updateTransparentConfig({ ...config, opacity: nextOpacity });
+            }}
           />
         </label>
         <button
@@ -1710,6 +1863,256 @@ function TransparentOverlayWindow() {
           <Copy size={14} />
         </button>
         <span>{copied ? "Copied" : config.targetLanguage.toUpperCase()}</span>
+      </footer>
+    </main>
+  );
+}
+
+function LookHelpOverlayWindow() {
+  const [status, setStatus] = useState<LookHelpStatus | null>(null);
+  const [answer, setAnswer] = useState<LookHelpUpdate | null>(null);
+  const [profiles, setProfiles] = useState<LlmProviderProfile[]>([]);
+  const [opacity, setOpacity] = useState(0.78);
+  const [copied, setCopied] = useState(false);
+  const [statusMessage, setStatusMessage] = useState("Starting Look & Help");
+  const config = status?.config ?? defaultLookHelpConfig();
+
+  useEffect(() => {
+    document.documentElement.classList.add("overlay-html");
+    document.body.classList.add("overlay-body");
+    return () => {
+      document.documentElement.classList.remove("overlay-html");
+      document.body.classList.remove("overlay-body");
+    };
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    const appWindow = getCurrentWindow();
+
+    async function reportGeometry() {
+      try {
+        const [position, size, scaleFactor, monitor] = await Promise.all([
+          appWindow.innerPosition(),
+          appWindow.innerSize(),
+          appWindow.scaleFactor(),
+          currentMonitor(),
+        ]);
+        if (disposed) {
+          return;
+        }
+        await updateLookHelpGeometry({
+          displayId: monitor?.name ?? undefined,
+          x: position.x,
+          y: position.y,
+          width: size.width,
+          height: size.height,
+          scaleFactor,
+          updatedAtMs: Date.now(),
+        });
+      } catch {
+        setStatusMessage("Waiting for window geometry");
+      }
+    }
+
+    const unlisten = Promise.all([
+      listen<LookHelpStatus>("look-help-status-update", (event) => {
+        setStatus(event.payload);
+        setOpacity(event.payload.config.opacity);
+        setStatusMessage(event.payload.message);
+      }),
+      listen<LookHelpUpdate>("look-help-answer-update", (event) => {
+        setAnswer(event.payload);
+        setStatusMessage(event.payload.message);
+      }),
+      appWindow.onMoved(() => void reportGeometry()),
+      appWindow.onResized(() => void reportGeometry()),
+    ]);
+
+    void lookHelpStatus()
+      .then((payload) => {
+        setStatus(payload);
+        setOpacity(payload.config.opacity);
+        setStatusMessage(payload.message);
+      })
+      .catch(() => setStatusMessage("Look & Help status unavailable"));
+    void listLlmProfiles().then(setProfiles).catch(() => setProfiles([]));
+    void reportGeometry();
+    const interval = window.setInterval(reportGeometry, 1200);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(interval);
+      void unlisten.then((callbacks) => callbacks.forEach((callback) => callback()));
+    };
+  }, []);
+
+  function updateHelperConfig(nextConfig: LookHelpConfig) {
+    setStatus((current) => (current ? { ...current, config: nextConfig } : current));
+    setOpacity(nextConfig.opacity);
+    void updateLookHelpConfig(nextConfig).catch((cause) =>
+      setStatusMessage(normalizeError(cause).message),
+    );
+  }
+
+  async function togglePaused() {
+    const paused = !(status?.isPaused ?? false);
+    setStatus((current) => (current ? { ...current, isPaused: paused } : current));
+    await setLookHelpPaused(paused);
+  }
+
+  async function copyAnswer() {
+    if (!answer?.answerText) {
+      return;
+    }
+    await navigator.clipboard.writeText(answer.answerText);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1200);
+  }
+
+  const statusKind = status?.status ?? "idle";
+  const answerText = answer?.answerText.trim();
+  const sourceText = answer?.sourceText.trim();
+  const selectedProfile = profiles.find((profile) => profile.id === config.providerProfileId);
+
+  return (
+    <main
+      className="overlay-window-root look-help-window-root"
+      style={{ "--overlay-opacity": opacity } as React.CSSProperties}
+    >
+      <header
+        className="overlay-titlebar look-help-titlebar"
+        onMouseDown={beginOverlayDrag}
+      >
+        <div>
+          <Bot size={15} />
+          <strong>Look & Help</strong>
+        </div>
+        <div className="overlay-window-actions" onMouseDown={beginOverlayActionsDrag}>
+          <button
+            className="icon-button tight"
+            onClick={() =>
+              updateHelperConfig({
+                ...config,
+                promptPanelVisible: !config.promptPanelVisible,
+              })
+            }
+            title={config.promptPanelVisible ? "Hide prompt" : "Show prompt"}
+            aria-label={config.promptPanelVisible ? "Hide prompt" : "Show prompt"}
+          >
+            <Settings2 size={14} />
+          </button>
+          <button
+            className="icon-button tight"
+            onClick={togglePaused}
+            title={status?.isPaused ? "Resume scanning" : "Pause scanning"}
+            aria-label={status?.isPaused ? "Resume scanning" : "Pause scanning"}
+          >
+            {status?.isPaused ? <Play size={14} /> : <Pause size={14} />}
+          </button>
+          <button
+            className="icon-button tight"
+            onClick={() => void closeLookHelpWindow()}
+            title="Close overlay"
+            aria-label="Close overlay"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      </header>
+
+      <section className={`overlay-status-strip overlay-${statusKind}`}>
+        <span className={`status-dot status-${statusKind}`} />
+        <span>{overlayStatusLabel(statusKind)}</span>
+        <small>{statusMessage}</small>
+      </section>
+
+      {config.promptPanelVisible ? (
+        <section className="look-help-settings" aria-label="Look & Help settings">
+          <label>
+            <span>Profile</span>
+            <select
+              value={config.providerProfileId}
+              onChange={(event) =>
+                updateHelperConfig({ ...config, providerProfileId: event.currentTarget.value })
+              }
+            >
+              <option value="">Select profile</option>
+              {profiles.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="look-help-prompt-field">
+            <span>System prompt</span>
+            <textarea
+              value={config.systemPrompt}
+              onChange={(event) =>
+                updateHelperConfig({ ...config, systemPrompt: event.currentTarget.value })
+              }
+            />
+          </label>
+        </section>
+      ) : null}
+
+      <section className="overlay-translation-surface look-help-answer-surface" aria-live="polite">
+        {answerText ? (
+          <p>{answerText}</p>
+        ) : statusKind === "permission_needed" ? (
+          <div className="overlay-empty">
+            <AlertTriangle size={24} />
+            <strong>Screen Recording needed</strong>
+            <button onClick={() => void openScreenRecordingSettings()}>
+              <Settings2 size={15} /> Open Settings
+            </button>
+          </div>
+        ) : statusKind === "error" ? (
+          <div className="overlay-empty">
+            <AlertTriangle size={24} />
+            <strong>{statusMessage}</strong>
+          </div>
+        ) : (
+          <div className="overlay-empty">
+            <Bot size={26} />
+            <strong>{status?.isPaused ? "Paused" : "Scanning"}</strong>
+          </div>
+        )}
+      </section>
+
+      {sourceText ? (
+        <details className="overlay-source-preview">
+          <summary>Source</summary>
+          <p>{sourceText}</p>
+        </details>
+      ) : null}
+
+      <footer className="overlay-controls look-help-controls">
+        <label>
+          <span>Opacity</span>
+          <input
+            type="range"
+            min="0.35"
+            max="0.94"
+            step="0.01"
+            value={opacity}
+            onChange={(event) => {
+              const nextOpacity = Number(event.currentTarget.value);
+              updateHelperConfig({ ...config, opacity: nextOpacity });
+            }}
+          />
+        </label>
+        <button
+          className="icon-button tight"
+          onClick={copyAnswer}
+          disabled={!answerText}
+          title="Copy answer"
+          aria-label="Copy answer"
+        >
+          <Copy size={14} />
+        </button>
+        <span>{copied ? "Copied" : selectedProfile?.name ?? "No profile"}</span>
       </footer>
     </main>
   );
@@ -2352,6 +2755,22 @@ function profileToDraft(profile: LlmProviderProfile): LlmProviderProfileDraft {
     temperature: profile.temperature,
     enabled: profile.enabled,
   };
+}
+
+function profileNumberValue(value?: number) {
+  return Number.isFinite(value) ? String(value) : "";
+}
+
+function parseProfileNumberInput(value: string, integer = false) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+  return integer ? Math.trunc(parsed) : parsed;
 }
 
 function defaultBaseUrlForKind(kind: LlmProviderKind, current?: string) {

@@ -40,6 +40,8 @@ export type OverlayStatusKind =
   | "scanning"
   | "translating"
   | "translated"
+  | "thinking"
+  | "complete"
   | "no_text"
   | "paused"
   | "error";
@@ -111,6 +113,38 @@ export interface OverlayTranslationUpdate {
   latencyMs?: number;
   provider: string;
   model: string;
+  updatedAtMs: number;
+}
+
+export interface LookHelpConfig {
+  providerProfileId: string;
+  systemPrompt: string;
+  promptPanelVisible: boolean;
+  captureIntervalMs: number;
+  minimumConfidence: number;
+  opacity: number;
+  maxOcrInputChars: number;
+  maxOutputTokens?: number;
+}
+
+export interface LookHelpStatus {
+  isOpen: boolean;
+  isPaused: boolean;
+  status: OverlayStatusKind;
+  message: string;
+  config: LookHelpConfig;
+  geometry?: OverlayGeometry;
+}
+
+export interface LookHelpUpdate {
+  sourceText: string;
+  answerText: string;
+  status: OverlayStatusKind;
+  message: string;
+  latencyMs?: number;
+  providerProfileId: string;
+  model: string;
+  promptHash: number;
   updatedAtMs: number;
 }
 

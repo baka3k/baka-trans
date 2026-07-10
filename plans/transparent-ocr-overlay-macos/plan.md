@@ -5,11 +5,13 @@ Created: 2026-07-10
 Source spec: user request in Codex thread, Vietnamese: add a "xuyen thau" button that opens a semi-transparent square window; wherever the user moves/resizes it, text underneath is translated and shown inside the window.
 Mode: `hi-plan --fast`
 Blocked by: `plans/realtime-meeting-translation-macos`
-Blocks: none
+Blocks: `plans/look-help-overlay-macos`
 
 ## Objective
 
 Add a macOS-only transparent overlay mode to Baka Trans. The main app exposes a "Xuyen thau" control. Clicking it opens a resizable, always-on-top, semi-transparent square overlay. The app captures the screen area under that overlay, OCRs visible text, translates changed text into the selected target language, and renders the translated result inside the overlay.
+
+This plan starts with macOS because the current app and product notes are macOS-first. The feature is not inherently macOS-only; Windows support should be added through a separate platform capture/OCR backend after the macOS MVP proves the UX.
 
 ## Feasibility
 
@@ -39,6 +41,48 @@ Not selected for MVP:
 - Google Cloud Translation API: a good future adapter for deterministic text translation, glossaries, or enterprise Google Cloud setups, but it may require separate Cloud Translation enablement/auth and should not block the MVP.
 - User-configured LLM profiles: useful as an advanced fallback later, but the default overlay path should not depend on summary-agent profile setup.
 
+## Platform Support Decision
+
+MVP: macOS only.
+
+Reason: the current application is already scoped and packaged for macOS, and macOS has a clean first implementation path:
+
+- Overlay window: Tauri secondary transparent always-on-top window.
+- Screen capture: Apple ScreenCaptureKit.
+- OCR: Apple Vision text recognition.
+- Translation: Gemini HTTPS text translation using the existing `GEMINI_API_KEY`.
+
+Windows: feasible, but not the same backend.
+
+The shared pieces can stay the same:
+
+- Tauri overlay UI.
+- OCR/translation state model.
+- Gemini text translation adapter.
+- Dedupe/cache/debounce logic.
+
+The platform-specific Windows backend should use:
+
+- Overlay window: Tauri transparent always-on-top window.
+- Screen capture: Windows Graphics Capture API.
+- OCR: Windows.Media.Ocr or the newer Windows App SDK text recognition APIs.
+- Translation: same Gemini HTTPS text translation adapter as macOS.
+
+Recommended sequencing:
+
+1. Build macOS MVP first.
+2. Extract a trait/interface such as `OverlayCaptureBackend`.
+3. Implement `MacOverlayCaptureBackend`.
+4. Add `WindowsOverlayCaptureBackend` in a follow-up phase.
+
+Important Windows constraints:
+
+- Windows capture consent and picker behavior differs from macOS Screen Recording permission.
+- Capturing the exact region under a transparent overlay may require capturing the full display/window and cropping in-process.
+- The overlay must be excluded from OCR, or temporarily hidden during capture, just like on macOS.
+- Some capture paths show a system capture border/indicator; this needs manual UX validation.
+- Rust integration may require WinRT bindings or a helper crate around Windows Graphics Capture.
+
 ## Context Scan
 
 - Existing active plan: `plans/realtime-meeting-translation-macos/plan.md`.
@@ -64,8 +108,9 @@ Overlay Window
 
 Rust Overlay Runtime
   -> receive overlay bounds in global screen coordinates
+  -> route capture/OCR through platform backend
   -> capture screen region under bounds
-  -> run OCR on captured bitmap
+  -> run local OCR on captured bitmap
   -> normalize/dedupe OCR text
   -> translate changed text via text translation provider
   -> emit overlay-translation-update to overlay window
@@ -76,6 +121,7 @@ Rust Overlay Runtime
 Overlay config:
 
 - enabled flag
+- platform capture backend: `mac_screen_capture_vision` for MVP; `windows_graphics_capture_ocr` later
 - target language
 - source language or auto
 - capture interval in milliseconds
@@ -114,17 +160,18 @@ Overlay translation result:
 1. Phase 01: Overlay window shell and lifecycle
 2. Phase 02: Screen capture permission, region capture, and OCR spike
 3. Phase 03: Text translation pipeline, dedupe, UI polish, and tests
+4. Phase 04: Windows capture/OCR backend after macOS MVP
 
 ## Scope Decisions
 
-- MVP is macOS only.
+- MVP is macOS only, but the feature should be designed with a platform backend boundary so Windows can be added later.
 - MVP translates visible text, not semantic UI objects.
 - MVP uses a polling loop with debouncing, not continuous video OCR on every frame.
 - MVP uses Gemini text generation through the existing Google/Gemini API key for translation.
 - MVP shows translated text inside the overlay. It does not replace or draw over the original text underneath.
 - MVP requires Screen Recording permission and should fail gracefully with a clear status.
 - Do not store screenshots by default. Keep captured images in memory and discard immediately after OCR.
-- Do not add Windows support until a separate capture/OCR strategy is planned.
+- Do not add Windows support in the macOS MVP implementation. Add it as a follow-up backend once the overlay UX and translation pipeline are stable.
 
 ## Risks
 
@@ -160,5 +207,9 @@ Overlay translation result:
 - https://developer.apple.com/documentation/screencapturekit/
 - https://developer.apple.com/documentation/screencapturekit/capturing-screen-content-in-macos
 - https://developer.apple.com/documentation/vision/recognizing-text-in-images
+- https://learn.microsoft.com/en-us/windows/apps/develop/media-authoring-processing/screen-capture
+- https://learn.microsoft.com/en-us/uwp/api/windows.graphics.capture
+- https://learn.microsoft.com/en-us/uwp/api/windows.media.ocr
+- https://learn.microsoft.com/en-us/windows/ai/apis/text-recognition
 - https://v2.tauri.app/learn/window-customization/
 - https://v2.tauri.app/reference/javascript/api/namespacewindow/

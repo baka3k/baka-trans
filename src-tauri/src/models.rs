@@ -356,6 +356,8 @@ pub enum OverlayStatusKind {
     Scanning,
     Translating,
     Translated,
+    Thinking,
+    Complete,
     NoText,
     Paused,
     Error,
@@ -383,6 +385,81 @@ pub struct OverlayTranslationUpdate {
     pub latency_ms: Option<u64>,
     pub provider: String,
     pub model: String,
+    pub updated_at_ms: u64,
+}
+
+pub const DEFAULT_LOOK_HELP_SYSTEM_PROMPT: &str = "You are Look & Help, a compact assistant for the visible screen region. Explain, summarize, or help with the provided OCR text. Be concise, practical, and do not invent details that are not present.";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LookHelpConfig {
+    pub provider_profile_id: String,
+    pub system_prompt: String,
+    pub prompt_panel_visible: bool,
+    pub capture_interval_ms: u64,
+    pub minimum_confidence: f32,
+    pub opacity: f32,
+    pub max_ocr_input_chars: usize,
+    pub max_output_tokens: Option<u32>,
+}
+
+impl Default for LookHelpConfig {
+    fn default() -> Self {
+        Self {
+            provider_profile_id: String::new(),
+            system_prompt: DEFAULT_LOOK_HELP_SYSTEM_PROMPT.to_string(),
+            prompt_panel_visible: false,
+            capture_interval_ms: 900,
+            minimum_confidence: 0.45,
+            opacity: 0.78,
+            max_ocr_input_chars: 6_000,
+            max_output_tokens: None,
+        }
+    }
+}
+
+impl LookHelpConfig {
+    pub fn normalized(self) -> Self {
+        let system_prompt = if self.system_prompt.trim().is_empty() {
+            DEFAULT_LOOK_HELP_SYSTEM_PROMPT.to_string()
+        } else {
+            self.system_prompt.trim().to_string()
+        };
+        Self {
+            provider_profile_id: self.provider_profile_id.trim().to_string(),
+            system_prompt,
+            prompt_panel_visible: self.prompt_panel_visible,
+            capture_interval_ms: self.capture_interval_ms.clamp(600, 5_000),
+            minimum_confidence: self.minimum_confidence.clamp(0.0, 1.0),
+            opacity: self.opacity.clamp(0.35, 0.94),
+            max_ocr_input_chars: self.max_ocr_input_chars.clamp(500, 20_000),
+            max_output_tokens: self.max_output_tokens.map(|tokens| tokens.clamp(64, 4_000)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LookHelpStatus {
+    pub is_open: bool,
+    pub is_paused: bool,
+    pub status: OverlayStatusKind,
+    pub message: String,
+    pub config: LookHelpConfig,
+    pub geometry: Option<OverlayGeometry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LookHelpUpdate {
+    pub source_text: String,
+    pub answer_text: String,
+    pub status: OverlayStatusKind,
+    pub message: String,
+    pub latency_ms: Option<u64>,
+    pub provider_profile_id: String,
+    pub model: String,
+    pub prompt_hash: u64,
     pub updated_at_ms: u64,
 }
 

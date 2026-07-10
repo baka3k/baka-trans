@@ -162,6 +162,23 @@ impl OverlayState {
         emit_status(app, status)
     }
 
+    pub fn update_config(&self, app: &AppHandle, config: OverlayConfig) -> AppResult<()> {
+        let config = config.normalized();
+        let status = {
+            let mut inner = self.inner.lock().map_err(lock_error)?;
+            inner.config = config;
+            inner.last_text_hash = None;
+            if inner.status == OverlayStatusKind::Translated
+                || inner.status == OverlayStatusKind::Error
+            {
+                inner.status = OverlayStatusKind::Scanning;
+                inner.message = "Scanning".to_string();
+            }
+            inner.status_payload()
+        };
+        emit_status(app, status)
+    }
+
     pub fn set_paused(&self, app: AppHandle, paused: bool) -> AppResult<()> {
         let status = {
             let mut inner = self.inner.lock().map_err(lock_error)?;
@@ -275,7 +292,9 @@ async fn overlay_loop(app: AppHandle) {
                 if normalized.is_empty() {
                     let _ = set_status(&app, OverlayStatusKind::NoText, "No readable text found.");
                 } else {
-                    let _ = handle_ocr_text(&app, &config, normalized).await;
+                    if let Err(error) = handle_ocr_text(&app, &config, normalized).await {
+                        let _ = set_status(&app, OverlayStatusKind::Error, error.message);
+                    }
                 }
             }
             Err(error) => {
@@ -304,7 +323,6 @@ async fn handle_ocr_text(
         if inner.last_text_hash == Some(text_hash) {
             return Ok(());
         }
-        inner.last_text_hash = Some(text_hash);
         inner.status = OverlayStatusKind::Translating;
         inner.message = "Translating".to_string();
         let cached = inner.cached_translation(text_hash);
@@ -323,6 +341,7 @@ async fn handle_ocr_text(
     {
         let state = app.state::<OverlayState>();
         let mut inner = state.inner.lock().map_err(lock_error)?;
+        inner.last_text_hash = Some(text_hash);
         inner.status = OverlayStatusKind::Translated;
         inner.message = "Translated".to_string();
         inner.remember_translation(text_hash, translated.clone());
@@ -414,7 +433,7 @@ fn parse_gemini_text(body: &str) -> AppResult<String> {
     Ok(cleaned.to_string())
 }
 
-async fn capture_and_ocr_text(
+pub(crate) async fn capture_and_ocr_text(
     geometry: &OverlayGeometry,
     minimum_confidence: f32,
     window_id: Option<u32>,
@@ -560,7 +579,7 @@ pub fn normalize_ocr_text(text: &str) -> String {
         .join("\n")
 }
 
-fn text_hash(text: &str) -> u64 {
+pub(crate) fn text_hash(text: &str) -> u64 {
     let mut hasher = DefaultHasher::new();
     text.hash(&mut hasher);
     hasher.finish()
@@ -595,7 +614,7 @@ fn extract_google_error_message(body: &str) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn now_ms() -> u64 {
+pub(crate) fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
