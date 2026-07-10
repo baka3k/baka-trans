@@ -1,8 +1,13 @@
 import type {
+  ConversationDisplayItem,
   LlmProviderProfileDraft,
   MeetingSummaryConfig,
   MeetingSummaryResult,
+  SessionStatus,
+  SourceSignalSnapshot,
+  SourceSignalState,
   TranscriptItem,
+  TranslationActivityState,
 } from "./types";
 
 export function mergeTranscriptDelta(
@@ -77,6 +82,100 @@ export function renderTranscript(
     )
     .join("\n");
   return notes ? `${transcript}\n\n${notes}` : transcript;
+}
+
+export function deriveConversationItems(items: TranscriptItem[]): ConversationDisplayItem[] {
+  return items.map((item) => {
+    const sourceText = item.sourceText.trim();
+    const translatedText = item.translatedText.trim();
+    return {
+      id: item.id,
+      timestampMs: item.timestampMs,
+      sourceText,
+      translatedText,
+      status: item.status,
+      latencyMs: item.latencyMs,
+      speakerLabel: item.speakerLabel,
+      speakerSegmentId: item.speakerSegmentId,
+      speakerConfidence: item.speakerConfidence,
+      speakerDisplayLabel: item.speakerLabel?.trim() || "Source",
+      hasPendingTranslation:
+        item.status !== "error" && sourceText.length > 0 && translatedText.length === 0,
+    };
+  });
+}
+
+export function deriveSourceSignalState(
+  snapshot: SourceSignalSnapshot | null,
+  selectedInputDeviceId: string,
+  sessionStatus: SessionStatus,
+  nowMs: number,
+  options: { silenceThreshold?: number; staleAfterMs?: number } = {},
+): SourceSignalState {
+  if (sessionStatus === "error") {
+    return "error";
+  }
+
+  if (!isSourceSignalSessionActive(sessionStatus)) {
+    return "waiting";
+  }
+
+  if (!selectedInputDeviceId || !snapshot) {
+    return "waiting";
+  }
+
+  if (snapshot.inputDeviceId !== selectedInputDeviceId) {
+    return "waiting";
+  }
+
+  const staleAfterMs = options.staleAfterMs ?? 2000;
+  if (nowMs - snapshot.receivedAtMs > staleAfterMs) {
+    return "stale";
+  }
+
+  const silenceThreshold = options.silenceThreshold ?? 0.03;
+  return Math.max(snapshot.peak, snapshot.rms) > silenceThreshold ? "receiving" : "silent";
+}
+
+export function deriveTranslationActivity(
+  sessionStatus: SessionStatus,
+  latestItem: ConversationDisplayItem | undefined,
+  sourceSignalState: SourceSignalState,
+  translatedPeak: number,
+): TranslationActivityState {
+  if (
+    sessionStatus === "error" ||
+    sourceSignalState === "error" ||
+    (isSourceSignalSessionActive(sessionStatus) && sourceSignalState === "stale")
+  ) {
+    return "needs_attention";
+  }
+
+  if (sessionStatus === "translating" || latestItem?.hasPendingTranslation) {
+    return "translating";
+  }
+
+  if (
+    sessionStatus === "starting" ||
+    sessionStatus === "listening"
+  ) {
+    return "listening";
+  }
+
+  if (sessionStatus === "speaking" || translatedPeak > 0.03) {
+    return "ready";
+  }
+
+  return "ready";
+}
+
+function isSourceSignalSessionActive(status: SessionStatus) {
+  return (
+    status === "starting" ||
+    status === "listening" ||
+    status === "translating" ||
+    status === "speaking"
+  );
 }
 
 export function buildMeetingSummaryConfig(

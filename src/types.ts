@@ -24,6 +24,12 @@ export type SessionStatus =
   | "stopping"
   | "error";
 export type TranscriptStatus = "partial" | "final" | "error";
+export type SourceSignalState = "waiting" | "receiving" | "silent" | "stale" | "error";
+export type TranslationActivityState =
+  | "listening"
+  | "translating"
+  | "ready"
+  | "needs_attention";
 export type LlmProviderKind = "openai" | "openai_compatible" | "ollama" | "adk_litellm";
 export type MeetingSummaryTrigger = "manual" | "end_of_session";
 export type TranscriptScope = "source" | "translated" | "both";
@@ -135,12 +141,33 @@ export interface TranscriptItem {
   translatedText: string;
   status: TranscriptStatus;
   latencyMs?: number;
+  speakerLabel?: string;
+  speakerSegmentId?: string;
+  speakerConfidence?: number;
 }
 
 export interface AudioLevelEvent {
   inputDeviceId: string;
   rms: number;
   peak: number;
+}
+
+export interface SourceSignalSnapshot extends AudioLevelEvent {
+  receivedAtMs: number;
+}
+
+export interface ConversationDisplayItem {
+  id: string;
+  timestampMs: number;
+  sourceText: string;
+  translatedText: string;
+  status: TranscriptStatus;
+  latencyMs?: number;
+  speakerLabel?: string;
+  speakerSegmentId?: string;
+  speakerConfidence?: number;
+  speakerDisplayLabel: string;
+  hasPendingTranslation: boolean;
 }
 
 export interface TranslatedAudioLevelEvent {

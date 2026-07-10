@@ -162,9 +162,9 @@ button:focus-visible {
 }
 
 .translation-column {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
-  grid-template-rows: auto auto minmax(0, 1fr);
   height: calc(100dvh - 124px);
   min-height: 0;
 }
@@ -832,7 +832,7 @@ h2 {
   margin-top: 0;
 }
 
-.transcript-panel {
+.conversation-panel {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -842,47 +842,272 @@ h2 {
   grid-template-rows: auto 1fr;
   min-height: 0;
   overflow: hidden;
+  position: relative;
 }
 
-.transcript-head {
-  background: var(--panel-strong);
-  color: #f7fbf9;
-  display: grid;
-  font-weight: 750;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.transcript-head span {
-  padding: 11px 14px;
-}
-
-.transcript-list {
-  min-height: 0;
-  overflow: auto;
-}
-
-.transcript-row {
+.live-status-rail {
+  background: var(--panel);
   border-bottom: 1px solid var(--line);
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  min-height: 72px;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 10px;
 }
 
-.transcript-row p {
-  line-height: 1.5;
+.rail-chip {
+  align-items: center;
+  background: var(--panel-subtle);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 22px minmax(0, 1fr);
+  min-height: 50px;
+  padding: 8px 9px;
+}
+
+.rail-chip.ok {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--line));
+}
+
+.rail-chip.info {
+  background: var(--info-soft);
+  border-color: color-mix(in srgb, var(--info) 36%, var(--line));
+}
+
+.rail-chip.warn {
+  background: var(--warn-soft);
+  border-color: color-mix(in srgb, var(--warn) 34%, var(--line));
+}
+
+.rail-chip.danger {
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 36%, var(--line));
+}
+
+.rail-icon {
+  color: var(--text-muted);
+  display: inline-flex;
+}
+
+.rail-chip.ok .rail-icon,
+.rail-chip.ok strong {
+  color: var(--accent-strong);
+}
+
+.rail-chip.ok .rail-meter {
+  color: var(--accent-strong);
+}
+
+.rail-chip.info .rail-icon,
+.rail-chip.info strong {
+  color: var(--info);
+}
+
+.rail-chip.info .rail-meter {
+  color: var(--info);
+}
+
+.rail-chip.warn .rail-icon,
+.rail-chip.warn strong {
+  color: var(--warn);
+}
+
+.rail-chip.warn .rail-meter {
+  color: var(--warn);
+}
+
+.rail-chip.danger .rail-icon,
+.rail-chip.danger strong {
+  color: var(--danger);
+}
+
+.rail-chip.danger .rail-meter {
+  color: var(--danger);
+}
+
+.rail-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rail-copy span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.rail-copy strong {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.rail-meter {
+  background: rgb(19 32 28 / 0.12);
+  border-radius: 999px;
+  grid-column: 2;
+  height: 5px;
+  overflow: hidden;
+}
+
+.rail-meter i {
+  background: currentColor;
+  display: block;
+  height: 100%;
+  transition: width 120ms ease-out;
+}
+
+.conversation-feed {
+  align-content: start;
+  background: var(--app-bg-soft);
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+  scroll-behavior: smooth;
+}
+
+.utterance-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  transition:
+    border-color 160ms ease,
+    transform 160ms ease;
+}
+
+.utterance-card.partial {
+  border-color: color-mix(in srgb, var(--info) 28%, var(--line));
+}
+
+.utterance-card.error {
+  border-color: color-mix(in srgb, var(--danger) 48%, var(--line));
+}
+
+.utterance-meta {
+  align-items: center;
+  color: var(--text-soft);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 8px;
+}
+
+.speaker-chip,
+.utterance-state {
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 750;
+  gap: 5px;
+  min-height: 24px;
+  padding: 0 8px;
+}
+
+.speaker-chip {
+  background: var(--panel-subtle);
+  color: var(--text-muted);
+}
+
+.utterance-state.state-final {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.utterance-state.state-partial {
+  background: var(--info-soft);
+  color: var(--info);
+}
+
+.utterance-state.state-error {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.utterance-source {
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.55;
   margin: 0;
   overflow-wrap: anywhere;
-  padding: 13px 14px;
   white-space: pre-wrap;
 }
 
-.transcript-row p + p {
-  background: var(--panel-subtle);
-  border-left: 1px solid var(--line);
+.utterance-card.partial .utterance-source {
+  color: var(--text-muted);
 }
 
-.transcript-row.partial {
+.translation-line {
+  background: var(--panel-subtle);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  display: grid;
+  gap: 5px;
+  min-height: 58px;
+  padding: 9px 10px;
+}
+
+.translation-line.pending {
+  border-left-color: var(--info);
+}
+
+.translation-line.error {
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 38%, var(--line));
+  border-left-color: var(--danger);
+}
+
+.translation-line > span {
   color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.translation-line p {
+  color: var(--text);
+  line-height: 1.5;
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.translation-line.error p {
+  align-items: center;
+  color: var(--danger);
+  display: inline-flex;
+  gap: 7px;
+}
+
+.translation-placeholder {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.new-translation-button {
+  bottom: 14px;
+  box-shadow: 0 10px 24px rgb(38 53 47 / 0.16);
+  left: 50%;
+  position: absolute;
+  transform: translateX(-50%);
+  z-index: 1;
+}
+
+.new-translation-button:active:not(:disabled) {
+  transform: translateX(-50%) translateY(1px);
 }
 
 .empty-state {
@@ -895,6 +1120,15 @@ h2 {
   min-height: 220px;
   padding: 28px;
   text-align: center;
+}
+
+.conversation-empty {
+  align-self: center;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  justify-self: center;
+  min-width: min(420px, 100%);
 }
 
 .empty-state svg {
@@ -942,8 +1176,7 @@ h2 {
       var(--panel);
   }
 
-  .brand-mark,
-  .transcript-head {
+  .brand-mark {
     color: #13201c;
   }
 
@@ -960,8 +1193,14 @@ h2 {
 
 @media (prefers-reduced-motion: reduce) {
   button,
-  .meter div {
+  .meter div,
+  .rail-meter i,
+  .utterance-card {
     transition: none;
+  }
+
+  .conversation-feed {
+    scroll-behavior: auto;
   }
 }
 
@@ -1022,14 +1261,16 @@ h2 {
   .field-grid.two,
   .segmented-control,
   .section-toggles,
-  .transcript-head,
-  .transcript-row,
+  .live-status-rail,
   .line-row {
     grid-template-columns: 1fr;
   }
 
-  .transcript-row p + p {
-    border-left: 0;
-    border-top: 1px solid var(--line);
+  .conversation-feed {
+    padding: 10px;
+  }
+
+  .utterance-meta {
+    gap: 6px;
   }
 }

@@ -43,6 +43,9 @@ import {
 } from "./api";
 import {
   buildMeetingSummaryConfig,
+  deriveConversationItems,
+  deriveSourceSignalState,
+  deriveTranslationActivity,
   mergeTranscriptDelta,
   renderTranscript,
   validateLlmProfileDraft,
@@ -55,6 +58,7 @@ import type {
   AudioDevices,
   AudioOutputChannel,
   AudioLevelEvent,
+  ConversationDisplayItem,
   Language,
   LlmProviderKind,
   LlmProviderProfile,
@@ -66,8 +70,11 @@ import type {
   MeetingSummaryStatusEvent,
   SessionConfig,
   SessionStatus,
+  SourceSignalSnapshot,
+  SourceSignalState,
   TranscriptScope,
   TranslationProvider,
+  TranslationActivityState,
   TranslatedAudioLevelEvent,
   TranscriptItem,
 } from "./types";
@@ -155,9 +162,11 @@ export default function App() {
   const [error, setError] = useState<AppErrorPayload | null>(null);
   const [keyTestMessage, setKeyTestMessage] = useState("");
   const [boundaryFeedback, setBoundaryFeedback] = useState("");
-  const [level, setLevel] = useState({ peak: 0, rms: 0 });
+  const [sourceLevel, setSourceLevel] = useState<SourceSignalSnapshot | null>(null);
   const [translatedLevel, setTranslatedLevel] = useState({ peak: 0, rms: 0, sampleCount: 0 });
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [hasNewTranslations, setHasNewTranslations] = useState(false);
   const [busy, setBusy] = useState(false);
   const [testingKey, setTestingKey] = useState(false);
   const [testingTone, setTestingTone] = useState<"translation" | "monitor" | null>(null);
@@ -176,6 +185,8 @@ export default function App() {
   const [meetingNotes, setMeetingNotes] = useState<MeetingSummaryResult | null>(null);
   const [summaryStatus, setSummaryStatus] = useState("");
   const [summaryRunning, setSummaryRunning] = useState(false);
+  const conversationFeedRef = useRef<HTMLDivElement | null>(null);
+  const feedAtBottomRef = useRef(true);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
 
   const selectedInput = devices.inputs.find((device) => device.id === inputDeviceId);
@@ -200,6 +211,25 @@ export default function App() {
     () => targetLanguageOptionsForProvider(translationProvider),
     [translationProvider],
   );
+  const signalSessionStatus: SessionStatus = localMonitorActive ? "listening" : status;
+  const sourceSignalState = deriveSourceSignalState(
+    sourceLevel,
+    inputDeviceId,
+    signalSessionStatus,
+    nowMs,
+  );
+  const visibleSourceLevel =
+    sourceLevel && sourceLevel.inputDeviceId === inputDeviceId
+      ? sourceLevel
+      : { peak: 0, rms: 0 };
+  const conversationItems = useMemo(() => deriveConversationItems(transcript), [transcript]);
+  const latestConversationItem = conversationItems[conversationItems.length - 1];
+  const translationActivity = deriveTranslationActivity(
+    status,
+    latestConversationItem,
+    sourceSignalState,
+    translatedLevel.peak,
+  );
 
   const canStart =
     (status === "idle" || status === "error") &&
@@ -217,15 +247,20 @@ export default function App() {
     status === "idle" &&
     !busy &&
     (localMonitorActive || (inputDeviceId.length > 0 && outputDeviceId.length > 0));
-  const inputSignalPercent = Math.round(level.peak * 100);
+  const inputSignalPercent = Math.round(visibleSourceLevel.peak * 100);
+  const inputSignalRmsPercent = Math.round(visibleSourceLevel.rms * 100);
   const inputSignalLabel =
-    inputSignalPercent > 3
+    sourceSignalState === "receiving"
       ? `${inputSignalPercent}% peak`
-      : localMonitorActive
-        ? "Monitoring"
-      : status === "idle"
-        ? "Idle"
-        : "No signal";
+      : sourceSignalState === "silent"
+        ? "Silent stream"
+        : sourceSignalState === "stale"
+          ? "No recent audio"
+          : localMonitorActive
+            ? "Monitoring"
+            : status === "idle"
+              ? "Idle"
+              : "Waiting";
   const translationOutLevel = localMonitorActive
     ? inputSignalPercent
     : Math.round(translatedLevel.peak * 100);
@@ -322,7 +357,7 @@ export default function App() {
       listen<SessionStatus>("session-status", (event) => {
         setStatus(event.payload);
         if (event.payload === "idle") {
-          setLevel({ peak: 0, rms: 0 });
+          setSourceLevel(null);
           setTranslatedLevel({ peak: 0, rms: 0, sampleCount: 0 });
         }
       }),
@@ -333,9 +368,13 @@ export default function App() {
         setBoundaryFeedback(event.payload.message);
       }),
       listen<AudioLevelEvent>("audio-level", (event) => {
-        setLevel({
+        const receivedAtMs = Date.now();
+        setNowMs(receivedAtMs);
+        setSourceLevel({
+          inputDeviceId: event.payload.inputDeviceId,
           peak: Math.max(0, Math.min(1, event.payload.peak)),
           rms: Math.max(0, Math.min(1, event.payload.rms)),
+          receivedAtMs,
         });
       }),
       listen<TranslatedAudioLevelEvent>("translated-audio-level", (event) => {
@@ -372,8 +411,28 @@ export default function App() {
   }, [translationProvider]);
 
   useEffect(() => {
-    transcriptEndRef.current?.scrollIntoView({ block: "end" });
-  }, [transcript]);
+    setSourceLevel(null);
+    setNowMs(Date.now());
+  }, [inputDeviceId]);
+
+  useEffect(() => {
+    if (!isSourceSignalStatusActive(signalSessionStatus)) {
+      setNowMs(Date.now());
+      return;
+    }
+
+    const interval = window.setInterval(() => setNowMs(Date.now()), 500);
+    return () => window.clearInterval(interval);
+  }, [signalSessionStatus]);
+
+  useEffect(() => {
+    if (feedAtBottomRef.current) {
+      transcriptEndRef.current?.scrollIntoView({ block: "end" });
+      setHasNewTranslations(false);
+    } else if (conversationItems.length > 0) {
+      setHasNewTranslations(true);
+    }
+  }, [conversationItems]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -635,7 +694,7 @@ export default function App() {
       if (localMonitorActive) {
         await stopLocalMonitor();
         setLocalMonitorActive(false);
-        setLevel({ peak: 0, rms: 0 });
+        setSourceLevel(null);
         return;
       }
       await startLocalMonitor(inputDeviceId, outputDeviceId, translationOutputChannel);
@@ -730,6 +789,25 @@ export default function App() {
       monitorOutputChannel,
       monitorOriginalAudio: enabled,
     });
+  }
+
+  function handleConversationScroll() {
+    const node = conversationFeedRef.current;
+    if (!node) {
+      return;
+    }
+
+    const isNearBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 72;
+    feedAtBottomRef.current = isNearBottom;
+    if (isNearBottom) {
+      setHasNewTranslations(false);
+    }
+  }
+
+  function jumpToLatestTranslation() {
+    transcriptEndRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+    feedAtBottomRef.current = true;
+    setHasNewTranslations(false);
   }
 
   return (
@@ -920,7 +998,7 @@ export default function App() {
                   role="progressbar"
                 >
                   <div style={{ width: `${inputSignalPercent}%` }} />
-                  <span style={{ width: `${Math.round(level.rms * 100)}%` }} />
+                  <span style={{ width: `${inputSignalRmsPercent}%` }} />
                 </div>
               </div>
               <AudioLineMonitor rows={audioLineRows} />
@@ -1290,32 +1368,198 @@ export default function App() {
             </section>
           ) : null}
 
-          <section className="transcript-panel">
-            <div className="transcript-head">
-              <span>Original speech</span>
-              <span>Translated speech</span>
-            </div>
-            <div className="transcript-list">
-              {transcript.length === 0 ? (
-                <div className="empty-state">
-                  <FileText size={28} />
-                  <strong>No transcript yet</strong>
-                  <p>Start a session to see original speech and translation side by side.</p>
-                </div>
+          <section className="conversation-panel">
+            <LiveStatusRail
+              sourceSignalState={sourceSignalState}
+              sourceLevelPercent={inputSignalPercent}
+              sessionStatus={status}
+              translationActivity={translationActivity}
+              playbackLevelPercent={localMonitorActive ? 0 : translationOutLevel}
+            />
+            <div
+              className="conversation-feed"
+              onScroll={handleConversationScroll}
+              ref={conversationFeedRef}
+            >
+              {conversationItems.length === 0 ? (
+                <ConversationEmptyState
+                  status={status}
+                  sourceSignalState={sourceSignalState}
+                  hasInput={Boolean(inputDeviceId)}
+                  hasOutput={Boolean(outputDeviceId)}
+                />
               ) : (
-                transcript.map((item) => (
-                  <article className={`transcript-row ${item.status}`} key={item.id}>
-                    <p>{item.sourceText}</p>
-                    <p>{item.translatedText}</p>
-                  </article>
+                conversationItems.map((item) => (
+                  <UtteranceCard item={item} key={item.id} />
                 ))
               )}
               <div ref={transcriptEndRef} />
             </div>
+            {hasNewTranslations ? (
+              <button
+                className="new-translation-button"
+                onClick={jumpToLatestTranslation}
+                type="button"
+              >
+                <FileText size={15} /> New translation
+              </button>
+            ) : null}
           </section>
         </section>
       </div>
     </main>
+  );
+}
+
+function LiveStatusRail({
+  sourceSignalState,
+  sourceLevelPercent,
+  sessionStatus,
+  translationActivity,
+  playbackLevelPercent,
+}: {
+  sourceSignalState: SourceSignalState;
+  sourceLevelPercent: number;
+  sessionStatus: SessionStatus;
+  translationActivity: TranslationActivityState;
+  playbackLevelPercent: number;
+}) {
+  const source = sourceSignalMeta(sourceSignalState);
+  const activity = translationActivityMeta(translationActivity);
+  const playbackActive = playbackLevelPercent > 3;
+  return (
+    <div className="live-status-rail" aria-label="Live translation status">
+      <RailChip
+        icon={<Mic size={17} />}
+        label="Source"
+        value={source.label}
+        tone={source.tone}
+        meterValue={sourceSignalState === "receiving" ? sourceLevelPercent : undefined}
+      />
+      <RailChip
+        icon={<Activity size={17} />}
+        label="Session"
+        value={labelStatus(sessionStatus)}
+        tone={sessionTone(sessionStatus)}
+      />
+      <RailChip
+        icon={translationActivity === "translating" ? <RefreshCw size={17} /> : <Bot size={17} />}
+        label="Translation"
+        value={activity.label}
+        tone={activity.tone}
+      />
+      <RailChip
+        icon={<Volume2 size={17} />}
+        label="Playback"
+        value={playbackActive ? "Playing translated" : "Output ready"}
+        tone={playbackActive ? "ok" : "neutral"}
+        meterValue={playbackLevelPercent}
+      />
+    </div>
+  );
+}
+
+function RailChip({
+  icon,
+  label,
+  value,
+  tone,
+  meterValue,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  tone: "ok" | "info" | "warn" | "danger" | "neutral";
+  meterValue?: number;
+}) {
+  const normalized = Math.max(0, Math.min(100, Math.round(meterValue ?? 0)));
+  return (
+    <div className={`rail-chip ${tone}`}>
+      <span className="rail-icon" aria-hidden="true">
+        {icon}
+      </span>
+      <div className="rail-copy">
+        <span>{label}</span>
+        <strong>{value}</strong>
+      </div>
+      {meterValue === undefined ? null : (
+        <div
+          className="rail-meter"
+          aria-label={`${label} level`}
+          aria-valuemax={100}
+          aria-valuemin={0}
+          aria-valuenow={normalized}
+          role="progressbar"
+        >
+          <i style={{ width: `${normalized}%` }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ConversationEmptyState({
+  status,
+  sourceSignalState,
+  hasInput,
+  hasOutput,
+}: {
+  status: SessionStatus;
+  sourceSignalState: SourceSignalState;
+  hasInput: boolean;
+  hasOutput: boolean;
+}) {
+  const copy = emptyConversationCopy(status, sourceSignalState, hasInput, hasOutput);
+  return (
+    <div className="empty-state conversation-empty">
+      <FileText size={28} />
+      <strong>{copy.title}</strong>
+      <p>{copy.body}</p>
+    </div>
+  );
+}
+
+function UtteranceCard({ item }: { item: ConversationDisplayItem }) {
+  return (
+    <article
+      aria-live={item.status === "final" ? "polite" : "off"}
+      className={`utterance-card ${item.status}`}
+    >
+      <header className="utterance-meta">
+        <span className="speaker-chip">
+          <Mic size={14} />
+          {item.speakerDisplayLabel}
+        </span>
+        <span>{formatClock(item.timestampMs)}</span>
+        <span className={`utterance-state state-${item.status}`}>
+          {labelTranscriptStatus(item)}
+        </span>
+        {item.latencyMs ? <span>{item.latencyMs} ms</span> : null}
+        {item.speakerConfidence ? (
+          <span>{Math.round(item.speakerConfidence * 100)}% speaker confidence</span>
+        ) : null}
+      </header>
+      <p className="utterance-source">
+        {item.sourceText || (item.status === "partial" ? "Listening..." : "No source text")}
+      </p>
+      <div
+        className={`translation-line ${
+          item.hasPendingTranslation ? "pending" : item.status === "error" ? "error" : ""
+        }`}
+      >
+        <span>Translation</span>
+        {item.status === "error" ? (
+          <p>
+            <AlertTriangle size={15} />
+            {item.translatedText || "Translation failed for this utterance."}
+          </p>
+        ) : item.translatedText ? (
+          <p>{item.translatedText}</p>
+        ) : (
+          <p className="translation-placeholder">Translating</p>
+        )}
+      </div>
+    </article>
   );
 }
 
@@ -1529,6 +1773,107 @@ function resolveStoredDevice(devices: AudioDeviceInfo[], storedId?: string) {
 
 function labelStatus(status: SessionStatus) {
   return status.replace(/_/g, " ");
+}
+
+function labelTranscriptStatus(item: ConversationDisplayItem) {
+  if (item.status === "error") {
+    return "Needs attention";
+  }
+  if (item.hasPendingTranslation) {
+    return "Translating";
+  }
+  return item.status;
+}
+
+function sourceSignalMeta(state: SourceSignalState): {
+  label: string;
+  tone: "ok" | "info" | "warn" | "danger" | "neutral";
+} {
+  switch (state) {
+    case "receiving":
+      return { label: "Receiving audio", tone: "ok" };
+    case "silent":
+      return { label: "Source silent", tone: "info" };
+    case "stale":
+      return { label: "No recent audio", tone: "warn" };
+    case "error":
+      return { label: "Capture error", tone: "danger" };
+    case "waiting":
+      return { label: "Waiting", tone: "neutral" };
+  }
+}
+
+function translationActivityMeta(state: TranslationActivityState): {
+  label: string;
+  tone: "ok" | "info" | "warn" | "danger" | "neutral";
+} {
+  switch (state) {
+    case "listening":
+      return { label: "Listening", tone: "info" };
+    case "translating":
+      return { label: "Translating", tone: "info" };
+    case "needs_attention":
+      return { label: "Needs attention", tone: "warn" };
+    case "ready":
+      return { label: "Ready", tone: "ok" };
+  }
+}
+
+function sessionTone(status: SessionStatus): "ok" | "info" | "warn" | "danger" | "neutral" {
+  switch (status) {
+    case "listening":
+    case "translating":
+    case "speaking":
+      return "ok";
+    case "starting":
+    case "stopping":
+    case "paused":
+      return "warn";
+    case "error":
+      return "danger";
+    case "idle":
+      return "neutral";
+  }
+}
+
+function emptyConversationCopy(
+  status: SessionStatus,
+  sourceSignalState: SourceSignalState,
+  hasInput: boolean,
+  hasOutput: boolean,
+) {
+  if (!hasInput || !hasOutput) {
+    return {
+      title: "Setup needed",
+      body: "Choose a meeting source and translated output before starting a session.",
+    };
+  }
+  if (status === "idle") {
+    return {
+      title: "Ready to listen",
+      body: "Start a session and each source line will appear with its translation underneath.",
+    };
+  }
+  if (sourceSignalState === "stale") {
+    return {
+      title: "No recent source audio",
+      body: "Check the selected input or Teams routing if speech should be arriving.",
+    };
+  }
+  if (sourceSignalState === "silent") {
+    return {
+      title: "Source is connected",
+      body: "The stream is healthy and quiet. Speech will appear here when it starts.",
+    };
+  }
+  return {
+    title: "Listening for speech",
+    body: "Source audio is being monitored. Transcript cards will stay grouped by utterance.",
+  };
+}
+
+function isSourceSignalStatusActive(status: SessionStatus) {
+  return status === "starting" || activeSessionStatuses.includes(status);
 }
 
 function labelTranslationProvider(provider: TranslationProvider) {

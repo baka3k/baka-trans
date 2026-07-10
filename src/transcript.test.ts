@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   buildMeetingSummaryConfig,
+  deriveConversationItems,
+  deriveSourceSignalState,
+  deriveTranslationActivity,
   mergeTranscriptDelta,
   renderTranscript,
   validateLlmProfileDraft,
@@ -119,5 +122,100 @@ describe("transcript helpers", () => {
     expect(config.providerProfileId).toBe("profile");
     expect(config.transcriptScope).toBe("both");
     expect(config.sections.actionItems).toBe(true);
+  });
+
+  it("classifies a fresh source signal above the threshold as receiving", () => {
+    expect(
+      deriveSourceSignalState(
+        { inputDeviceId: "mic-1", peak: 0.12, rms: 0.06, receivedAtMs: 1000 },
+        "mic-1",
+        "listening",
+        1400,
+      ),
+    ).toBe("receiving");
+  });
+
+  it("classifies a fresh low-level source signal as silent", () => {
+    expect(
+      deriveSourceSignalState(
+        { inputDeviceId: "mic-1", peak: 0.01, rms: 0.004, receivedAtMs: 1000 },
+        "mic-1",
+        "listening",
+        1200,
+      ),
+    ).toBe("silent");
+  });
+
+  it("marks active sessions stale when source events stop", () => {
+    expect(
+      deriveSourceSignalState(
+        { inputDeviceId: "mic-1", peak: 0.2, rms: 0.1, receivedAtMs: 1000 },
+        "mic-1",
+        "translating",
+        3501,
+      ),
+    ).toBe("stale");
+  });
+
+  it("ignores source events from a different input device", () => {
+    expect(
+      deriveSourceSignalState(
+        { inputDeviceId: "mic-2", peak: 0.3, rms: 0.1, receivedAtMs: 1000 },
+        "mic-1",
+        "listening",
+        1100,
+      ),
+    ).toBe("waiting");
+  });
+
+  it("derives conversation cards with source and translation together", () => {
+    const items = deriveConversationItems([
+      { ...base, translatedText: "Xin chao", status: "final", latencyMs: 740 },
+    ]);
+
+    expect(items[0]).toMatchObject({
+      id: "1",
+      sourceText: "Hello",
+      translatedText: "Xin chao",
+      status: "final",
+      latencyMs: 740,
+      speakerDisplayLabel: "Source",
+      hasPendingTranslation: false,
+    });
+  });
+
+  it("marks source-only items as pending translation", () => {
+    const items = deriveConversationItems([base]);
+
+    expect(items[0].hasPendingTranslation).toBe(true);
+  });
+
+  it("uses optional speaker labels when available", () => {
+    const items = deriveConversationItems([
+      {
+        ...base,
+        speakerLabel: "Speaker 2",
+        speakerSegmentId: "segment-2",
+        speakerConfidence: 0.88,
+      },
+    ]);
+
+    expect(items[0]).toMatchObject({
+      speakerDisplayLabel: "Speaker 2",
+      speakerSegmentId: "segment-2",
+      speakerConfidence: 0.88,
+    });
+  });
+
+  it("flags stale active translation as needing attention", () => {
+    expect(deriveTranslationActivity("listening", undefined, "stale", 0)).toBe(
+      "needs_attention",
+    );
+  });
+
+  it("flags pending conversation items as translating", () => {
+    const [item] = deriveConversationItems([base]);
+
+    expect(deriveTranslationActivity("listening", item, "receiving", 0)).toBe("translating");
   });
 });
