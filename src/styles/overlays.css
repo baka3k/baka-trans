@@ -1,0 +1,65 @@
+/* Overlay composition remains in the compatibility layer during the component migration. */
+
+.look-through-overlay,
+.look-help-overlay {
+  font-size: 14px;
+  color: var(--colorNeutralForeground1);
+}
+
+.look-through-overlay button,
+.look-help-overlay button,
+.look-through-overlay input,
+.look-help-overlay input,
+.look-through-overlay select,
+.look-help-overlay select,
+.look-help-overlay textarea {
+  min-height: 36px;
+}
+
+.overlay-titlebar {
+  background: color-mix(in srgb, var(--colorNeutralBackground1) 88%, transparent);
+  border-bottom-color: var(--colorNeutralStroke2);
+  min-height: 42px;
+}
+
+.overlay-titlebar strong {
+  font-size: 14px;
+}
+
+.look-through-status-strip,
+.look-help-status-strip,
+.look-through-meta-bar,
+.look-help-meta-bar {
+  font-size: 13px;
+}
+
+.look-through-panel,
+.look-help-panel {
+  border-color: color-mix(in srgb, var(--colorNeutralStroke1) 72%, transparent);
+  border-radius: 10px;
+}
+
+.look-through-panel header,
+.look-help-panel header {
+  font-size: 13px;
+  min-height: 34px;
+}
+
+.look-through-panel-empty strong,
+.look-help-panel-empty strong,
+.look-through-result-body,
+.look-help-result-body {
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+@media (forced-colors: active) {
+  .look-through-overlay,
+  .look-help-overlay,
+  .look-through-panel,
+  .look-help-panel {
+    background: Canvas;
+    border-color: CanvasText;
+    color: CanvasText;
+  }
+}

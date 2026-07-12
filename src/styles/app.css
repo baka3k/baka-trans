@@ -1,0 +1,499 @@
+@import "./legacy.css";
+
+:root {
+  font-family: "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  color-scheme: light dark;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+html,
+body,
+#root,
+.application-theme {
+  min-height: 100%;
+}
+
+.application-theme {
+  background: var(--colorNeutralBackground2);
+  color: var(--colorNeutralForeground1);
+  --app-bg: var(--colorNeutralBackground2);
+  --app-bg-soft: var(--colorNeutralBackground3);
+  --panel: var(--colorNeutralBackground1);
+  --panel-subtle: var(--colorNeutralBackground2);
+  --panel-strong: var(--colorNeutralForeground1);
+  --line: var(--colorNeutralStroke2);
+  --line-strong: var(--colorNeutralStroke1);
+  --text: var(--colorNeutralForeground1);
+  --text-muted: var(--colorNeutralForeground2);
+  --text-soft: var(--colorNeutralForeground3);
+  --accent: var(--colorBrandBackground);
+  --accent-strong: var(--colorBrandBackgroundHover);
+  --accent-soft: var(--colorBrandBackground2);
+  --info: var(--colorPaletteBlueForeground2);
+  --info-soft: var(--colorPaletteBlueBackground2);
+  --warn: var(--colorPaletteDarkOrangeForeground2);
+  --warn-soft: var(--colorPaletteDarkOrangeBackground2);
+  --danger: var(--colorPaletteRedForeground1);
+  --danger-soft: var(--colorPaletteRedBackground1);
+  --shadow: var(--shadow16);
+}
+
+body {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.app-shell {
+  gap: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.topbar {
+  background: var(--colorNeutralBackground1);
+  border-color: transparent transparent var(--colorNeutralStroke2);
+  border-radius: 0;
+  box-shadow: none;
+  min-height: 64px;
+  padding: 10px 16px;
+  position: relative;
+  z-index: 20;
+}
+
+.brand-mark {
+  background: var(--colorBrandBackground);
+  border-radius: 10px;
+  height: 40px;
+  width: 40px;
+}
+
+.topbar h1 {
+  font-size: 20px;
+  font-weight: 650;
+}
+
+.top-actions {
+  flex-wrap: nowrap;
+}
+
+.top-actions .icon-button {
+  min-height: 40px;
+}
+
+.session-command-bar {
+  align-items: center;
+  background: var(--colorNeutralBackground1);
+  border-bottom: 1px solid var(--colorNeutralStroke2);
+  display: grid;
+  gap: 12px 20px;
+  grid-template-columns: minmax(300px, 420px) auto minmax(140px, 1fr);
+  min-height: 78px;
+  padding: 10px 16px;
+  position: relative;
+  z-index: 19;
+}
+
+.command-language-fields {
+  align-items: end;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(120px, 1fr) auto minmax(120px, 1fr);
+}
+
+.language-direction-icon {
+  color: var(--colorNeutralForeground3);
+  margin-bottom: 8px;
+}
+
+.command-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.command-actions > button {
+  min-height: 40px;
+}
+
+.command-actions .stop-command:not(:disabled) {
+  color: var(--colorPaletteRedForeground1);
+}
+
+.command-context {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.readiness-label {
+  color: var(--colorNeutralForeground2);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.application-layout {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 96px minmax(0, 1fr);
+  min-height: 0;
+}
+
+.app-navigation {
+  background: var(--colorNeutralBackground1);
+  border-right: 1px solid var(--colorNeutralStroke2);
+  min-width: 0;
+  padding: 12px 6px;
+}
+
+.app-navigation [role="tablist"] {
+  gap: 4px;
+}
+
+.app-navigation [role="tab"] {
+  border-radius: 8px;
+  font-size: 12px;
+  justify-content: center;
+  min-height: 54px;
+  padding-inline: 4px;
+}
+
+.app-navigation [role="tab"] > span {
+  flex-direction: column;
+  gap: 3px;
+}
+
+.workspace-layout,
+.workspace-layout.settings-collapsed {
+  align-items: stretch;
+  gap: 0;
+  grid-template-areas: "translation settings";
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 400px);
+  min-height: 0;
+  position: relative;
+}
+
+.workspace-layout.settings-collapsed {
+  grid-template-areas: "translation";
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.translation-column {
+  grid-area: translation;
+  height: calc(100dvh - 142px);
+  min-width: 0;
+  padding: 16px;
+}
+
+.settings-column {
+  background: var(--colorNeutralBackground1);
+  border-left: 1px solid var(--colorNeutralStroke2);
+  grid-area: settings;
+  max-height: calc(100dvh - 142px);
+  overflow: auto;
+  padding: 0 16px 20px;
+  position: static;
+}
+
+.settings-panel-heading {
+  align-items: center;
+  background: var(--colorNeutralBackground1);
+  border-bottom: 1px solid var(--colorNeutralStroke2);
+  display: flex;
+  justify-content: space-between;
+  margin: 0 -16px 16px;
+  min-height: 64px;
+  padding: 10px 12px 10px 16px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.settings-panel-heading span {
+  color: var(--colorNeutralForeground3);
+  display: block;
+  font-size: 12px;
+}
+
+.settings-panel-heading h2 {
+  font-size: 18px;
+  margin-top: 2px;
+}
+
+.settings-panel-close {
+  display: none;
+}
+
+.settings-backdrop {
+  display: none;
+}
+
+.settings-column .control-grid {
+  display: block;
+}
+
+.settings-column .panel {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+}
+
+.settings-column .controls-panel {
+  display: none;
+}
+
+.settings-column[data-section="audio"] .key-panel,
+.settings-column[data-section="audio"] .summary-config-panel,
+.settings-column[data-section="translation"] .devices-panel,
+.settings-column[data-section="translation"] .summary-config-panel,
+.settings-column[data-section="summary"] .devices-panel,
+.settings-column[data-section="summary"] .key-panel {
+  display: none;
+}
+
+.panel + .panel {
+  margin-top: 0;
+}
+
+.conversation-panel,
+.notes-panel,
+.error-bar {
+  border-color: var(--colorNeutralStroke2);
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+.conversation-panel {
+  background: var(--colorNeutralBackground1);
+}
+
+@media (max-width: 1279px) {
+  .session-command-bar {
+    grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  }
+
+  .command-context {
+    display: none;
+  }
+
+  .workspace-layout,
+  .workspace-layout.settings-collapsed {
+    grid-template-areas: "translation";
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-column {
+    border-left: 1px solid var(--colorNeutralStroke1);
+    box-shadow: var(--shadow28);
+    height: calc(100dvh - 142px);
+    inset: 142px 0 0 auto;
+    max-height: none;
+    max-width: 420px;
+    position: fixed;
+    width: min(420px, calc(100vw - 76px));
+    z-index: 40;
+  }
+
+  .settings-panel-close {
+    display: inline-flex;
+  }
+
+  .settings-backdrop {
+    background: rgb(0 0 0 / 0.34);
+    border: 0;
+    border-radius: 0;
+    display: block;
+    height: auto;
+    inset: 142px 0 0 96px;
+    padding: 0;
+    position: fixed;
+    width: auto;
+    z-index: 30;
+  }
+}
+
+@media (min-width: 1280px) {
+  .settings-panel-close {
+    display: none !important;
+  }
+}
+
+@media (max-width: 1040px) {
+  .app-shell {
+    padding: 0;
+  }
+
+  .session-command-bar {
+    grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+    padding: 8px 12px;
+  }
+
+  .command-actions {
+    overflow-x: auto;
+    padding-block: 2px;
+  }
+
+  .application-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 54px minmax(0, 1fr);
+  }
+
+  .app-navigation {
+    border-bottom: 1px solid var(--colorNeutralStroke2);
+    border-right: 0;
+    overflow-x: auto;
+    padding: 4px 8px;
+  }
+
+  .app-navigation [role="tablist"] {
+    flex-direction: row;
+    min-width: max-content;
+  }
+
+  .app-navigation [role="tab"] {
+    min-height: 44px;
+    min-width: 116px;
+    padding-inline: 12px;
+  }
+
+  .app-navigation [role="tab"] > span {
+    flex-direction: row;
+    gap: 8px;
+  }
+
+  .translation-column {
+    height: calc(100dvh - 196px);
+    min-height: 0;
+    padding: 12px;
+  }
+
+  .settings-column {
+    height: calc(100dvh - 196px);
+    inset-block-start: 196px;
+  }
+
+  .settings-backdrop {
+    inset: 196px 0 0 0;
+  }
+
+  .topbar {
+    align-items: center;
+    padding: 8px 12px;
+  }
+
+  .overlay-launch-button span {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .topbar,
+  .brand-lockup {
+    align-items: center;
+    flex-direction: row;
+  }
+
+  .topbar {
+    min-height: 56px;
+  }
+
+  .brand-mark {
+    height: 36px;
+    width: 36px;
+  }
+
+  .status-row .status-chip {
+    display: none;
+  }
+
+  .top-actions {
+    display: flex;
+    overflow-x: auto;
+    width: auto;
+  }
+
+  .top-actions .icon-button {
+    flex: 0 0 38px;
+    min-height: 38px;
+    padding-inline: 8px;
+  }
+
+  .session-command-bar {
+    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 116px;
+    padding: 8px;
+  }
+
+  .command-language-fields {
+    grid-template-columns: minmax(0, 1fr) 16px minmax(0, 1fr);
+  }
+
+  .command-actions {
+    gap: 6px;
+  }
+
+  .command-actions > button {
+    flex: 0 0 auto;
+    min-height: 36px;
+  }
+
+  .application-layout {
+    grid-template-rows: 52px minmax(0, 1fr);
+  }
+
+  .app-navigation [role="tab"] {
+    min-width: 104px;
+  }
+
+  .translation-column {
+    height: calc(100dvh - 224px);
+    padding: 8px;
+  }
+
+  .settings-column {
+    height: calc(100dvh - 224px);
+    inset-block-start: 224px;
+    max-width: none;
+    width: 100vw;
+  }
+
+  .settings-backdrop {
+    inset-block-start: 224px;
+  }
+
+  .live-status-rail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid Highlight !important;
+    outline-offset: 2px;
+  }
+
+  .status-dot,
+  .rail-chip::before {
+    forced-color-adjust: none;
+    border: 1px solid CanvasText;
+  }
+}
