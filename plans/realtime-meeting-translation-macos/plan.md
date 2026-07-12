@@ -5,7 +5,7 @@ Created: 2026-07-08
 Source spec: `/Users/hieplq1.rpm/AI/baka-trans/note.md`
 Mode: `hi-plan --full`
 Blocked by: none
-Blocks: `plans/transparent-ocr-overlay-macos`, `plans/windows-support`
+Blocks: `plans/transparent-ocr-overlay-macos`, `plans/windows-support`, `plans/260712-2234-application-ui-modernization`
 
 ## Objective
 
@@ -24,6 +24,7 @@ Build a lightweight macOS desktop app that captures Microsoft Teams meeting audi
 - 2026-07-10 Google migration update: `mind_mcp`, `graph_mcp`, and `serena` were not exposed in this session, so the search chain fast-failed to local `rg`/file reads. Local source now has a concrete OpenAI Realtime implementation in `src-tauri/src/ai.rs`, OpenAI-specific translation secrets in `src-tauri/src/security.rs`, OpenAI target-language assumptions in `src/languages.ts` and `src-tauri/src/models.rs`, and OpenAI-compatible summary profiles in `src-tauri/src/llm.rs`. The Google migration should update this active plan, not create a separate feature plan.
 - 2026-07-10 Conversation UI redesign update: `mind_mcp`, `graph_mcp`, and `serena` were not exposed in this session, so the search chain fast-failed to local `rg`/file reads. Local source shows `src/App.tsx` already renders status, routing, audio levels, summary controls, and a two-column transcript table. The new scope should redesign that transcript area into a chat-style conversation feed while reusing existing transcript, audio-level, and session events.
 - 2026-07-10 Transparent OCR overlay update: user requested a "xuyen thau" mode that opens a semi-transparent movable/resizable window and translates text under it. `graph_mcp` found the current Tauri/React bridge and transcript UI symbols, while local source confirms translation provider settings, Tauri commands, and app state are already centralized. This should be tracked as `plans/transparent-ocr-overlay-macos` and implemented as a separate screen-capture/OCR/text-translation runtime that depends on this app foundation rather than extending the audio session runtime.
+- 2026-07-12 Application UI modernization update: the Phase 16 conversation feed, live status rail, source-signal derivation, and scrolled-away translation affordance are present in current code even though the phase document still says planned. The broader Fluent 2 shell, responsive navigation, form hierarchy, accessibility, and overlay modernization work is tracked in `plans/260712-2234-application-ui-modernization`. That plan treats Phase 16 as a satisfied functional baseline and does not change translation or session behavior.
 
 ## Official API Notes
 
@@ -418,6 +419,12 @@ Session status:
    - Compose the selected instructions with immutable structured-output and transcript-grounding rules in Rust.
    - Keep preset/custom selection compatible with every existing LLM provider profile.
    - See `phase-17-summary-agent-prompt-presets-custom.md`.
+
+18. Application-wide UI modernization
+   - Adopt one official Fluent 2 component, token, icon, accessibility, and responsive system across the main window and both overlay routes.
+   - Replace the settings-first compact layout with a live-first shell and responsive context panel or drawer.
+   - Preserve all existing commands, events, data contracts, validation, transcript behavior, overlay behavior, and provider logic.
+   - See `../260712-2234-application-ui-modernization/plan.md`.
 
 ## Acceptance Criteria
 

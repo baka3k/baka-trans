@@ -1,6 +1,6 @@
 # Phase 16: Conversation Translation UI Redesign
 
-Status: planned
+Status: implemented baseline; broader visual integration planned in `../260712-2234-application-ui-modernization/plan.md`
 Depends on: phases 04, 08
 Compatible with: phases 12, 13, 15
 Primary files: `src/App.tsx`, `src/styles.css`, `src/types.ts`, `src/transcript.ts`, `src/transcript.test.ts`

@@ -1,0 +1,132 @@
+flowchart TB
+  user["Người dùng"]
+  teams["Microsoft Teams<br/>âm thanh cuộc họp"]
+
+  subgraph frontend["Frontend windows - React + Vite + Fluent UI"]
+    direction TB
+    route["App router<br/>main / transparent overlay / look-help overlay"]
+    mainWindow["MainApp<br/>phiên dịch, thiết bị, transcript, summary"]
+    overlayWindow["TransparentOverlayWindow<br/>overlay OCR trong suốt"]
+    lookHelpWindow["LookHelpOverlayWindow<br/>trợ lý OCR theo vùng màn hình"]
+    uiState["UI state helpers<br/>merge transcript, render notes, validate profile"]
+    apiLayer["src/api.ts<br/>typed wrappers cho Tauri invoke"]
+  end
+C:\ai\baka-trans
+  subgraph ipc["Tauri IPC và event bus"]
+    direction LR
+    invokeBridge["invoke commands"]
+    eventBus["events<br/>session-status, transcript-update, audio-level,<br/>summary, overlay, look-help, app-error"]
+  end
+
+  subgraph rust["Rust backend - Tauri 2"]
+    direction TB
+    commandLayer["commands.rs<br/>command facade"]
+    models["models.rs<br/>DTOs, enums, validation"]
+
+    subgraph sessionCore["Realtime translation session"]
+      direction LR
+      appState["AppState / session.rs<br/>status, transcript store, lifecycle"]
+      audioRuntime["audio.rs + CPAL<br/>capture, playback, monitor, test tone"]
+      providerDispatch["provider dispatch"]
+      openaiRealtime["ai/openai_realtime.rs<br/>OpenAI Realtime"]
+      googleLive["ai/google_live.rs<br/>Google Gemini Live Translate"]
+    end
+
+    subgraph assistants["Summary and OCR assistants"]
+      direction LR
+      summaryAgent["summary_agent.rs<br/>chunk transcript, compose prompt, merge notes"]
+      overlayState["overlay.rs<br/>continuous OCR translation loop"]
+      lookHelpState["look_help.rs<br/>manual OCR assistant loop"]
+      ocrCapture["screen capture + OCR abstraction"]
+    end
+
+    subgraph storage["Local config and secrets"]
+      direction LR
+      credentials["security.rs<br/>translation API keys"]
+      llmProfiles["llm.rs<br/>LLM profiles + chat completion client"]
+    end
+  end
+
+  subgraph platform["OS services"]
+    direction LR
+    audioDevices["Audio devices<br/>macOS input-output / Windows WASAPI loopback"]
+    screenOcr["Screen capture + OCR<br/>macOS CoreGraphics + Vision / Windows GDI + WinRT OCR"]
+    keyStore["Keychain / Windows Credential Manager<br/>plus environment variables"]
+    configStore["App config dir<br/>llm-profiles.json"]
+  end
+
+  subgraph external["External AI services"]
+    direction LR
+    openaiApi["OpenAI Realtime API<br/>WebSocket"]
+    googleLiveApi["Google Gemini Live Translate<br/>WebSocket"]
+    googleGenerateApi["Google Gemini generateContent<br/>REST for OCR translation"]
+    chatProviders["Chat completion providers<br/>OpenAI, OpenAI-compatible, Ollama, ADK LiteLLM"]
+  end
+
+  user --> route
+  route --> mainWindow
+  route --> overlayWindow
+  route --> lookHelpWindow
+  mainWindow --> uiState
+  mainWindow --> apiLayer
+  overlayWindow --> apiLayer
+  lookHelpWindow --> apiLayer
+
+  apiLayer --> invokeBridge
+  invokeBridge --> commandLayer
+  eventBus --> mainWindow
+  eventBus --> overlayWindow
+  eventBus --> lookHelpWindow
+
+  commandLayer --> models
+  commandLayer --> appState
+  commandLayer --> overlayState
+  commandLayer --> lookHelpState
+  commandLayer --> credentials
+  commandLayer --> llmProfiles
+  commandLayer --> summaryAgent
+
+  appState --> audioRuntime
+  appState --> providerDispatch
+  appState --> summaryAgent
+  audioRuntime <--> audioDevices
+  teams --> audioDevices
+  audioRuntime --> eventBus
+
+  providerDispatch --> openaiRealtime
+  providerDispatch --> googleLive
+  openaiRealtime <--> openaiApi
+  googleLive <--> googleLiveApi
+  openaiRealtime --> eventBus
+  googleLive --> eventBus
+
+  summaryAgent --> llmProfiles
+  summaryAgent --> chatProviders
+  summaryAgent --> eventBus
+
+  overlayState --> ocrCapture
+  overlayState --> googleGenerateApi
+  overlayState --> eventBus
+  lookHelpState --> ocrCapture
+  lookHelpState --> llmProfiles
+  lookHelpState --> chatProviders
+  lookHelpState --> eventBus
+  ocrCapture <--> screenOcr
+
+  credentials <--> keyStore
+  llmProfiles --> configStore
+  llmProfiles <--> keyStore
+
+  classDef actor fill:#fdf2f8,stroke:#be185d,color:#500724
+  classDef frontend fill:#eff6ff,stroke:#2563eb,color:#172554
+  classDef ipc fill:#fef3c7,stroke:#d97706,color:#451a03
+  classDef rust fill:#ecfdf5,stroke:#059669,color:#052e16
+  classDef platform fill:#f8fafc,stroke:#64748b,color:#0f172a
+  classDef external fill:#fff7ed,stroke:#ea580c,color:#431407
+
+  class user,teams actor
+  class route,mainWindow,overlayWindow,lookHelpWindow,uiState,apiLayer frontend
+  class invokeBridge,eventBus ipc
+  class commandLayer,models,appState,audioRuntime,providerDispatch,openaiRealtime,googleLive,summaryAgent,overlayState,lookHelpState,ocrCapture,credentials,llmProfiles rust
+  class audioDevices,screenOcr,keyStore,configStore platform
+  class openaiApi,googleLiveApi,googleGenerateApi,chatProviders external
