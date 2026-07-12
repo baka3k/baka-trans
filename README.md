@@ -1,6 +1,6 @@
 # Baka Trans
 
-Real-time meeting translation desktop app built with Tauri, React, TypeScript, and Rust.
+Real-time meeting translation desktop app for macOS and Windows, built with Tauri, React, TypeScript, and Rust.
 
 ## Development
 
@@ -55,24 +55,23 @@ For public distribution, add Apple code signing and notarization before sharing 
 For the versioned build, verification, tag, and GitHub Release workflow, see
 [the macOS release guide](docs/RELEASE_GUIDE.md).
 
-## Windows Status
+## Windows Development
 
 The generated macOS `.dmg` and `.app` files do not run on Windows.
 
-Tauri can produce Windows installers, but this app is currently scoped and configured for the macOS MVP. The product docs assume macOS audio routing with BlackHole, so Windows support needs separate build configuration and real audio-routing validation.
+Windows uses its built-in WASAPI loopback capture so users can leave Teams on their normal speaker or headset. No virtual audio driver is required for the default workflow. VB-CABLE is only a troubleshooting fallback.
 
 To create a Windows build, use a Windows machine or Windows CI with Node.js, Rust, and Microsoft Visual Studio Build Tools installed. Then build with Windows bundle targets:
 
 ```powershell
 npm ci
-npm run tauri -- build --bundles nsis,msi
+npm run release:windows
 ```
 
 Expected Windows artifacts:
 
 ```text
 src-tauri\target\release\bundle\nsis\
-src-tauri\target\release\bundle\msi\
 ```
 
-Before treating the Windows build as supported, verify device enumeration, microphone/system-audio routing, credential storage, realtime translation, playback, and transcript export on Windows.
+Run the Windows checks without producing an installer with `npm run release:windows:check`. See [the Windows user guide](docs/WINDOWS_TEAMS_USER_GUIDE.md) and [release guide](docs/WINDOWS_RELEASE_GUIDE.md).

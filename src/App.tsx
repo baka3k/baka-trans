@@ -152,6 +152,7 @@ const deviceAutoRefreshIntervalMs = 5000;
 const overlayRoute = new URLSearchParams(window.location.search).get("overlay");
 const isTransparentOverlayRoute = overlayRoute === "transparent";
 const isLookHelpOverlayRoute = overlayRoute === "look-help";
+const isWindows = navigator.userAgent.toLowerCase().includes("windows");
 const defaultLookHelpSystemPrompt =
   "You are Look & Help, a compact assistant for the visible screen region. Explain, summarize, or help with the provided OCR text. Be concise, practical, and do not invent details that are not present.";
 
@@ -292,7 +293,7 @@ export default function App() {
     monitorOriginalAudio ? selectedMonitorOutput : undefined,
     monitorOutputChannel,
   );
-  const effectiveMonitorOriginalAudio = monitorOriginalAudio && !outputMonitorConflict;
+  const effectiveMonitorOriginalAudio = !isWindows && monitorOriginalAudio && !outputMonitorConflict;
   const routingWarnings = getRoutingWarnings(
     selectedOutput,
     translationOutputChannel,
@@ -1201,7 +1202,11 @@ export default function App() {
               <DeviceSelect
                 icon={<Mic size={17} />}
                 label="Meeting source"
-                description="Mac input captured for translation. Route Teams speaker audio here."
+                description={
+                  isWindows
+                    ? "Choose Teams audio (system output). Teams can stay on your normal speaker or headset."
+                    : "Mac input captured for translation. Route Teams speaker audio here."
+                }
                 devices={devices.inputs}
                 value={inputDeviceId}
                 onChange={updateInputDevice}
@@ -1223,30 +1228,34 @@ export default function App() {
                 options={channelOptions}
                 disabled={localMonitorActive}
               />
-              <label className="toggle-row no-margin">
-                <input
-                  type="checkbox"
-                  checked={monitorOriginalAudio}
-                  onChange={(event) => updateMonitorEnabled(event.currentTarget.checked)}
-                />
-                <span>Original audio monitor</span>
-              </label>
-              <DeviceSelect
-                icon={<Volume2 size={17} />}
-                label="Monitor output"
-                description="Optional original meeting audio playback."
-                devices={devices.outputs}
-                value={monitorOutputDeviceId}
-                onChange={updateMonitorOutputDevice}
-                disabled={!monitorOriginalAudio}
-              />
-              <SelectField
-                label="Original channel"
-                value={monitorOutputChannel}
-                onChange={(value) => updateMonitorOutputChannel(value as AudioOutputChannel)}
-                options={channelOptions}
-                disabled={!monitorOriginalAudio}
-              />
+              {!isWindows ? (
+                <>
+                  <label className="toggle-row no-margin">
+                    <input
+                      type="checkbox"
+                      checked={monitorOriginalAudio}
+                      onChange={(event) => updateMonitorEnabled(event.currentTarget.checked)}
+                    />
+                    <span>Original audio monitor</span>
+                  </label>
+                  <DeviceSelect
+                    icon={<Volume2 size={17} />}
+                    label="Monitor output"
+                    description="Optional original meeting audio playback."
+                    devices={devices.outputs}
+                    value={monitorOutputDeviceId}
+                    onChange={updateMonitorOutputDevice}
+                    disabled={!monitorOriginalAudio}
+                  />
+                  <SelectField
+                    label="Original channel"
+                    value={monitorOutputChannel}
+                    onChange={(value) => updateMonitorOutputChannel(value as AudioOutputChannel)}
+                    options={channelOptions}
+                    disabled={!monitorOriginalAudio}
+                  />
+                </>
+              ) : null}
               <div className="signal-card">
                 <div>
                   <span>Input signal</span>
@@ -1290,7 +1299,7 @@ export default function App() {
                     : "No translation call; tests mic, device, and left/right routing."}
                 </span>
               </div>
-              <div className="button-row compact">
+              {!isWindows ? <div className="button-row compact">
                 <button
                   className={monitorToneActive ? "small-button danger" : "small-button"}
                   onClick={() => testTone("monitor", monitorOutputDeviceId, monitorOutputChannel)}
@@ -1307,7 +1316,7 @@ export default function App() {
                     {autoRefreshDevices ? " | Auto 5s" : ""}
                   </span>
                 ) : null}
-              </div>
+              </div> : null}
               <RoutingSummary
                 input={selectedInput}
                 output={selectedOutput}
@@ -1375,6 +1384,23 @@ export default function App() {
                 {keyTestMessage ? <span>{keyTestMessage}</span> : null}
               </div>
               <div className="setup-list">
+                {isWindows ? (
+                  <>
+                    <div>
+                      <strong>1. Keep Teams</strong>
+                      <span>Leave Teams on your normal speaker or headset.</span>
+                    </div>
+                    <div>
+                      <strong>2. Select</strong>
+                      <span>Choose Teams audio (system output) as the meeting source.</span>
+                    </div>
+                    <div>
+                      <strong>3. Start</strong>
+                      <span>Choose where translated audio should play, then start translation.</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
                 <div>
                   <strong>1. Route</strong>
                   <span>Set Teams speaker output to BlackHole 2ch or a multi-output device that includes it.</span>
@@ -1391,6 +1417,8 @@ export default function App() {
                   <strong>4. Teams</strong>
                   <span>To speak translated audio into Teams, route translated output to a virtual device and select it as the Teams microphone.</span>
                 </div>
+                  </>
+                )}
               </div>
             </div>
 
@@ -2972,7 +3000,7 @@ function labelApiKeySource(source: ApiKeySource | null) {
     case "environment":
       return "env";
     case "keychain":
-      return "Keychain";
+      return isWindows ? "Windows Credential Manager" : "Keychain";
     case "memory":
       return "memory";
     default:

@@ -442,17 +442,33 @@ fn write_store(store: &ProfileStore) -> AppResult<()> {
 }
 
 fn profile_store_path() -> AppResult<PathBuf> {
-    let home = std::env::var_os("HOME").ok_or_else(|| {
-        AppError::new(
-            "llm_config_path_error",
-            "Could not resolve HOME for summary profile storage.",
-        )
-    })?;
-    Ok(PathBuf::from(home)
-        .join("Library")
-        .join("Application Support")
-        .join(CONFIG_DIR_NAME)
-        .join(PROFILE_FILE_NAME))
+    #[cfg(target_os = "windows")]
+    {
+        let app_data = std::env::var_os("APPDATA").ok_or_else(|| {
+            AppError::new(
+                "llm_config_path_error",
+                "Could not resolve APPDATA for summary profile storage.",
+            )
+        })?;
+        return Ok(PathBuf::from(app_data)
+            .join(CONFIG_DIR_NAME)
+            .join(PROFILE_FILE_NAME));
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let home = std::env::var_os("HOME").ok_or_else(|| {
+            AppError::new(
+                "llm_config_path_error",
+                "Could not resolve HOME for summary profile storage.",
+            )
+        })?;
+        Ok(PathBuf::from(home)
+            .join("Library")
+            .join("Application Support")
+            .join(CONFIG_DIR_NAME)
+            .join(PROFILE_FILE_NAME))
+    }
 }
 
 fn save_profile_secret(profile_id: &str, api_key: &str) -> AppResult<()> {

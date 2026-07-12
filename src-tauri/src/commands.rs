@@ -160,7 +160,13 @@ pub async fn run_meeting_summary_agent(
 fn api_key_source_label(source: crate::models::ApiKeySource) -> &'static str {
     match source {
         crate::models::ApiKeySource::Environment => "environment",
-        crate::models::ApiKeySource::Keychain => "Keychain",
+        crate::models::ApiKeySource::Keychain => {
+            if cfg!(target_os = "windows") {
+                "Windows Credential Manager"
+            } else {
+                "Keychain"
+            }
+        }
         crate::models::ApiKeySource::Memory => "memory",
     }
 }

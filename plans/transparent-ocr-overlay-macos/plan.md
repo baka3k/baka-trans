@@ -5,7 +5,7 @@ Created: 2026-07-10
 Source spec: user request in Codex thread, Vietnamese: add a "xuyen thau" button that opens a semi-transparent square window; wherever the user moves/resizes it, text underneath is translated and shown inside the window.
 Mode: `hi-plan --fast`
 Blocked by: `plans/realtime-meeting-translation-macos`
-Blocks: `plans/look-help-overlay-macos`
+Blocks: `plans/look-help-overlay-macos`, `plans/windows-support`
 
 ## Objective
 

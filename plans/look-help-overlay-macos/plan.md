@@ -5,7 +5,7 @@ Created: 2026-07-10
 Source spec: user request in Codex thread, Vietnamese: add a feature similar to Look through, but instead of only translating it reads information from the region underneath, sends that information to an LLM with a configurable system prompt, shows the answer in the overlay, and has a settings button to hide/show the system prompt.
 Mode: `hi-plan --fast`
 Blocked by: `plans/transparent-ocr-overlay-macos`
-Blocks: none
+Blocks: `plans/windows-support`
 
 ## Objective
 

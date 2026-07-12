@@ -16,6 +16,9 @@ pub const OPENAI_REALTIME_SAMPLE_RATE: u32 = 24_000;
 pub const GOOGLE_LIVE_INPUT_SAMPLE_RATE: u32 = 16_000;
 pub const GOOGLE_LIVE_OUTPUT_SAMPLE_RATE: u32 = 24_000;
 
+#[cfg(target_os = "windows")]
+const LOOPBACK_DEVICE_PREFIX: &str = "loopback";
+
 pub struct CaptureRuntime {
     stop_tx: std_mpsc::Sender<()>,
     join_handle: Option<thread::JoinHandle<()>>,
@@ -74,7 +77,7 @@ pub fn list_devices() -> AppResult<AudioDevices> {
         .default_output_device()
         .and_then(|device| device.name().ok());
 
-    let inputs = host
+    let mut inputs = host
         .input_devices()?
         .enumerate()
         .map(|(index, device)| {
@@ -89,6 +92,16 @@ pub fn list_devices() -> AppResult<AudioDevices> {
             device_info(index, device, DeviceKind::Output, default_output.as_deref())
         })
         .collect::<Vec<_>>();
+
+    #[cfg(target_os = "windows")]
+    {
+        let loopback_outputs = host
+            .output_devices()?
+            .enumerate()
+            .map(|(index, device)| loopback_device_info(index, device, default_output.as_deref()))
+            .collect::<Vec<_>>();
+        inputs.splice(0..0, loopback_outputs);
+    }
 
     Ok(AudioDevices { inputs, outputs })
 }
@@ -392,14 +405,28 @@ fn run_capture_thread(
     stop_rx: std_mpsc::Receiver<()>,
     ready_tx: std_mpsc::Sender<AppResult<()>>,
 ) {
-    let device = match find_device(&device_id, DeviceKind::Input) {
+    #[cfg(target_os = "windows")]
+    let is_loopback = device_id.starts_with(&format!("{LOOPBACK_DEVICE_PREFIX}:"));
+    #[cfg(not(target_os = "windows"))]
+    let is_loopback = false;
+
+    let device_kind = if is_loopback {
+        DeviceKind::Output
+    } else {
+        DeviceKind::Input
+    };
+    let device = match find_device(&device_id, device_kind) {
         Ok(device) => device,
         Err(error) => {
             let _ = ready_tx.send(Err(error));
             return;
         }
     };
-    let supported = match device.default_input_config() {
+    let supported = match if is_loopback {
+        device.default_output_config()
+    } else {
+        device.default_input_config()
+    } {
         Ok(config) => config,
         Err(error) => {
             let _ = ready_tx.send(Err(error.into()));
@@ -901,6 +928,42 @@ fn device_info(
         id: format!("{prefix}:{index}:{name}"),
         name: name.clone(),
         kind,
+        is_default: default_name == Some(name.as_str()),
+        min_sample_rate,
+        max_sample_rate,
+        max_channels,
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn loopback_device_info(
+    index: usize,
+    device: Device,
+    default_name: Option<&str>,
+) -> AudioDeviceInfo {
+    let name = device
+        .name()
+        .unwrap_or_else(|_| "Unknown output device".to_string());
+    let mut min_sample_rate = None;
+    let mut max_sample_rate = None;
+    let mut max_channels = None;
+    if let Ok(configs) = device.supported_output_configs() {
+        for config in configs {
+            update_config_stats(
+                &mut min_sample_rate,
+                &mut max_sample_rate,
+                &mut max_channels,
+                config.min_sample_rate().0,
+                config.max_sample_rate().0,
+                config.channels(),
+            );
+        }
+    }
+
+    AudioDeviceInfo {
+        id: format!("{LOOPBACK_DEVICE_PREFIX}:{index}:{name}"),
+        name: format!("Teams audio (system output) — {name}"),
+        kind: DeviceKind::Input,
         is_default: default_name == Some(name.as_str()),
         min_sample_rate,
         max_sample_rate,

@@ -10,7 +10,6 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "Baka Trans",
@@ -26,10 +25,6 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["dmg", "app"],
-    "macOS": {
-      "signingIdentity": "Apple Development: quanghiep0206@gmail.com (4LSKATAAV4)"
-    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

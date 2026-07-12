@@ -34,6 +34,7 @@ const OVERLAY_LABEL: &str = "transparent-overlay";
 const STATUS_EVENT: &str = "overlay-status-update";
 const TRANSLATION_EVENT: &str = "overlay-translation-update";
 const CACHE_LIMIT: usize = 24;
+#[cfg(any(target_os = "macos", test))]
 const SCREEN_RECORDING_PERMISSION_MESSAGE: &str = "Baka Trans needs Screen & System Audio Recording access to read text from browsers and other apps. Allow access for this exact Baka Trans app, then quit and reopen it.";
 
 #[cfg(target_os = "macos")]
@@ -457,10 +458,17 @@ pub(crate) async fn capture_and_ocr_text(
         .map_err(|err| AppError::new("overlay_ocr_join_error", err.to_string()))?;
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        let _ = minimum_confidence;
+        let _ = window_id;
+        return crate::windows_ocr::capture_and_recognize(geometry).await;
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     Err(AppError::new(
         "unsupported_platform",
-        "Transparent OCR overlay capture is currently only available on macOS.",
+        "Transparent OCR overlay capture is currently available on macOS and Windows.",
     ))
 }
 
@@ -550,7 +558,19 @@ fn overlay_window_id(window: &WebviewWindow) -> Option<u32> {
     Some(ns_window.windowNumber() as u32)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+fn overlay_window_id(window: &WebviewWindow) -> Option<u32> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE,
+    };
+
+    if let Ok(hwnd) = window.hwnd() {
+        let _ = unsafe { SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE) };
+    }
+    None
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn overlay_window_id(_window: &WebviewWindow) -> Option<u32> {
     None
 }
@@ -565,7 +585,12 @@ pub fn open_screen_recording_settings() -> AppResult<()> {
         return Ok(());
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        return Ok(());
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     Err(AppError::new(
         "unsupported_platform",
         "Screen Recording settings are only available on macOS.",
@@ -626,6 +651,7 @@ fn lock_error<T>(_: std::sync::PoisonError<T>) -> AppError {
     AppError::new("state_lock_error", "Overlay state lock was poisoned.")
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn require_screen_recording_permission(permission_granted: bool) -> AppResult<()> {
     if permission_granted {
         Ok(())
@@ -647,11 +673,6 @@ extern "C" {
 #[cfg(target_os = "macos")]
 fn screen_recording_permission_granted() -> bool {
     unsafe { CGPreflightScreenCaptureAccess() }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn screen_recording_permission_granted() -> bool {
-    false
 }
 
 #[cfg(target_os = "macos")]

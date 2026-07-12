@@ -508,17 +508,33 @@ fn save_config(config: &LookHelpConfig) -> AppResult<()> {
 }
 
 fn config_path() -> AppResult<PathBuf> {
-    let home = std::env::var_os("HOME").ok_or_else(|| {
-        AppError::new(
-            "look_help_config_path_error",
-            "Could not resolve HOME for Look & Help config storage.",
-        )
-    })?;
-    Ok(PathBuf::from(home)
-        .join("Library")
-        .join("Application Support")
-        .join(CONFIG_DIR_NAME)
-        .join(CONFIG_FILE_NAME))
+    #[cfg(target_os = "windows")]
+    {
+        let app_data = std::env::var_os("APPDATA").ok_or_else(|| {
+            AppError::new(
+                "look_help_config_path_error",
+                "Could not resolve APPDATA for Look & Help config storage.",
+            )
+        })?;
+        return Ok(PathBuf::from(app_data)
+            .join(CONFIG_DIR_NAME)
+            .join(CONFIG_FILE_NAME));
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let home = std::env::var_os("HOME").ok_or_else(|| {
+            AppError::new(
+                "look_help_config_path_error",
+                "Could not resolve HOME for Look & Help config storage.",
+            )
+        })?;
+        Ok(PathBuf::from(home)
+            .join("Library")
+            .join("Application Support")
+            .join(CONFIG_DIR_NAME)
+            .join(CONFIG_FILE_NAME))
+    }
 }
 
 fn lock_error<T>(_: std::sync::PoisonError<T>) -> AppError {
@@ -535,7 +551,19 @@ fn look_help_window_id(window: &WebviewWindow) -> Option<u32> {
     Some(ns_window.windowNumber() as u32)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+fn look_help_window_id(window: &WebviewWindow) -> Option<u32> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE,
+    };
+
+    if let Ok(hwnd) = window.hwnd() {
+        let _ = unsafe { SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE) };
+    }
+    None
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn look_help_window_id(_window: &WebviewWindow) -> Option<u32> {
     None
 }

@@ -10,6 +10,8 @@
     "tauri": "tauri",
     "test": "vitest run",
     "version:set": "node scripts/set-version.mjs",
+    "release:windows:check": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release-windows.ps1 check",
+    "release:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release-windows.ps1 build",
     "release:check": "bash scripts/release-macos.sh check",
     "release:publish": "bash scripts/release-macos.sh publish",
     "release:macos": "bash scripts/release-macos.sh"

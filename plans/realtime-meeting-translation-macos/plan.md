@@ -5,7 +5,7 @@ Created: 2026-07-08
 Source spec: `/Users/hieplq1.rpm/AI/baka-trans/note.md`
 Mode: `hi-plan --full`
 Blocked by: none
-Blocks: `plans/transparent-ocr-overlay-macos`
+Blocks: `plans/transparent-ocr-overlay-macos`, `plans/windows-support`
 
 ## Objective
 

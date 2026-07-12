@@ -9,6 +9,8 @@ mod overlay;
 mod security;
 mod session;
 mod summary_agent;
+#[cfg(target_os = "windows")]
+mod windows_ocr;
 
 use commands::{
     capture_look_help, close_look_help_window, close_overlay_window, delete_llm_profile,
