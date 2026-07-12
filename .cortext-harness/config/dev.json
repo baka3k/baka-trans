@@ -7,25 +7,32 @@
   "code": {
     "env": {
       "GRAPH_PROVIDER": "falkordb",
+      "CODE_GRAPH_PROVIDER": "falkordb",
+      "FALKORDB_URI": "redis://localhost:6379",
       "FALKORDB_HOST": "localhost",
       "FALKORDB_PORT": "6379",
-      "FALKORDB_GRAPH": "bakatrans",
-      "FALKORDB_USERNAME": "",
+      "FALKORDB_USER": "",
       "FALKORDB_PASSWORD": "",
+      "FALKORDB_GRAPH": "bakatrans",
+      "FALKORDB_SSL": "false",
+      "NEO4J_URI": "redis://localhost:6379",
+      "NEO4J_DB": "bakatrans",
+      "NEO4J_USER": "",
+      "NEO4J_PASS": "",
       "QDRANT_HOST": "localhost",
       "QDRANT_PORT": "6333",
+      "QDRANT_COLLECTION": "bakatrans",
       "EMBEDDING_MODEL": "jinaai/jina-embeddings-v3",
       "BATCH_SIZE": "1",
       "MAX_EMBED_CHARS": "500",
-      "device": "mps",
-      "QDRANT_URL": "http://localhost:6333"
+      "device": "cpu"
     },
     "source": {
       "projects": [
         {
           "git": "",
           "folder": [
-            "/Users/hieplq1.rpm/AI/baka-trans"
+            "C:\\ai\\baka-trans"
           ]
         }
       ]
@@ -34,18 +41,24 @@
   "doc": {
     "env": {
       "GRAPH_PROVIDER": "falkordb",
+      "DOC_GRAPH_PROVIDER": "falkordb",
+      "FALKORDB_URI": "redis://localhost:6379",
       "FALKORDB_HOST": "localhost",
       "FALKORDB_PORT": "6379",
-      "FALKORDB_GRAPH": "hyper_graph",
-      "FALKORDB_USERNAME": "",
+      "FALKORDB_USER": "",
       "FALKORDB_PASSWORD": "",
+      "FALKORDB_GRAPH": "hyper_graph",
+      "FALKORDB_SSL": "false",
+      "NEO4J_URI": "redis://localhost:6379",
+      "NEO4J_DB": "hyper_graph",
+      "NEO4J_USER": "",
+      "NEO4J_PASS": "",
       "QDRANT_HOST": "localhost",
       "QDRANT_PORT": "6333",
       "EMBEDDING_MODEL": "BAAI/bge-m3",
       "BATCH_SIZE": "1",
       "MAX_EMBED_CHARS": "500",
-      "device": "mps",
-      "QDRANT_URL": "http://localhost:6333"
+      "device": "cpu"
     },
     "source": {
       "projects": [

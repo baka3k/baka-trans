@@ -15,10 +15,13 @@ use windows::Win32::System::WinRT::IBufferByteAccess;
 
 pub async fn capture_and_recognize(geometry: &OverlayGeometry) -> AppResult<String> {
     let geometry = geometry.clone();
-    let (pixels, width, height) =
-        tauri::async_runtime::spawn_blocking(move || capture_bgra(&geometry))
-            .await
-            .map_err(|err| AppError::new("overlay_capture_join_error", err.to_string()))??;
+    tauri::async_runtime::spawn_blocking(move || capture_and_recognize_blocking(&geometry))
+        .await
+        .map_err(|err| AppError::new("overlay_ocr_join_error", err.to_string()))?
+}
+
+fn capture_and_recognize_blocking(geometry: &OverlayGeometry) -> AppResult<String> {
+    let (pixels, width, height) = capture_bgra(geometry)?;
 
     let bitmap = {
         let buffer = Buffer::Create(pixels.len() as u32).map_err(winrt_ocr_error)?;
@@ -55,7 +58,7 @@ pub async fn capture_and_recognize(geometry: &OverlayGeometry) -> AppResult<Stri
     let result = engine
         .RecognizeAsync(&bitmap)
         .map_err(winrt_ocr_error)?
-        .await
+        .get()
         .map_err(winrt_ocr_error)?;
     result
         .Text()
