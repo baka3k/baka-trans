@@ -5,7 +5,7 @@
 - Windows 10 version 2004 or newer; Windows 11 is recommended.
 - Microsoft Teams desktop or web app.
 - A speaker, wired headset, USB headset, or Bluetooth headset selected in Windows.
-- A saved Google or OpenAI translation credential.
+- A saved Google/OpenAI translation credential, or a tested Local LLM configuration.
 
 ## Start a Translation
 
@@ -20,6 +20,10 @@ The normal Windows workflow does not require BlackHole, VB-CABLE, or VoiceMeeter
 7. Start translation.
 
 Windows captures the selected output with WASAPI loopback. The original Teams audio continues to play normally, so Windows does not show the extra original-audio monitor controls used by the macOS BlackHole workflow.
+
+## Local Text-only Translation
+
+For Japanese-to-Vietnamese meetings, select **Local** instead of Google/OpenAI. Configure and test Ollama plus a multilingual Whisper GGML model under **Local LLM** first. Local mode requires only the **Meeting source**: translated text appears on the same conversation card, and **Translated audio**, its channel, and the test tone are intentionally disabled. See the [local setup and troubleshooting section](../README.md#local-japanese-to-vietnamese-translation).
 
 ## Bluetooth and Device Changes
 
@@ -36,6 +40,8 @@ Windows captures the selected output with WASAPI loopback. The original Teams au
 | Translated voice feeds back | Use headphones and do not select a speaker that a live microphone can hear. |
 | Bluetooth audio becomes low quality | Select the stereo endpoint or use a wired/USB headset. |
 | Loopback fails on a specific driver | Update the audio driver. As a last resort, install VB-CABLE and use its input/output pair. |
+| Local Start is disabled | Save and test Local LLM settings again after every runtime-critical edit, then select a meeting source. |
+| Local translation is slow | Use a smaller/quantized multilingual Whisper model, a faster Ollama model, or reduce the maximum utterance duration. |
 
 VB-CABLE is a fallback, not part of the normal setup. VoiceMeeter is intentionally not included because its mixer and routing controls are unnecessary for the standard Baka Trans workflow.
 

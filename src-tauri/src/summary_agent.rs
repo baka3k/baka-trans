@@ -471,6 +471,9 @@ mod tests {
             translated_text: "Chung ta quyet dinh giao vao thu Sau.".to_string(),
             status: TranscriptStatus::Partial,
             latency_ms: None,
+            revision: 0,
+            update_mode: Default::default(),
+            error_message: None,
         }];
         let chunks = transcript_chunks(&transcript, &config()).unwrap();
         assert_eq!(chunks[0].source_item_ids, vec!["item-1"]);

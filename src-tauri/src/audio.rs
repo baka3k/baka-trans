@@ -362,6 +362,7 @@ pub fn pcm16_to_le_bytes(samples: &[i16]) -> Vec<u8> {
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_input(
     data: &[f32],
     channels: usize,

@@ -81,6 +81,68 @@ describe("transcript helpers", () => {
     });
   });
 
+  it("replaces a pending local snapshot by stable id", () => {
+    const pending: TranscriptItem = {
+      ...base,
+      id: "local-1",
+      sourceText: "こんにちは",
+      revision: 1,
+      updateMode: "snapshot",
+    };
+    const merged = mergeTranscriptDelta([pending], {
+      ...pending,
+      translatedText: "Xin chào",
+      status: "final",
+      revision: 2,
+    });
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0].translatedText).toBe("Xin chào");
+  });
+
+  it("ignores stale and duplicate local snapshot revisions", () => {
+    const completed: TranscriptItem = {
+      ...base,
+      id: "local-1",
+      sourceText: "こんにちは",
+      translatedText: "Xin chào",
+      status: "final",
+      revision: 2,
+      updateMode: "snapshot",
+    };
+    const stale = mergeTranscriptDelta([completed], {
+      ...completed,
+      translatedText: "stale",
+      revision: 1,
+    });
+    const duplicate = mergeTranscriptDelta(stale, completed);
+
+    expect(stale[0]).toBe(completed);
+    expect(duplicate).toBe(stale);
+    expect(duplicate[0].translatedText).toBe("Xin chào");
+  });
+
+  it("keeps two pending local utterances in source order", () => {
+    const first = {
+      ...base,
+      id: "local-1",
+      sourceText: "一",
+      revision: 1,
+      updateMode: "snapshot" as const,
+    };
+    const second = { ...first, id: "local-2", sourceText: "二", timestampMs: 2 };
+    const completedSecond = mergeTranscriptDelta([first, second], {
+      ...second,
+      translatedText: "Hai",
+      status: "final",
+      revision: 2,
+    });
+
+    expect(completedSecond.map((item) => item.id)).toEqual(["local-1", "local-2"]);
+    expect(completedSecond[0].translatedText).toBe("");
+    expect(completedSecond[1].translatedText).toBe("Hai");
+  });
+
   it("starts a new translated line after sentence boundaries", () => {
     const merged = mergeTranscriptDelta(
       [

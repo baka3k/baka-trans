@@ -450,9 +450,9 @@ fn profile_store_path() -> AppResult<PathBuf> {
                 "Could not resolve APPDATA for summary profile storage.",
             )
         })?;
-        return Ok(PathBuf::from(app_data)
+        Ok(PathBuf::from(app_data)
             .join(CONFIG_DIR_NAME)
-            .join(PROFILE_FILE_NAME));
+            .join(PROFILE_FILE_NAME))
     }
 
     #[cfg(not(target_os = "windows"))]

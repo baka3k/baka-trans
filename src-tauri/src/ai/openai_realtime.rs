@@ -669,6 +669,9 @@ fn emit_transcript_delta(
         translated_text: if source { String::new() } else { delta },
         status: TranscriptStatus::Partial,
         latency_ms: None,
+        revision: 0,
+        update_mode: Default::default(),
+        error_message: None,
     };
     if let Ok(mut transcript) = transcript_store.lock() {
         merge_transcript_delta(&mut transcript, item.clone());
@@ -853,6 +856,9 @@ mod tests {
             translated_text: String::new(),
             status: TranscriptStatus::Partial,
             latency_ms: None,
+            revision: 0,
+            update_mode: Default::default(),
+            error_message: None,
         }];
 
         merge_transcript_delta(
@@ -864,6 +870,9 @@ mod tests {
                 translated_text: "Xin chao".to_string(),
                 status: TranscriptStatus::Final,
                 latency_ms: None,
+                revision: 0,
+                update_mode: Default::default(),
+                error_message: None,
             },
         );
 
@@ -882,6 +891,9 @@ mod tests {
             translated_text: "De kiem tra".to_string(),
             status: TranscriptStatus::Partial,
             latency_ms: None,
+            revision: 0,
+            update_mode: Default::default(),
+            error_message: None,
         }];
 
         merge_transcript_delta(
@@ -893,6 +905,9 @@ mod tests {
                 translated_text: String::new(),
                 status: TranscriptStatus::Partial,
                 latency_ms: None,
+                revision: 0,
+                update_mode: Default::default(),
+                error_message: None,
             },
         );
         merge_transcript_delta(
@@ -904,6 +919,9 @@ mod tests {
                 translated_text: "chat luong cuoc goi".to_string(),
                 status: TranscriptStatus::Partial,
                 latency_ms: None,
+                revision: 0,
+                update_mode: Default::default(),
+                error_message: None,
             },
         );
 
@@ -924,6 +942,9 @@ mod tests {
             translated_text: "Good morning.".to_string(),
             status: TranscriptStatus::Partial,
             latency_ms: None,
+            revision: 0,
+            update_mode: Default::default(),
+            error_message: None,
         }];
 
         merge_transcript_delta(
@@ -935,6 +956,9 @@ mod tests {
                 translated_text: " We can start now.".to_string(),
                 status: TranscriptStatus::Partial,
                 latency_ms: None,
+                revision: 0,
+                update_mode: Default::default(),
+                error_message: None,
             },
         );
 

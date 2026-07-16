@@ -124,6 +124,10 @@ At this point, it is normal to stop hearing Teams audio directly: Teams is sendi
 
 Baka Trans stores saved translation credentials through the backend and macOS Keychain. Do not paste API keys into chat, screenshots, logs, or shared documents.
 
+### Local text-only alternative
+
+For Japanese-to-Vietnamese meetings, **Local** uses a user-provided multilingual Whisper GGML model and a local Ollama chat model. It does not use a cloud translation key and does not play translated audio. Open **Local LLM**, save the model/server settings, run **Test local pipeline**, then select **Local**. Keep **Meeting source** set to BlackHole; translated output controls are preserved for cloud mode but disabled while Local is selected. See the [local setup guide](../README.md#local-japanese-to-vietnamese-translation).
+
 ### 7.2 Languages and session
 
 In the **Session** panel:

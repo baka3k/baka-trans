@@ -92,22 +92,46 @@ export function mergeTranscriptDelta(
   items: TranscriptItem[],
   update: TranscriptItem,
 ): TranscriptItem[] {
+  if (update.updateMode === "snapshot") {
+    const index = items.findIndex((item) => item.id === update.id);
+    if (index < 0) {
+      return [...items, update];
+    }
+    const current = items[index];
+    if ((update.revision ?? 0) <= (current.revision ?? 0)) {
+      return items;
+    }
+    return [...items.slice(0, index), update, ...items.slice(index + 1)];
+  }
+
+  const matchingIndex = items.findIndex((item) => item.id === update.id);
+  if (matchingIndex >= 0) {
+    const current = items[matchingIndex];
+    const merged = mergeDeltaItem(current, update);
+    return [...items.slice(0, matchingIndex), merged, ...items.slice(matchingIndex + 1)];
+  }
+
   const last = items[items.length - 1];
   if (!last || last.status === "final" || !isSingleSidedDelta(update)) {
     return [...items, update];
   }
 
-  return [
-    ...items.slice(0, -1),
-    {
-      ...last,
-      timestampMs: Math.min(last.timestampMs, update.timestampMs),
-      sourceText: appendTranscriptText(last.sourceText, update.sourceText, false),
-      translatedText: appendTranscriptText(last.translatedText, update.translatedText, true),
-      status: update.status,
-      latencyMs: update.latencyMs ?? last.latencyMs,
-    },
-  ];
+  return [...items.slice(0, -1), mergeDeltaItem(last, update)];
+}
+
+export const mergeTranscriptUpdate = mergeTranscriptDelta;
+
+function mergeDeltaItem(current: TranscriptItem, update: TranscriptItem): TranscriptItem {
+  return {
+    ...current,
+    timestampMs: Math.min(current.timestampMs, update.timestampMs),
+    sourceText: appendTranscriptText(current.sourceText, update.sourceText, false),
+    translatedText: appendTranscriptText(current.translatedText, update.translatedText, true),
+    status: update.status,
+    latencyMs: update.latencyMs ?? current.latencyMs,
+    revision: update.revision ?? current.revision,
+    errorMessage: update.errorMessage ?? current.errorMessage,
+  };
 }
 
 function isSingleSidedDelta(item: TranscriptItem) {
@@ -200,6 +224,7 @@ export function deriveConversationItems(items: TranscriptItem[]): ConversationDi
       sentencePairs: pairTranscriptSentences(sourceText, translatedText),
       status: item.status,
       latencyMs: item.latencyMs,
+      errorMessage: item.errorMessage,
       speakerLabel: item.speakerLabel,
       speakerSegmentId: item.speakerSegmentId,
       speakerConfidence: item.speakerConfidence,

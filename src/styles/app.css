@@ -251,11 +251,85 @@ body {
 
 .settings-column[data-section="audio"] .key-panel,
 .settings-column[data-section="audio"] .summary-config-panel,
+.settings-column[data-section="audio"] .local-llm-panel,
 .settings-column[data-section="translation"] .devices-panel,
 .settings-column[data-section="translation"] .summary-config-panel,
+.settings-column[data-section="translation"] .local-llm-panel,
 .settings-column[data-section="summary"] .devices-panel,
-.settings-column[data-section="summary"] .key-panel {
+.settings-column[data-section="summary"] .key-panel,
+.settings-column[data-section="summary"] .local-llm-panel,
+.settings-column[data-section="local_llm"] .devices-panel,
+.settings-column[data-section="local_llm"] .key-panel,
+.settings-column[data-section="local_llm"] .summary-config-panel {
   display: none;
+}
+
+.local-llm-panel .panel-header p {
+  color: var(--colorNeutralForeground2);
+  font-size: 12px;
+  margin: 4px 0 0;
+}
+
+.local-config-group {
+  border: 0;
+  border-top: 1px solid var(--colorNeutralStroke2);
+  margin: 18px 0 0;
+  padding: 16px 0 0;
+}
+
+.local-config-group legend {
+  font-size: 14px;
+  font-weight: 650;
+  padding: 0 8px 0 0;
+}
+
+.local-health-grid {
+  display: grid;
+  gap: 8px;
+  margin: 18px 0;
+}
+
+.local-health {
+  align-items: center;
+  background: var(--colorNeutralBackground2);
+  border: 1px solid var(--colorNeutralStroke2);
+  border-radius: 8px;
+  display: flex;
+  font-size: 13px;
+  gap: 8px;
+  padding: 9px 10px;
+}
+
+.local-health.ok {
+  color: var(--colorPaletteGreenForeground1);
+}
+
+.local-health.pending,
+.local-config-error {
+  color: var(--colorPaletteDarkOrangeForeground2);
+}
+
+.local-config-error,
+.local-text-only-note {
+  font-size: 12px;
+  margin: 12px 0;
+}
+
+.local-provider-callout {
+  align-items: flex-start;
+  background: var(--colorNeutralBackground2);
+  border: 1px solid var(--colorNeutralStroke2);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 12px;
+}
+
+.local-provider-callout span {
+  color: var(--colorNeutralForeground2);
+  font-size: 13px;
 }
 
 .panel + .panel {

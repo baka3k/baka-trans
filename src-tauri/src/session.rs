@@ -5,7 +5,8 @@ use crate::models::{
     ManualBoundaryEvent, ManualBoundaryRequest, ManualBoundaryStatus, SessionConfig, SessionStatus,
     TranscriptItem, TranscriptStatus, TranslationProvider,
 };
-use crate::{ai, security};
+use crate::{ai, local_translation, security};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
@@ -24,6 +25,7 @@ pub struct AppState {
     last_manual_boundary_request_ms: Mutex<Option<u64>>,
     transcript: Arc<Mutex<Vec<TranscriptItem>>>,
     last_config: Mutex<Option<SessionConfig>>,
+    session_generation: Arc<AtomicU64>,
 }
 
 impl AppState {
@@ -40,6 +42,7 @@ impl AppState {
             last_manual_boundary_request_ms: Mutex::new(None),
             transcript: Arc::new(Mutex::new(Vec::new())),
             last_config: Mutex::new(None),
+            session_generation: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -64,7 +67,19 @@ impl AppState {
             .map_err(|err| AppError::new("event_emit_error", err.to_string()))
     }
 
-    pub fn start_session(&self, app: AppHandle, config: SessionConfig) -> AppResult<()> {
+    fn next_session_generation(&self) -> u64 {
+        self.session_generation.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    fn invalidate_session_generation(&self) {
+        self.session_generation.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn is_session_generation_current(&self, generation: u64) -> bool {
+        self.session_generation.load(Ordering::SeqCst) == generation
+    }
+
+    pub async fn start_session(&self, app: AppHandle, config: SessionConfig) -> AppResult<()> {
         let current_status = self.status()?;
         if !matches!(current_status, SessionStatus::Idle | SessionStatus::Error) {
             return Err(AppError::new(
@@ -103,7 +118,10 @@ impl AppState {
         self.set_status(&app, SessionStatus::Starting)?;
         self.transcript.lock().map_err(lock_error)?.clear();
         *self.last_config.lock().map_err(lock_error)? = Some(config.clone());
-        if let Err(error) = self.start_pipeline(app.clone(), config) {
+        if let Err(error) = self.start_pipeline(app.clone(), config).await {
+            if error.code == "session_start_cancelled" {
+                return Ok(());
+            }
             let _ = self.capture.lock().map(|mut capture| *capture = None);
             let _ = self.playback.lock().map(|mut playback| *playback = None);
             let _ = self
@@ -213,7 +231,7 @@ impl AppState {
         self.set_status(&app, SessionStatus::Paused)
     }
 
-    pub fn resume_session(&self, app: AppHandle) -> AppResult<()> {
+    pub async fn resume_session(&self, app: AppHandle) -> AppResult<()> {
         let config = self
             .last_config
             .lock()
@@ -230,14 +248,23 @@ impl AppState {
         }
         let playback_active = self.playback.lock().map_err(lock_error)?.is_some();
         let monitor_active = self.monitor_playback.lock().map_err(lock_error)?.is_some();
-        if playback_active || monitor_active {
+        let control_active = self.realtime_control.lock().map_err(lock_error)?.is_some();
+        if playback_active || monitor_active || control_active {
             return Err(AppError::new(
                 "session_still_pausing",
                 "Wait for the current translation session to finish draining before resuming.",
             ));
         }
 
-        self.start_pipeline(app, config)
+        self.set_status(&app, SessionStatus::Starting)?;
+        if let Err(error) = self.start_pipeline(app.clone(), config).await {
+            if error.code == "session_start_cancelled" {
+                return Ok(());
+            }
+            let _ = self.set_status(&app, SessionStatus::Paused);
+            return Err(error);
+        }
+        Ok(())
     }
 
     pub fn stop_session(&self, app: AppHandle) -> AppResult<()> {
@@ -256,6 +283,7 @@ impl AppState {
         if let Some(control) = control {
             let _ = control.try_send(ai::RealtimeControl::Stop);
         } else {
+            self.invalidate_session_generation();
             self.clear_runtime();
             self.set_status(&app, SessionStatus::Idle)?;
         }
@@ -341,18 +369,58 @@ impl AppState {
         Ok(self.transcript.lock().map_err(lock_error)?.clone())
     }
 
-    fn start_pipeline(&self, app: AppHandle, config: SessionConfig) -> AppResult<()> {
-        let api_key = security::load_translation_api_key(config.translation_provider)?;
-        let capture_sample_rate = capture_sample_rate(config.translation_provider);
-        let translated_output_sample_rate =
-            translated_output_sample_rate(config.translation_provider);
-        let playback = audio::start_playback_with_channel_at_sample_rate(
-            app.clone(),
-            &config.output_device_id,
-            config.translation_output_channel,
-            translated_output_sample_rate,
-        )?;
-        let playback_tx = playback.sender();
+    async fn start_pipeline(&self, app: AppHandle, config: SessionConfig) -> AppResult<()> {
+        let generation = self.next_session_generation();
+        let provider = config.translation_provider;
+        let local_config = if provider == TranslationProvider::LocalWhisperOllama {
+            Some(local_translation::validated_runtime_config()?)
+        } else {
+            None
+        };
+        let api_key = if provider.requires_api_key() {
+            Some(security::load_translation_api_key(provider)?)
+        } else {
+            None
+        };
+        let local_context_result = if let Some(local_config) = &local_config {
+            let model_path = local_config.model_path.clone();
+            let use_gpu = local_config.use_gpu;
+            Some(
+                tauri::async_runtime::spawn_blocking(move || {
+                    local_translation::load_whisper_context(&model_path, use_gpu)
+                })
+                .await,
+            )
+        } else {
+            None
+        };
+        if !self.is_session_generation_current(generation)
+            || self.status()? != SessionStatus::Starting
+        {
+            return Err(AppError::new(
+                "session_start_cancelled",
+                "Translation startup was cancelled before the local model was ready.",
+            ));
+        }
+        let local_context = local_context_result
+            .map(|result| {
+                result
+                    .map_err(|err| AppError::new("local_whisper_join_error", err.to_string()))?
+                    .map(Arc::new)
+            })
+            .transpose()?;
+        let capture_sample_rate = capture_sample_rate(provider);
+        let playback = if provider == TranslationProvider::LocalWhisperOllama {
+            None
+        } else {
+            Some(audio::start_playback_with_channel_at_sample_rate(
+                app.clone(),
+                &config.output_device_id,
+                config.translation_output_channel,
+                translated_output_sample_rate(provider),
+            )?)
+        };
+        let playback_tx = playback.as_ref().map(PlaybackRuntime::sender);
         let monitor_playback = if should_start_original_monitor(&config) {
             Some(audio::start_playback_with_channel_at_sample_rate(
                 app.clone(),
@@ -372,9 +440,9 @@ impl AppState {
         )?;
         let (control_tx, control_rx) = mpsc::channel(8);
         let transcript_store = Arc::clone(&self.transcript);
-        let provider = config.translation_provider;
+        let active_generation = self.session_generation.clone();
         *self.capture.lock().map_err(lock_error)? = Some(capture);
-        *self.playback.lock().map_err(lock_error)? = Some(playback);
+        *self.playback.lock().map_err(lock_error)? = playback;
         *self.monitor_playback.lock().map_err(lock_error)? = monitor_playback;
         *self.realtime_control.lock().map_err(lock_error)? = Some(control_tx);
         *self
@@ -389,10 +457,10 @@ impl AppState {
                     ai::run_realtime_translation(
                         app.clone(),
                         config,
-                        api_key,
+                        api_key.expect("cloud provider API key was validated"),
                         audio_rx,
                         control_rx,
-                        playback_tx,
+                        playback_tx.expect("cloud provider playback was created"),
                         transcript_store,
                     )
                     .await
@@ -401,23 +469,63 @@ impl AppState {
                     ai::run_google_live_translation(
                         app.clone(),
                         config,
-                        api_key,
+                        api_key.expect("cloud provider API key was validated"),
                         audio_rx,
                         control_rx,
-                        playback_tx,
+                        playback_tx.expect("cloud provider playback was created"),
                         transcript_store,
+                    )
+                    .await
+                }
+                TranslationProvider::LocalWhisperOllama => {
+                    ai::run_local_translation(
+                        app.clone(),
+                        ai::LocalTranslationRuntime::new(
+                            local_config.expect("local config was validated"),
+                            local_context.expect("local Whisper context was loaded"),
+                        ),
+                        audio_rx,
+                        control_rx,
+                        transcript_store,
+                        generation,
+                        active_generation,
                     )
                     .await
                 }
             };
             let state = app.state::<AppState>();
-            state.finish_pipeline(&app, result);
+            state.finish_pipeline(&app, result, generation);
         });
 
         Ok(())
     }
 
-    fn finish_pipeline(&self, app: &AppHandle, result: AppResult<()>) {
+    pub(crate) fn set_pipeline_status_if_active(
+        &self,
+        app: &AppHandle,
+        generation: u64,
+        next_status: SessionStatus,
+    ) -> AppResult<()> {
+        let mut current = self.status.lock().map_err(lock_error)?;
+        if !self.is_session_generation_current(generation)
+            || !matches!(
+                *current,
+                SessionStatus::Listening | SessionStatus::Translating | SessionStatus::Speaking
+            )
+        {
+            return Ok(());
+        }
+        *current = next_status;
+        drop(current);
+        app.emit("session-status", next_status)
+            .map_err(|err| AppError::new("event_emit_error", err.to_string()))
+    }
+
+    fn finish_pipeline(&self, app: &AppHandle, result: AppResult<()>, generation: u64) {
+        if !self.is_session_generation_current(generation) {
+            return;
+        }
+
         self.clear_runtime();
 
         match result {
@@ -523,7 +631,9 @@ fn validate_routing_config(config: &SessionConfig) -> AppResult<()> {
         ));
     }
 
-    if config.output_device_id.trim().is_empty() {
+    if config.translation_provider != TranslationProvider::LocalWhisperOllama
+        && config.output_device_id.trim().is_empty()
+    {
         return Err(AppError::new(
             "missing_output_device",
             "Choose a translated audio output before starting.",
@@ -541,6 +651,9 @@ fn validate_routing_config(config: &SessionConfig) -> AppResult<()> {
 }
 
 fn should_start_original_monitor(config: &SessionConfig) -> bool {
+    if config.translation_provider == TranslationProvider::LocalWhisperOllama {
+        return config.monitor_original_audio;
+    }
     config.monitor_original_audio
         && !has_output_monitor_conflict(
             &config.output_device_id,
@@ -597,6 +710,7 @@ fn capture_sample_rate(provider: TranslationProvider) -> u32 {
     match provider {
         TranslationProvider::OpenaiRealtime => audio::OPENAI_REALTIME_SAMPLE_RATE,
         TranslationProvider::GoogleLiveTranslate => audio::GOOGLE_LIVE_INPUT_SAMPLE_RATE,
+        TranslationProvider::LocalWhisperOllama => 16_000,
     }
 }
 
@@ -604,6 +718,7 @@ fn translated_output_sample_rate(provider: TranslationProvider) -> u32 {
     match provider {
         TranslationProvider::OpenaiRealtime => audio::OPENAI_REALTIME_SAMPLE_RATE,
         TranslationProvider::GoogleLiveTranslate => audio::GOOGLE_LIVE_OUTPUT_SAMPLE_RATE,
+        TranslationProvider::LocalWhisperOllama => 16_000,
     }
 }
 
@@ -638,6 +753,17 @@ mod tests {
             voice_id: "marin".to_string(),
             fallback_enabled: false,
         }
+    }
+
+    #[test]
+    fn stale_start_token_cannot_claim_a_newer_start() {
+        let state = AppState::new();
+        let start_a = state.next_session_generation();
+        state.invalidate_session_generation();
+        let start_b = state.next_session_generation();
+
+        assert!(!state.is_session_generation_current(start_a));
+        assert!(state.is_session_generation_current(start_b));
     }
 
     #[test]

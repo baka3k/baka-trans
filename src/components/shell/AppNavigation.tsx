@@ -1,13 +1,14 @@
 import { Tab, TabList, type SelectTabEvent, type SelectTabData } from "@fluentui/react-components";
 import {
   BotRegular,
+  BrainCircuitRegular,
   LiveRegular,
   SineWaveDotsRegular,
   TranslateRegular,
 } from "@fluentui/react-icons";
 import { useEffect, useState } from "react";
 
-export type SettingsSection = "live" | "audio" | "translation" | "summary";
+export type SettingsSection = "live" | "audio" | "translation" | "local_llm" | "summary";
 
 interface AppNavigationProps {
   activeSection: SettingsSection;
@@ -18,6 +19,7 @@ const destinations = [
   { value: "live", label: "Live", icon: <LiveRegular fontSize={20} /> },
   { value: "audio", label: "Audio", icon: <SineWaveDotsRegular fontSize={20} /> },
   { value: "translation", label: "Translation", icon: <TranslateRegular fontSize={20} /> },
+  { value: "local_llm", label: "Local LLM", icon: <BrainCircuitRegular fontSize={20} /> },
   { value: "summary", label: "Summary", icon: <BotRegular fontSize={20} /> },
 ] satisfies Array<{ value: SettingsSection; label: string; icon: React.ReactElement }>;
 

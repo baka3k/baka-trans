@@ -5,13 +5,12 @@ flowchart TB
   subgraph frontend["Frontend windows - React + Vite + Fluent UI"]
     direction TB
     route["App router<br/>main / transparent overlay / look-help overlay"]
-    mainWindow["MainApp<br/>phiên dịch, thiết bị, transcript, summary"]
+    mainWindow["MainApp<br/>phiên dịch, thiết bị, Local LLM, transcript, summary"]
     overlayWindow["TransparentOverlayWindow<br/>overlay OCR trong suốt"]
     lookHelpWindow["LookHelpOverlayWindow<br/>trợ lý OCR theo vùng màn hình"]
-    uiState["UI state helpers<br/>merge transcript, render notes, validate profile"]
+    uiState["UI state helpers<br/>stable snapshot upsert, legacy delta merge, render notes"]
     apiLayer["src/api.ts<br/>typed wrappers cho Tauri invoke"]
-  end
-C:\ai\baka-trans
+end
   subgraph ipc["Tauri IPC và event bus"]
     direction LR
     invokeBridge["invoke commands"]
@@ -30,6 +29,7 @@ C:\ai\baka-trans
       providerDispatch["provider dispatch"]
       openaiRealtime["ai/openai_realtime.rs<br/>OpenAI Realtime"]
       googleLive["ai/google_live.rs<br/>Google Gemini Live Translate"]
+      localPipeline["ai/local_whisper_ollama.rs<br/>segment PCM16 16 kHz, Whisper ja, ordered Ollama vi"]
     end
 
     subgraph assistants["Summary and OCR assistants"]
@@ -44,6 +44,7 @@ C:\ai\baka-trans
       direction LR
       credentials["security.rs<br/>translation API keys"]
       llmProfiles["llm.rs<br/>LLM profiles + chat completion client"]
+      localConfig["local_translation.rs<br/>versioned config + native Ollama /api/chat client"]
     end
   end
 
@@ -52,7 +53,8 @@ C:\ai\baka-trans
     audioDevices["Audio devices<br/>macOS input-output / Windows WASAPI loopback"]
     screenOcr["Screen capture + OCR<br/>macOS CoreGraphics + Vision / Windows GDI + WinRT OCR"]
     keyStore["Keychain / Windows Credential Manager<br/>plus environment variables"]
-    configStore["App config dir<br/>llm-profiles.json"]
+    configStore["App config dir<br/>llm-profiles.json + local-translation-config.json"]
+    whisperModel["User-provided Whisper GGML model"]
   end
 
   subgraph external["External AI services"]
@@ -61,6 +63,7 @@ C:\ai\baka-trans
     googleLiveApi["Google Gemini Live Translate<br/>WebSocket"]
     googleGenerateApi["Google Gemini generateContent<br/>REST for OCR translation"]
     chatProviders["Chat completion providers<br/>OpenAI, OpenAI-compatible, Ollama, ADK LiteLLM"]
+    localOllama["Local Ollama server<br/>POST /api/chat"]
   end
 
   user --> route
@@ -84,6 +87,7 @@ C:\ai\baka-trans
   commandLayer --> lookHelpState
   commandLayer --> credentials
   commandLayer --> llmProfiles
+  commandLayer --> localConfig
   commandLayer --> summaryAgent
 
   appState --> audioRuntime
@@ -95,10 +99,15 @@ C:\ai\baka-trans
 
   providerDispatch --> openaiRealtime
   providerDispatch --> googleLive
+  providerDispatch --> localPipeline
   openaiRealtime <--> openaiApi
   googleLive <--> googleLiveApi
+  localPipeline --> localConfig
+  localPipeline --> whisperModel
+  localPipeline <--> localOllama
   openaiRealtime --> eventBus
   googleLive --> eventBus
+  localPipeline --> eventBus
 
   summaryAgent --> llmProfiles
   summaryAgent --> chatProviders
@@ -115,6 +124,7 @@ C:\ai\baka-trans
 
   credentials <--> keyStore
   llmProfiles --> configStore
+  localConfig --> configStore
   llmProfiles <--> keyStore
 
   classDef actor fill:#fdf2f8,stroke:#be185d,color:#500724
@@ -127,6 +137,6 @@ C:\ai\baka-trans
   class user,teams actor
   class route,mainWindow,overlayWindow,lookHelpWindow,uiState,apiLayer frontend
   class invokeBridge,eventBus ipc
-  class commandLayer,models,appState,audioRuntime,providerDispatch,openaiRealtime,googleLive,summaryAgent,overlayState,lookHelpState,ocrCapture,credentials,llmProfiles rust
-  class audioDevices,screenOcr,keyStore,configStore platform
-  class openaiApi,googleLiveApi,googleGenerateApi,chatProviders external
+  class commandLayer,models,appState,audioRuntime,providerDispatch,openaiRealtime,googleLive,localPipeline,summaryAgent,overlayState,lookHelpState,ocrCapture,credentials,llmProfiles,localConfig rust
+  class audioDevices,screenOcr,keyStore,configStore,whisperModel platform
+  class openaiApi,googleLiveApi,googleGenerateApi,chatProviders,localOllama external

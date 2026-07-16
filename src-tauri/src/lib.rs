@@ -3,6 +3,7 @@ mod audio;
 mod commands;
 mod error;
 mod llm;
+mod local_translation;
 mod look_help;
 mod models;
 mod overlay;
@@ -14,13 +15,14 @@ mod windows_ocr;
 
 use commands::{
     capture_look_help, close_look_help_window, close_overlay_window, delete_llm_profile,
-    export_transcript, force_translate_boundary, get_app_status, has_api_key,
-    has_translation_api_key, list_audio_devices, list_llm_profiles, look_help_status,
+    export_transcript, force_translate_boundary, get_app_status, get_local_translation_config,
+    has_api_key, has_translation_api_key, list_audio_devices, list_llm_profiles, look_help_status,
     open_look_help_window, open_overlay_window, open_screen_recording_settings, overlay_status,
     pause_session, play_test_tone, resume_session, run_meeting_summary_agent, save_api_key,
-    save_llm_profile, save_translation_api_key, set_look_help_paused, set_overlay_paused,
-    start_local_monitor, start_session, stop_local_monitor, stop_session, stop_test_tone,
-    test_api_key, test_llm_profile, test_translation_api_key, translation_credential_status,
+    save_llm_profile, save_local_translation_config, save_translation_api_key,
+    set_look_help_paused, set_overlay_paused, start_local_monitor, start_session,
+    stop_local_monitor, stop_session, stop_test_tone, test_api_key, test_llm_profile,
+    test_local_translation_config, test_translation_api_key, translation_credential_status,
     update_look_help_config, update_look_help_geometry, update_overlay_config,
     update_overlay_geometry,
 };
@@ -47,6 +49,9 @@ pub fn run() {
             has_api_key,
             has_translation_api_key,
             translation_credential_status,
+            get_local_translation_config,
+            save_local_translation_config,
+            test_local_translation_config,
             test_api_key,
             test_translation_api_key,
             list_llm_profiles,

@@ -1,0 +1,14 @@
+# Engineering Logs
+
+- [2026-07-16 — Local Whisper and Ollama translation](2026-07-16-local-whisper-ollama-translation.md)
+- [2026-07-12 — Application UI modernization](2026-07-12-application-ui-modernization.md)
+- [2026-07-10 — Translation provider abstraction](2026-07-10-translation-provider-abstraction.md)
+- [2026-07-10 — Summary Agent prompt presets and custom instructions](2026-07-10-summary-agent-prompt-presets-custom-instructions.md)
+- [2026-07-10 — Transparent OCR overlay](2026-07-10-transparent-ocr-overlay.md)
+- [2026-07-10 — Screen recording permission gate](2026-07-10-screen-recording-permission-gate.md)
+- [2026-07-10 — macOS release automation](2026-07-10-macos-release-automation.md)
+- [2026-07-10 — Look Help overlay](2026-07-10-look-help-overlay.md)
+- [2026-07-10 — Collapsible settings sidebar](2026-07-10-collapsible-settings-sidebar.md)
+- [2026-07-09 — OpenAI Realtime language selector](2026-07-09-openai-realtime-language-selector.md)
+- [2026-07-09 — LLM configuration and Summary Agent](2026-07-09-llm-config-summary-agent.md)
+- [2026-07-08 — Realtime meeting translation MVP](2026-07-08-realtime-meeting-translation-mvp.md)

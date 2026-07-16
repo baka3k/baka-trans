@@ -33,9 +33,14 @@ import { AppNavigation, type SettingsSection } from "../components/shell/AppNavi
 import { ResponsiveSettingsPanel } from "../components/shell/ResponsiveSettingsPanel";
 import { SessionCommandBar } from "../components/session/SessionCommandBar";
 import {
+  LocalLlmSettings,
+  defaultLocalTranslationConfig,
+} from "../components/settings/LocalLlmSettings";
+import {
   captureLookHelp,
   exportTranscript,
   forceTranslateBoundary,
+  getLocalTranslationConfig,
   getAppStatus,
   lookHelpStatus,
   closeOverlayWindow,
@@ -52,6 +57,7 @@ import {
   resumeSession,
   runMeetingSummaryAgent,
   saveLlmProfile,
+  saveLocalTranslationConfig,
   saveTranslationApiKey,
   startLocalMonitor,
   startSession,
@@ -60,6 +66,7 @@ import {
   stopSession,
   setOverlayPaused,
   testLlmProfile,
+  testLocalTranslationConfig,
   testTranslationApiKey,
   translationCredentialStatus,
   updateLookHelpConfig,
@@ -98,6 +105,8 @@ import type {
   LlmProviderKind,
   LlmProviderProfile,
   LlmProviderProfileDraft,
+  LocalTranslationConfigDraft,
+  LocalTranslationTestResult,
   ManualBoundaryEvent,
   ManualBoundaryReason,
   MeetingSummaryConfig,
@@ -166,6 +175,11 @@ const translationProviders: Array<{ value: TranslationProvider; label: string; t
     value: "openai_realtime",
     label: "OpenAI",
     title: "OpenAI Realtime Translation",
+  },
+  {
+    value: "local_whisper_ollama",
+    label: "Local",
+    title: "Local Whisper + Ollama",
   },
 ];
 const providerKinds: Array<{ value: LlmProviderKind; label: string; title: string }> = [
@@ -299,6 +313,13 @@ export default function MainApp() {
   const [meetingNotes, setMeetingNotes] = useState<MeetingSummaryResult | null>(null);
   const [summaryStatus, setSummaryStatus] = useState("");
   const [summaryRunning, setSummaryRunning] = useState(false);
+  const [localConfigDraft, setLocalConfigDraft] = useState<LocalTranslationConfigDraft>(
+    defaultLocalTranslationConfig,
+  );
+  const [localConfigDirty, setLocalConfigDirty] = useState(false);
+  const [localConfigSaving, setLocalConfigSaving] = useState(false);
+  const [localConfigTesting, setLocalConfigTesting] = useState(false);
+  const [localConfigTest, setLocalConfigTest] = useState<LocalTranslationTestResult | null>(null);
   const conversationFeedRef = useRef<HTMLDivElement | null>(null);
   const feedAtBottomRef = useRef(true);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
@@ -312,18 +333,25 @@ export default function MainApp() {
     monitorOriginalAudio: false,
   });
   const settingsTriggerRef = useRef<HTMLButtonElement>(null);
+  const cloudLanguagesRef = useRef<{ source: Language; target: Language }>({
+    source: "auto",
+    target: "vi",
+  });
 
   const selectedInput = devices.inputs.find((device) => device.id === inputDeviceId);
   const selectedOutput = devices.outputs.find((device) => device.id === outputDeviceId);
   const selectedMonitorOutput = devices.outputs.find(
     (device) => device.id === monitorOutputDeviceId,
   );
-  const outputMonitorConflict = hasOutputMonitorConflict(
-    selectedOutput,
-    translationOutputChannel,
-    monitorOriginalAudio ? selectedMonitorOutput : undefined,
-    monitorOutputChannel,
-  );
+  const outputMonitorConflict =
+    translationProvider === "local_whisper_ollama"
+      ? false
+      : hasOutputMonitorConflict(
+          selectedOutput,
+          translationOutputChannel,
+          monitorOriginalAudio ? selectedMonitorOutput : undefined,
+          monitorOutputChannel,
+        );
   const effectiveMonitorOriginalAudio = !isWindows && monitorOriginalAudio && !outputMonitorConflict;
   const routingWarnings = getRoutingWarnings(
     selectedOutput,
@@ -333,6 +361,13 @@ export default function MainApp() {
   );
   const targetLanguageOptions = useMemo(
     () => targetLanguageOptionsForProvider(translationProvider),
+    [translationProvider],
+  );
+  const sourceOptions = useMemo(
+    () =>
+      translationProvider === "local_whisper_ollama"
+        ? sourceLanguageOptions.filter((option) => option.value === "ja")
+        : sourceLanguageOptions,
     [translationProvider],
   );
   const signalSessionStatus: SessionStatus = localMonitorActive ? "listening" : status;
@@ -355,16 +390,23 @@ export default function MainApp() {
     translatedLevel.peak,
   );
 
+  const localProviderReady = Boolean(localConfigTest?.ok && !localConfigDirty);
+  const providerReady =
+    translationProvider === "local_whisper_ollama"
+      ? localProviderReady
+      : apiKeyStored && outputDeviceId.length > 0;
   const canStart =
     (status === "idle" || status === "error") &&
     !localMonitorActive &&
     inputDeviceId.length > 0 &&
-    outputDeviceId.length > 0 &&
+    providerReady &&
     testingTone === null &&
     (!monitorOriginalAudio || monitorOutputDeviceId.length > 0);
   const sessionActive = activeSessionStatuses.includes(status);
   const canForceBoundary =
-    translationProvider === "openai_realtime" && sessionActive;
+    (translationProvider === "openai_realtime" ||
+      translationProvider === "local_whisper_ollama") &&
+    sessionActive;
   const canPause = canForceBoundary;
   const canResume = status === "paused";
   const canStop = status !== "idle" && status !== "stopping";
@@ -415,7 +457,10 @@ export default function MainApp() {
     {
       id: "translation",
       label: "Translated out",
-      detail: formatRoute(selectedOutput, translationOutputChannel),
+      detail:
+        translationProvider === "local_whisper_ollama"
+          ? "Text only"
+          : formatRoute(selectedOutput, translationOutputChannel),
       state: localMonitorActive
         ? translationOutLevel > 3
           ? "signal"
@@ -427,7 +472,7 @@ export default function MainApp() {
             : "idle",
       leftLevel: channelLevel(translationOutputChannel, "left", translationOutLevel),
       rightLevel: channelLevel(translationOutputChannel, "right", translationOutLevel),
-      disabled: !selectedOutput,
+      disabled: translationProvider === "local_whisper_ollama" || !selectedOutput,
     },
     {
       id: "monitor",
@@ -560,6 +605,12 @@ export default function MainApp() {
   }, [targetLanguage, targetLanguageOptions]);
 
   useEffect(() => {
+    if (translationProvider !== "local_whisper_ollama") {
+      cloudLanguagesRef.current = { source: sourceLanguage, target: targetLanguage };
+    }
+  }, [sourceLanguage, targetLanguage, translationProvider]);
+
+  useEffect(() => {
     if (!isTauri()) {
       return;
     }
@@ -618,16 +669,21 @@ export default function MainApp() {
   async function hydrate() {
     setBusy(true);
     try {
-      const [deviceList, appStatus, profiles] = await Promise.all([
+      const [deviceList, appStatus, profiles, localConfig] = await Promise.all([
         listAudioDevices(),
         getAppStatus(),
         listLlmProfiles(),
+        getLocalTranslationConfig(),
       ]);
       setDevices(deviceList);
       setStatus(appStatus.sessionStatus);
       applyAppStatus(appStatus);
       await refreshTranslationCredentialStatus(translationProvider);
       applyProfiles(profiles);
+      const { schemaVersion: _schemaVersion, ...localDraft } = localConfig;
+      setLocalConfigDraft(localDraft);
+      setLocalConfigDirty(false);
+      setLocalConfigTest(null);
       setKeyTestMessage("");
       const storedRouting = readRoutingProfile();
       applyRoutingProfile(resolveRoutingProfile(deviceList, storedRouting), true);
@@ -718,6 +774,52 @@ export default function MainApp() {
       setApiKeySource(null);
       setApiKeyFingerprint("");
       setError(normalizeError(cause));
+    }
+  }
+
+  function selectTranslationProvider(provider: TranslationProvider) {
+    if (provider === translationProvider) {
+      return;
+    }
+    if (provider === "local_whisper_ollama") {
+      cloudLanguagesRef.current = { source: sourceLanguage, target: targetLanguage };
+      setSourceLanguage("ja");
+      setTargetLanguage("vi");
+    } else if (translationProvider === "local_whisper_ollama") {
+      setSourceLanguage(cloudLanguagesRef.current.source);
+      setTargetLanguage(cloudLanguagesRef.current.target);
+    }
+    setTranslationProvider(provider);
+    setApiKeyDraft("");
+    setKeyTestMessage("");
+  }
+
+  async function saveLocalConfig() {
+    setLocalConfigSaving(true);
+    setError(null);
+    try {
+      const saved = await saveLocalTranslationConfig(localConfigDraft);
+      const { schemaVersion: _schemaVersion, ...draft } = saved;
+      setLocalConfigDraft(draft);
+      setLocalConfigDirty(false);
+      setLocalConfigTest(null);
+    } catch (cause) {
+      setError(normalizeError(cause));
+    } finally {
+      setLocalConfigSaving(false);
+    }
+  }
+
+  async function testLocalConfig() {
+    setLocalConfigTesting(true);
+    setError(null);
+    try {
+      setLocalConfigTest(await testLocalTranslationConfig(localConfigDraft));
+    } catch (cause) {
+      setLocalConfigTest(null);
+      setError(normalizeError(cause));
+    } finally {
+      setLocalConfigTesting(false);
     }
   }
 
@@ -1071,7 +1173,12 @@ export default function MainApp() {
             <div className="status-row">
               <span className={`status-dot status-${status}`} />
               <span>{labelStatus(status)}</span>
-              {apiKeyStored ? (
+              {translationProvider === "local_whisper_ollama" ? (
+                <span className={`status-chip ${localProviderReady ? "ok" : "warn"}`}>
+                  {localProviderReady ? <Check size={14} /> : <Settings2 size={14} />}
+                  {localProviderReady ? "Local ready" : "Local setup needed"}
+                </span>
+              ) : apiKeyStored ? (
                 <span className="status-chip ok">
                   <Check size={14} /> Key stored
                 </span>
@@ -1157,9 +1264,13 @@ export default function MainApp() {
       <SessionCommandBar
         sourceLanguage={sourceLanguage}
         targetLanguage={targetLanguage}
-        sourceOptions={sourceLanguageOptions}
+        sourceOptions={sourceOptions}
         targetOptions={targetLanguageOptions}
-        onSourceChange={(value) => setSourceLanguage(value as Language)}
+        onSourceChange={(value) =>
+          setSourceLanguage(
+            translationProvider === "local_whisper_ollama" ? "ja" : (value as Language),
+          )
+        }
         onTargetChange={(value) => setTargetLanguage(value as Language)}
         fallbackEnabled={fallbackEnabled}
         onFallbackChange={setFallbackEnabled}
@@ -1208,7 +1319,7 @@ export default function MainApp() {
                   label="Source"
                   value={sourceLanguage}
                   onChange={(value) => setSourceLanguage(value as Language)}
-                  options={sourceLanguageOptions}
+                  options={sourceOptions}
                 />
                 <SelectField
                   label="Target"
@@ -1308,14 +1419,14 @@ export default function MainApp() {
                 devices={devices.outputs}
                 value={outputDeviceId}
                 onChange={updateOutputDevice}
-                disabled={localMonitorActive}
+                disabled={localMonitorActive || translationProvider === "local_whisper_ollama"}
               />
               <SelectField
                 label="Translated channel"
                 value={translationOutputChannel}
                 onChange={(value) => updateTranslationOutputChannel(value as AudioOutputChannel)}
                 options={channelOptions}
-                disabled={localMonitorActive}
+                disabled={localMonitorActive || translationProvider === "local_whisper_ollama"}
               />
               {!isWindows ? (
                 <>
@@ -1368,7 +1479,10 @@ export default function MainApp() {
                 <button
                   className={translationToneActive ? "small-button danger" : "small-button"}
                   onClick={() => testTone("translation", outputDeviceId, translationOutputChannel)}
-                  disabled={!translationToneActive && (!outputDeviceId || !canTestAudio)}
+                  disabled={
+                    translationProvider === "local_whisper_ollama" ||
+                    (!translationToneActive && (!outputDeviceId || !canTestAudio))
+                  }
                 >
                   {translationToneActive ? "Stop translated" : "Test translated"}
                 </button>
@@ -1429,87 +1543,119 @@ export default function MainApp() {
                     className={translationProvider === provider.value ? "active" : ""}
                     title={provider.title}
                     key={provider.value}
-                    onClick={() => {
-                      setTranslationProvider(provider.value);
-                      setApiKeyDraft("");
-                      setKeyTestMessage("");
-                    }}
+                    onClick={() => selectTranslationProvider(provider.value)}
                   >
                     {provider.label}
                   </button>
                 ))}
               </div>
-              <div className="key-row">
-                <input
-                  type="password"
-                  value={apiKeyDraft}
-                  placeholder={
-                    apiKeyStored
-                      ? "Saved translation key. Paste only to replace."
-                      : `${labelTranslationProvider(translationProvider)} API key`
-                  }
-                  onChange={(event) => setApiKeyDraft(event.currentTarget.value)}
-                />
-                <button onClick={saveKey} disabled={apiKeyDraft.trim().length === 0 || busy}>
-                  <Save size={17} /> {apiKeyStored ? "Replace" : "Save"}
-                </button>
-              </div>
-              <div className={`key-status ${apiKeyStored ? "ok" : "warn"}`}>
-                <KeyRound size={14} />
-                <span>
-                  {apiKeyStored
-                    ? `Using ${labelApiKeySource(apiKeySource)} key ${apiKeyFingerprint || ""} for ${labelTranslationProvider(translationProvider)}`
-                    : `No ${labelTranslationProvider(translationProvider)} key available`}
-                </span>
-              </div>
-              <div className="key-test-row">
-                <button
-                  className="small-button"
-                  onClick={testStoredKey}
-                  disabled={!apiKeyStored || busy || testingKey}
-                >
-                  <Check size={14} /> {testingKey ? "Testing" : "Test key"}
-                </button>
-                {keyTestMessage ? <span>{keyTestMessage}</span> : null}
-              </div>
-              <div className="setup-list">
-                {isWindows ? (
-                  <>
-                    <div>
-                      <strong>1. Keep Teams</strong>
-                      <span>Leave Teams on your normal speaker or headset.</span>
-                    </div>
-                    <div>
-                      <strong>2. Select</strong>
-                      <span>Choose Teams audio (system output) as the meeting source.</span>
-                    </div>
-                    <div>
-                      <strong>3. Start</strong>
-                      <span>Choose where translated audio should play, then start translation.</span>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                <div>
-                  <strong>1. Route</strong>
-                  <span>Set Teams speaker output to BlackHole 2ch or a multi-output device that includes it.</span>
+              {translationProvider === "local_whisper_ollama" ? (
+                <div className="local-provider-callout">
+                  <strong>No cloud key required</strong>
+                  <span>
+                    Local mode transcribes Japanese at 16 kHz and returns Vietnamese text without
+                    translated-audio playback.
+                  </span>
+                  <button
+                    className="small-button"
+                    onClick={() => {
+                      setActiveSettings("local_llm");
+                      setSettingsOpen(true);
+                    }}
+                  >
+                    <Settings2 size={14} /> Configure Local LLM
+                  </button>
                 </div>
-                <div>
-                  <strong>2. Select</strong>
-                  <span>Choose BlackHole as source and headphones as translation output.</span>
-                </div>
-                <div>
-                  <strong>3. Split</strong>
-                  <span>For left/right ears, use one headphone device with opposite channels.</span>
-                </div>
-                <div>
-                  <strong>4. Teams</strong>
-                  <span>To speak translated audio into Teams, route translated output to a virtual device and select it as the Teams microphone.</span>
-                </div>
-                  </>
-                )}
-              </div>
+              ) : (
+                <>
+                  <div className="key-row">
+                    <input
+                      type="password"
+                      value={apiKeyDraft}
+                      placeholder={
+                        apiKeyStored
+                          ? "Saved translation key. Paste only to replace."
+                          : `${labelTranslationProvider(translationProvider)} API key`
+                      }
+                      onChange={(event) => setApiKeyDraft(event.currentTarget.value)}
+                    />
+                    <button onClick={saveKey} disabled={apiKeyDraft.trim().length === 0 || busy}>
+                      <Save size={17} /> {apiKeyStored ? "Replace" : "Save"}
+                    </button>
+                  </div>
+                  <div className={`key-status ${apiKeyStored ? "ok" : "warn"}`}>
+                    <KeyRound size={14} />
+                    <span>
+                      {apiKeyStored
+                        ? `Using ${labelApiKeySource(apiKeySource)} key ${apiKeyFingerprint || ""} for ${labelTranslationProvider(translationProvider)}`
+                        : `No ${labelTranslationProvider(translationProvider)} key available`}
+                    </span>
+                  </div>
+                  <div className="key-test-row">
+                    <button
+                      className="small-button"
+                      onClick={testStoredKey}
+                      disabled={!apiKeyStored || busy || testingKey}
+                    >
+                      <Check size={14} /> {testingKey ? "Testing" : "Test key"}
+                    </button>
+                    {keyTestMessage ? <span>{keyTestMessage}</span> : null}
+                  </div>
+                  <div className="setup-list">
+                    {isWindows ? (
+                      <>
+                        <div>
+                          <strong>1. Keep Teams</strong>
+                          <span>Leave Teams on your normal speaker or headset.</span>
+                        </div>
+                        <div>
+                          <strong>2. Select</strong>
+                          <span>Choose Teams audio (system output) as the meeting source.</span>
+                        </div>
+                        <div>
+                          <strong>3. Start</strong>
+                          <span>Choose where translated audio should play, then start translation.</span>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div>
+                          <strong>1. Route</strong>
+                          <span>Set Teams speaker output to BlackHole 2ch or a multi-output device that includes it.</span>
+                        </div>
+                        <div>
+                          <strong>2. Select</strong>
+                          <span>Choose BlackHole as source and headphones as translation output.</span>
+                        </div>
+                        <div>
+                          <strong>3. Split</strong>
+                          <span>For left/right ears, use one headphone device with opposite channels.</span>
+                        </div>
+                        <div>
+                          <strong>4. Teams</strong>
+                          <span>To speak translated audio into Teams, route translated output to a virtual device and select it as the Teams microphone.</span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
+
+            <LocalLlmSettings
+              draft={localConfigDraft}
+              dirty={localConfigDirty}
+              saving={localConfigSaving}
+              testing={localConfigTesting}
+              testResult={localConfigTest}
+              onChange={(draft) => {
+                setLocalConfigDraft(draft);
+                setLocalConfigDirty(true);
+                setLocalConfigTest(null);
+              }}
+              onSave={() => void saveLocalConfig()}
+              onTest={() => void testLocalConfig()}
+            />
 
             <div className="panel summary-config-panel">
               <div className="panel-header">
@@ -1871,7 +2017,9 @@ export default function MainApp() {
                   status={status}
                   sourceSignalState={sourceSignalState}
                   hasInput={Boolean(inputDeviceId)}
-                  hasOutput={Boolean(outputDeviceId)}
+                  hasOutput={
+                    translationProvider === "local_whisper_ollama" || Boolean(outputDeviceId)
+                  }
                 />
               ) : (
                 conversationItems.map((item) => (
@@ -2640,7 +2788,7 @@ function UtteranceCard({ item }: { item: ConversationDisplayItem }) {
               {item.status === "error" ? (
                 <p>
                   <AlertTriangle size={15} />
-                  {pair.translatedText || "Translation failed for this utterance."}
+                  {item.errorMessage || pair.translatedText || "Translation failed for this utterance."}
                 </p>
               ) : pair.translatedText ? (
                 <p>{pair.translatedText}</p>
@@ -2995,6 +3143,8 @@ function labelTranslationProvider(provider: TranslationProvider) {
       return "Google Live Translation";
     case "openai_realtime":
       return "OpenAI Realtime Translation";
+    case "local_whisper_ollama":
+      return "Local Whisper + Ollama";
   }
 }
 

@@ -7,6 +7,9 @@ import type {
   ExportedTranscript,
   LookHelpConfig,
   LookHelpStatus,
+  LocalTranslationConfig,
+  LocalTranslationConfigDraft,
+  LocalTranslationTestResult,
   LlmProviderProfile,
   LlmProviderProfileDraft,
   LlmProviderTestResult,
@@ -80,6 +83,18 @@ export function translationCredentialStatus(provider: TranslationProvider) {
 
 export function testTranslationApiKey(provider: TranslationProvider) {
   return invoke<ApiKeyTestResult>("test_translation_api_key", { provider });
+}
+
+export function getLocalTranslationConfig() {
+  return invoke<LocalTranslationConfig>("get_local_translation_config");
+}
+
+export function saveLocalTranslationConfig(draft: LocalTranslationConfigDraft) {
+  return invoke<LocalTranslationConfig>("save_local_translation_config", { draft });
+}
+
+export function testLocalTranslationConfig(draft: LocalTranslationConfigDraft) {
+  return invoke<LocalTranslationTestResult>("test_local_translation_config", { draft });
 }
 
 export function listLlmProfiles() {

@@ -15,6 +15,8 @@ describe("AppNavigation", () => {
 
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect).toHaveBeenCalledWith("translation");
+    await user.click(screen.getByRole("tab", { name: "Local LLM" }));
+    expect(onSelect).toHaveBeenLastCalledWith("local_llm");
     expect((await axe(container)).violations).toEqual([]);
   });
 });

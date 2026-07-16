@@ -5,6 +5,7 @@ Created: 2026-07-12 22:34 Asia/Bangkok
 Mode: `hi-plan --fast`
 Blocked by: none
 Coordinates with: `plans/realtime-meeting-translation-macos/phase-16-conversation-translation-ui-redesign.md`
+Coordinates with: `plans/260716-2033-local-llm-audio-translation`
 Updates: `plans/realtime-meeting-translation-macos/plan.md`
 
 ## Objective
@@ -323,3 +324,5 @@ Extraction rule: move existing hooks, handlers, and derived values without rewri
 ## Implementation Handoff
 
 Implement in phase order. Phase 1 creates the compatibility and regression foundation. Phases 2-4 may then migrate one surface at a time while the existing handlers remain in place. Phase 5 is required before the redesign is considered complete.
+
+The separate Local LLM destination and its provider-specific form are owned by `plans/260716-2033-local-llm-audio-translation`. Implement that surface using this plan's Fluent shell, responsive settings, focus, and accessibility contracts; do not fold its Whisper/Ollama fields into the Summary profile panel.

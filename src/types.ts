@@ -4,7 +4,10 @@ export type DeviceKind = "input" | "output";
 export type AudioOutputChannel = "all" | "left" | "right";
 export type ApiKeySource = "environment" | "keychain" | "memory";
 export type Language = LanguageCode;
-export type TranslationProvider = "openai_realtime" | "google_live_translate";
+export type TranslationProvider =
+  | "openai_realtime"
+  | "google_live_translate"
+  | "local_whisper_ollama";
 export type TranslationStyle = "literal" | "natural" | "technical_meeting_safe";
 export type ManualBoundaryReason = "user_button" | "keyboard_shortcut";
 export type ManualBoundaryStatus =
@@ -24,6 +27,7 @@ export type SessionStatus =
   | "stopping"
   | "error";
 export type TranscriptStatus = "partial" | "final" | "error";
+export type TranscriptUpdateMode = "delta" | "snapshot";
 export type SourceSignalState = "waiting" | "receiving" | "silent" | "stale" | "error";
 export type TranslationActivityState =
   | "listening"
@@ -177,6 +181,39 @@ export interface TranslationCredentialStatus {
   apiKeyFingerprint?: string;
 }
 
+export interface LocalTranslationConfig {
+  schemaVersion: number;
+  baseUrl: string;
+  model: string;
+  timeoutSeconds: number;
+  temperature: number;
+  maxOutputTokens: number;
+  keepAlive?: string;
+  modelPath: string;
+  language: "ja";
+  threads: number;
+  useGpu: boolean;
+  sampleRateHz: 16000;
+  minimumSpeechMs: number;
+  silenceToCommitMs: number;
+  maximumUtteranceMs: number;
+  preRollMs: number;
+  speechThreshold: number;
+}
+
+export type LocalTranslationConfigDraft = Omit<LocalTranslationConfig, "schemaVersion">;
+
+export interface LocalTranslationTestResult {
+  ok: boolean;
+  message: string;
+  model: string;
+  endpoint: string;
+  whisperModelReadable: boolean;
+  whisperModelLoaded: boolean;
+  ollamaReachable: boolean;
+  ollamaModelAccepted: boolean;
+}
+
 export interface LlmProviderProfile {
   id: string;
   name: string;
@@ -231,6 +268,9 @@ export interface TranscriptItem {
   translatedText: string;
   status: TranscriptStatus;
   latencyMs?: number;
+  revision?: number;
+  updateMode?: TranscriptUpdateMode;
+  errorMessage?: string;
   speakerLabel?: string;
   speakerSegmentId?: string;
   speakerConfidence?: number;
@@ -254,6 +294,7 @@ export interface ConversationDisplayItem {
   sentencePairs: ConversationSentencePair[];
   status: TranscriptStatus;
   latencyMs?: number;
+  errorMessage?: string;
   speakerLabel?: string;
   speakerSegmentId?: string;
   speakerConfidence?: number;

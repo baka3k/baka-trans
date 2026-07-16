@@ -35,17 +35,13 @@ pub enum AudioOutputChannel {
     Right,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TranslationProvider {
     OpenaiRealtime,
+    #[default]
     GoogleLiveTranslate,
-}
-
-impl Default for TranslationProvider {
-    fn default() -> Self {
-        TranslationProvider::GoogleLiveTranslate
-    }
+    LocalWhisperOllama,
 }
 
 impl TranslationProvider {
@@ -53,6 +49,7 @@ impl TranslationProvider {
         match self {
             TranslationProvider::OpenaiRealtime => "OpenAI Realtime Translation",
             TranslationProvider::GoogleLiveTranslate => "Google Live Translation",
+            TranslationProvider::LocalWhisperOllama => "Local Whisper + Ollama",
         }
     }
 
@@ -60,7 +57,12 @@ impl TranslationProvider {
         match self {
             TranslationProvider::OpenaiRealtime => "OPENAI_API_KEY",
             TranslationProvider::GoogleLiveTranslate => "GEMINI_API_KEY",
+            TranslationProvider::LocalWhisperOllama => "",
         }
+    }
+
+    pub fn requires_api_key(self) -> bool {
+        !matches!(self, TranslationProvider::LocalWhisperOllama)
     }
 }
 
@@ -264,6 +266,7 @@ impl Language {
         match provider {
             TranslationProvider::OpenaiRealtime => self.is_openai_realtime_target_supported(),
             TranslationProvider::GoogleLiveTranslate => self.is_google_live_target_supported(),
+            TranslationProvider::LocalWhisperOllama => self == Language::Vi,
         }
     }
 }
@@ -465,6 +468,14 @@ pub struct LookHelpUpdate {
 
 impl SessionConfig {
     pub fn validate_translation_target_language(&self) -> AppResult<()> {
+        if self.translation_provider == TranslationProvider::LocalWhisperOllama
+            && self.source_language != Language::Ja
+        {
+            return Err(AppError::new(
+                "unsupported_source_language",
+                "Local Whisper + Ollama currently requires Japanese as the source language.",
+            ));
+        }
         if self
             .target_language
             .is_target_supported_by(self.translation_provider)
@@ -538,6 +549,20 @@ pub struct TranscriptItem {
     pub translated_text: String,
     pub status: TranscriptStatus,
     pub latency_ms: Option<u64>,
+    #[serde(default)]
+    pub revision: u64,
+    #[serde(default)]
+    pub update_mode: TranscriptUpdateMode,
+    #[serde(default)]
+    pub error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TranscriptUpdateMode {
+    #[default]
+    Delta,
+    Snapshot,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -574,6 +599,85 @@ pub struct ApiKeyTestResult {
     pub source: ApiKeySource,
     pub fingerprint: String,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalTranslationConfig {
+    pub schema_version: u32,
+    pub base_url: String,
+    pub model: String,
+    pub timeout_seconds: u64,
+    pub temperature: f32,
+    pub max_output_tokens: u32,
+    pub keep_alive: Option<String>,
+    pub model_path: String,
+    pub language: String,
+    pub threads: u32,
+    pub use_gpu: bool,
+    pub sample_rate_hz: u32,
+    pub minimum_speech_ms: u64,
+    pub silence_to_commit_ms: u64,
+    pub maximum_utterance_ms: u64,
+    pub pre_roll_ms: u64,
+    pub speech_threshold: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalTranslationConfigDraft {
+    pub base_url: String,
+    pub model: String,
+    pub timeout_seconds: u64,
+    pub temperature: f32,
+    pub max_output_tokens: u32,
+    pub keep_alive: Option<String>,
+    pub model_path: String,
+    pub language: String,
+    pub threads: u32,
+    pub use_gpu: bool,
+    pub sample_rate_hz: u32,
+    pub minimum_speech_ms: u64,
+    pub silence_to_commit_ms: u64,
+    pub maximum_utterance_ms: u64,
+    pub pre_roll_ms: u64,
+    pub speech_threshold: f32,
+}
+
+impl From<LocalTranslationConfig> for LocalTranslationConfigDraft {
+    fn from(value: LocalTranslationConfig) -> Self {
+        Self {
+            base_url: value.base_url,
+            model: value.model,
+            timeout_seconds: value.timeout_seconds,
+            temperature: value.temperature,
+            max_output_tokens: value.max_output_tokens,
+            keep_alive: value.keep_alive,
+            model_path: value.model_path,
+            language: value.language,
+            threads: value.threads,
+            use_gpu: value.use_gpu,
+            sample_rate_hz: value.sample_rate_hz,
+            minimum_speech_ms: value.minimum_speech_ms,
+            silence_to_commit_ms: value.silence_to_commit_ms,
+            maximum_utterance_ms: value.maximum_utterance_ms,
+            pre_roll_ms: value.pre_roll_ms,
+            speech_threshold: value.speech_threshold,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalTranslationTestResult {
+    pub ok: bool,
+    pub message: String,
+    pub model: String,
+    pub endpoint: String,
+    pub whisper_model_readable: bool,
+    pub whisper_model_loaded: bool,
+    pub ollama_reachable: bool,
+    pub ollama_model_accepted: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

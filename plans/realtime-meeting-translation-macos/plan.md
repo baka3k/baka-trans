@@ -6,6 +6,7 @@ Source spec: `/Users/hieplq1.rpm/AI/baka-trans/note.md`
 Mode: `hi-plan --full`
 Blocked by: none
 Blocks: `plans/transparent-ocr-overlay-macos`, `plans/windows-support`, `plans/260712-2234-application-ui-modernization`
+Coordinates with: `plans/260716-2033-local-llm-audio-translation`
 
 ## Objective
 
@@ -25,6 +26,7 @@ Build a lightweight macOS desktop app that captures Microsoft Teams meeting audi
 - 2026-07-10 Conversation UI redesign update: `mind_mcp`, `graph_mcp`, and `serena` were not exposed in this session, so the search chain fast-failed to local `rg`/file reads. Local source shows `src/App.tsx` already renders status, routing, audio levels, summary controls, and a two-column transcript table. The new scope should redesign that transcript area into a chat-style conversation feed while reusing existing transcript, audio-level, and session events.
 - 2026-07-10 Transparent OCR overlay update: user requested a "xuyen thau" mode that opens a semi-transparent movable/resizable window and translates text under it. `graph_mcp` found the current Tauri/React bridge and transcript UI symbols, while local source confirms translation provider settings, Tauri commands, and app state are already centralized. This should be tracked as `plans/transparent-ocr-overlay-macos` and implemented as a separate screen-capture/OCR/text-translation runtime that depends on this app foundation rather than extending the audio session runtime.
 - 2026-07-12 Application UI modernization update: the Phase 16 conversation feed, live status rail, source-signal derivation, and scrolled-away translation affordance are present in current code even though the phase document still says planned. The broader Fluent 2 shell, responsive navigation, form hierarchy, accessibility, and overlay modernization work is tracked in `plans/260712-2234-application-ui-modernization`. That plan treats Phase 16 as a satisfied functional baseline and does not change translation or session behavior.
+- 2026-07-16 Local translation update: `plans/260716-2033-local-llm-audio-translation` adds a Japanese Whisper -> native Ollama `/api/chat` -> Vietnamese text provider while reusing this plan's implemented audio/session foundation. That plan owns local configuration, Whisper segmentation/inference, provider-aware text-only routing, and stable transcript snapshot reconciliation; this plan remains the owner of shared realtime capture and lifecycle behavior.
 
 ## Official API Notes
 

@@ -582,12 +582,12 @@ pub fn open_screen_recording_settings() -> AppResult<()> {
             .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
             .spawn()
             .map_err(|err| AppError::new("open_settings_error", err.to_string()))?;
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(target_os = "windows")]
     {
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]

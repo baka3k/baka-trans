@@ -136,6 +136,9 @@ function supportsTargetByProvider(
   if (provider === "openai_realtime") {
     return openaiTargetLanguageCodeSet.has(language.code) && language.supportsTarget;
   }
+  if (provider === "local_whisper_ollama") {
+    return language.code === "vi";
+  }
   return !language.isAuto;
 }
 

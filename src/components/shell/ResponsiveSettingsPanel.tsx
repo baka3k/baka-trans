@@ -19,6 +19,22 @@ const focusableSelector = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(",");
 
+function isVisible(element: HTMLElement) {
+  for (let current: HTMLElement | null = element; current; current = current.parentElement) {
+    const style = window.getComputedStyle(current);
+    if (style.display === "none" || style.visibility === "hidden") {
+      return false;
+    }
+  }
+  return true;
+}
+
+function focusableElements(container: HTMLElement | null) {
+  return Array.from(container?.querySelectorAll<HTMLElement>(focusableSelector) ?? []).filter(
+    isVisible,
+  );
+}
+
 export function ResponsiveSettingsPanel({
   children,
   open,
@@ -27,14 +43,19 @@ export function ResponsiveSettingsPanel({
   returnFocusRef,
 }: ResponsiveSettingsPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const title = section === "translation" ? "Translation settings" : `${section[0].toUpperCase()}${section.slice(1)} settings`;
+  const title =
+    section === "translation"
+      ? "Translation settings"
+      : section === "local_llm"
+        ? "Local LLM settings"
+        : `${section[0].toUpperCase()}${section.slice(1)} settings`;
   const modal = open && !window.matchMedia("(min-width: 1280px)").matches;
 
   useEffect(() => {
     if (!open || window.matchMedia("(min-width: 1280px)").matches) {
       return;
     }
-    const first = panelRef.current?.querySelector<HTMLElement>(focusableSelector);
+    const first = focusableElements(panelRef.current)[0];
     first?.focus();
   }, [open, section]);
 
@@ -48,9 +69,7 @@ export function ResponsiveSettingsPanel({
     if (event.key !== "Tab" || window.matchMedia("(min-width: 1280px)").matches) {
       return;
     }
-    const focusable = Array.from(
-      panelRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? [],
-    );
+    const focusable = focusableElements(panelRef.current);
     if (focusable.length === 0) {
       return;
     }

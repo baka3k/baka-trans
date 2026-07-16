@@ -3,13 +3,14 @@ use crate::error::{AppError, AppResult};
 use crate::models::{
     ApiKeyTestResult, AppStatus, AudioDevices, AudioOutputChannel, ExportRequest,
     ExportedTranscript, LlmProviderProfile, LlmProviderProfileDraft, LlmProviderTestResult,
+    LocalTranslationConfig, LocalTranslationConfigDraft, LocalTranslationTestResult,
     LookHelpConfig, LookHelpStatus, ManualBoundaryRequest, MeetingSummaryConfig,
     MeetingSummaryResult, MeetingSummaryStatus, MeetingSummaryStatusEvent, OverlayConfig,
     OverlayGeometry, OverlayStatus, SessionConfig, TranslationCredentialStatus,
     TranslationProvider,
 };
 use crate::session::AppState;
-use crate::{ai, llm, look_help, overlay, security, summary_agent};
+use crate::{ai, llm, local_translation, look_help, overlay, security, summary_agent};
 use tauri::{AppHandle, Emitter, State};
 
 #[tauri::command]
@@ -23,12 +24,12 @@ pub fn list_audio_devices() -> AppResult<AudioDevices> {
 }
 
 #[tauri::command]
-pub fn start_session(
+pub async fn start_session(
     app: AppHandle,
     state: State<'_, AppState>,
     config: SessionConfig,
 ) -> AppResult<()> {
-    state.start_session(app, config)
+    state.start_session(app, config).await
 }
 
 #[tauri::command]
@@ -37,8 +38,8 @@ pub fn pause_session(app: AppHandle, state: State<'_, AppState>) -> AppResult<()
 }
 
 #[tauri::command]
-pub fn resume_session(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
-    state.resume_session(app)
+pub async fn resume_session(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
+    state.resume_session(app).await
 }
 
 #[tauri::command]
@@ -95,6 +96,12 @@ pub async fn test_translation_api_key(
         TranslationProvider::GoogleLiveTranslate => {
             ai::test_google_live_translation_connection(&info.key).await
         }
+        TranslationProvider::LocalWhisperOllama => {
+            return Err(AppError::new(
+                "local_provider_has_no_api_key",
+                "Use Test local pipeline in Local LLM settings.",
+            ));
+        }
     };
     if let Err(error) = test_result {
         return Err(AppError::new(
@@ -114,6 +121,25 @@ pub async fn test_translation_api_key(
         fingerprint: info.fingerprint,
         message: format!("{} accepted this key.", provider.label()),
     })
+}
+
+#[tauri::command]
+pub fn get_local_translation_config() -> AppResult<LocalTranslationConfig> {
+    local_translation::get_config()
+}
+
+#[tauri::command]
+pub fn save_local_translation_config(
+    draft: LocalTranslationConfigDraft,
+) -> AppResult<LocalTranslationConfig> {
+    local_translation::save_config(draft)
+}
+
+#[tauri::command]
+pub async fn test_local_translation_config(
+    draft: LocalTranslationConfigDraft,
+) -> AppResult<LocalTranslationTestResult> {
+    local_translation::test_config(draft).await
 }
 
 #[tauri::command]
