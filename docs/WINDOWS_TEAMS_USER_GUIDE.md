@@ -21,9 +21,9 @@ The normal Windows workflow does not require BlackHole, VB-CABLE, or VoiceMeeter
 
 Windows captures the selected output with WASAPI loopback. The original Teams audio continues to play normally, so Windows does not show the extra original-audio monitor controls used by the macOS BlackHole workflow.
 
-## Local Text-only Translation
+## Local Spoken Translation
 
-For Japanese-to-Vietnamese meetings, select **Local** instead of Google/OpenAI. Configure and test Ollama plus a multilingual Whisper GGML model under **Local LLM** first. Local mode requires only the **Meeting source**: translated text appears on the same conversation card, and **Translated audio**, its channel, and the test tone are intentionally disabled. See the [local setup and troubleshooting section](../README.md#local-japanese-to-vietnamese-translation).
+For Japanese-to-Vietnamese meetings, choose **Local Whisper** at launch. Configure and test Whisper, Gemma in Ollama, and an installed Vietnamese Windows voice under **Local LLM**. Select both **Meeting source** and **Translated audio**, choose the target channel, then use **Test selected voice**. The translated text appears on the conversation card before Windows TTS plays it through the selected output. See the [local setup and troubleshooting section](../README.md#local-japanese-to-vietnamese-translation).
 
 ## Bluetooth and Device Changes
 
@@ -40,7 +40,8 @@ For Japanese-to-Vietnamese meetings, select **Local** instead of Google/OpenAI. 
 | Translated voice feeds back | Use headphones and do not select a speaker that a live microphone can hear. |
 | Bluetooth audio becomes low quality | Select the stereo endpoint or use a wired/USB headset. |
 | Loopback fails on a specific driver | Update the audio driver. As a last resort, install VB-CABLE and use its input/output pair. |
-| Local Start is disabled | Save and test Local LLM settings again after every runtime-critical edit, then select a meeting source. |
+| Local Start is disabled | Save and test Local LLM settings after every runtime-critical edit, then select both meeting source and translated output. |
+| No Vietnamese voice appears | Install a Vietnamese voice in Windows speech settings, reopen Baka Trans, and reselect Local Whisper. |
 | Local translation is slow | Use a smaller/quantized multilingual Whisper model, a faster Ollama model, or reduce the maximum utterance duration. |
 
 VB-CABLE is a fallback, not part of the normal setup. VoiceMeeter is intentionally not included because its mixer and routing controls are unnecessary for the standard Baka Trans workflow.

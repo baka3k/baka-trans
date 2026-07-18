@@ -1,5 +1,7 @@
+import { useState } from "react";
 import MainApp from "./app/MainApp";
 import { LookHelpOverlayWindow } from "./app/LookHelpOverlayWindow";
+import { ModeChooser, type ApplicationMode } from "./app/ModeChooser";
 import { TransparentOverlayWindow } from "./app/TransparentOverlayWindow";
 
 export type ApplicationRoute = "main" | "transparent" | "look-help";
@@ -17,6 +19,7 @@ export function resolveApplicationRoute(search: string): ApplicationRoute {
 
 export default function App() {
   const route = resolveApplicationRoute(window.location.search);
+  const [mode, setMode] = useState<ApplicationMode | null>(null);
 
   if (route === "transparent") {
     return <TransparentOverlayWindow />;
@@ -24,5 +27,14 @@ export default function App() {
   if (route === "look-help") {
     return <LookHelpOverlayWindow />;
   }
-  return <MainApp />;
+  if (mode === null) {
+    return <ModeChooser onSelect={setMode} />;
+  }
+  return (
+    <MainApp
+      experience={mode}
+      key={mode}
+      onRequestModeChange={() => setMode(null)}
+    />
+  );
 }

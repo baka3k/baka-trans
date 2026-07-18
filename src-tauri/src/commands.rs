@@ -3,19 +3,27 @@ use crate::error::{AppError, AppResult};
 use crate::models::{
     ApiKeyTestResult, AppStatus, AudioDevices, AudioOutputChannel, ExportRequest,
     ExportedTranscript, LlmProviderProfile, LlmProviderProfileDraft, LlmProviderTestResult,
-    LocalTranslationConfig, LocalTranslationConfigDraft, LocalTranslationTestResult,
+    LocalTranslationConfig, LocalTranslationConfigDraft, LocalTranslationTestResult, LocalVoice,
     LookHelpConfig, LookHelpStatus, ManualBoundaryRequest, MeetingSummaryConfig,
     MeetingSummaryResult, MeetingSummaryStatus, MeetingSummaryStatusEvent, OverlayConfig,
-    OverlayGeometry, OverlayStatus, SessionConfig, TranslationCredentialStatus,
+    OverlayGeometry, OverlayStatus, SessionConfig, TranscriptItem, TranslationCredentialStatus,
     TranslationProvider,
 };
 use crate::session::AppState;
-use crate::{ai, llm, local_translation, look_help, overlay, security, summary_agent};
+use crate::{ai, llm, local_translation, look_help, overlay, security, summary_agent, tts};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 
 #[tauri::command]
 pub fn get_app_status(state: State<'_, AppState>) -> AppResult<AppStatus> {
     state.app_status()
+}
+
+#[tauri::command]
+pub fn get_transcript_snapshot(state: State<'_, AppState>) -> AppResult<Vec<TranscriptItem>> {
+    state.transcript_snapshot()
 }
 
 #[tauri::command]
@@ -140,6 +148,61 @@ pub async fn test_local_translation_config(
     draft: LocalTranslationConfigDraft,
 ) -> AppResult<LocalTranslationTestResult> {
     local_translation::test_config(draft).await
+}
+
+#[tauri::command]
+pub fn list_local_tts_voices() -> AppResult<Vec<LocalVoice>> {
+    tts::list_voices()
+}
+
+#[tauri::command]
+pub async fn preview_local_tts(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    draft: LocalTranslationConfigDraft,
+    output_device_id: String,
+    output_channel: AudioOutputChannel,
+) -> AppResult<()> {
+    if state.app_status()?.session_status != crate::models::SessionStatus::Idle {
+        return Err(AppError::new(
+            "session_busy",
+            "Stop translation before testing the local voice.",
+        ));
+    }
+    if output_device_id.trim().is_empty() {
+        return Err(AppError::new(
+            "local_tts_output_missing",
+            "Choose a translated audio output before testing the voice.",
+        ));
+    }
+    let config = local_translation::normalize_and_validate(draft, true)?;
+    let audio = tts::synthesize(
+        "Xin chào. Đây là giọng dịch cục bộ.",
+        &config,
+        Arc::new(AtomicBool::new(false)),
+    )
+    .await?;
+    let playback = audio::start_playback_with_channel_at_sample_rate(
+        app,
+        &output_device_id,
+        output_channel,
+        audio.sample_rate_hz,
+    )?;
+    playback
+        .sender()
+        .send(audio.pcm16_mono.clone())
+        .map_err(|_| {
+            AppError::new(
+                "local_tts_playback_error",
+                "The selected output stopped before the voice preview could play.",
+            )
+        })?;
+    let duration_ms = (audio.pcm16_mono.len() as u64 * 1_000)
+        .saturating_div(u64::from(audio.sample_rate_hz))
+        .saturating_add(250);
+    tokio::time::sleep(Duration::from_millis(duration_ms)).await;
+    drop(playback);
+    Ok(())
 }
 
 #[tauri::command]

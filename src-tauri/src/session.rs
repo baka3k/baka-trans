@@ -279,6 +279,18 @@ impl AppState {
         }
         self.set_status(&app, SessionStatus::Stopping)?;
         *self.capture.lock().map_err(lock_error)? = None;
+        let local_session = self
+            .last_config
+            .lock()
+            .map_err(lock_error)?
+            .as_ref()
+            .is_some_and(|config| {
+                config.translation_provider == TranslationProvider::LocalWhisperOllama
+            });
+        if local_session {
+            *self.playback.lock().map_err(lock_error)? = None;
+            *self.monitor_playback.lock().map_err(lock_error)? = None;
+        }
         let control = self.realtime_control.lock().map_err(lock_error)?.clone();
         if let Some(control) = control {
             let _ = control.try_send(ai::RealtimeControl::Stop);
@@ -410,16 +422,12 @@ impl AppState {
             })
             .transpose()?;
         let capture_sample_rate = capture_sample_rate(provider);
-        let playback = if provider == TranslationProvider::LocalWhisperOllama {
-            None
-        } else {
-            Some(audio::start_playback_with_channel_at_sample_rate(
-                app.clone(),
-                &config.output_device_id,
-                config.translation_output_channel,
-                translated_output_sample_rate(provider),
-            )?)
-        };
+        let playback = Some(audio::start_playback_with_channel_at_sample_rate(
+            app.clone(),
+            &config.output_device_id,
+            config.translation_output_channel,
+            translated_output_sample_rate(provider),
+        )?);
         let playback_tx = playback.as_ref().map(PlaybackRuntime::sender);
         let monitor_playback = if should_start_original_monitor(&config) {
             Some(audio::start_playback_with_channel_at_sample_rate(
@@ -483,6 +491,7 @@ impl AppState {
                         ai::LocalTranslationRuntime::new(
                             local_config.expect("local config was validated"),
                             local_context.expect("local Whisper context was loaded"),
+                            playback_tx.expect("local provider playback was created"),
                         ),
                         audio_rx,
                         control_rx,
@@ -631,9 +640,7 @@ fn validate_routing_config(config: &SessionConfig) -> AppResult<()> {
         ));
     }
 
-    if config.translation_provider != TranslationProvider::LocalWhisperOllama
-        && config.output_device_id.trim().is_empty()
-    {
+    if config.output_device_id.trim().is_empty() {
         return Err(AppError::new(
             "missing_output_device",
             "Choose a translated audio output before starting.",
@@ -651,9 +658,6 @@ fn validate_routing_config(config: &SessionConfig) -> AppResult<()> {
 }
 
 fn should_start_original_monitor(config: &SessionConfig) -> bool {
-    if config.translation_provider == TranslationProvider::LocalWhisperOllama {
-        return config.monitor_original_audio;
-    }
     config.monitor_original_audio
         && !has_output_monitor_conflict(
             &config.output_device_id,
@@ -718,7 +722,7 @@ fn translated_output_sample_rate(provider: TranslationProvider) -> u32 {
     match provider {
         TranslationProvider::OpenaiRealtime => audio::OPENAI_REALTIME_SAMPLE_RATE,
         TranslationProvider::GoogleLiveTranslate => audio::GOOGLE_LIVE_OUTPUT_SAMPLE_RATE,
-        TranslationProvider::LocalWhisperOllama => 16_000,
+        TranslationProvider::LocalWhisperOllama => crate::tts::LOCAL_TTS_SAMPLE_RATE,
     }
 }
 

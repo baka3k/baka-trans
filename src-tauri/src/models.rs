@@ -602,7 +602,7 @@ pub struct ApiKeyTestResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(default, rename_all = "camelCase")]
 pub struct LocalTranslationConfig {
     pub schema_version: u32,
     pub base_url: String,
@@ -621,10 +621,14 @@ pub struct LocalTranslationConfig {
     pub maximum_utterance_ms: u64,
     pub pre_roll_ms: u64,
     pub speech_threshold: f32,
+    pub voice_id: String,
+    pub tts_rate: f32,
+    pub tts_volume: f32,
+    pub tts_output_sample_rate_hz: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(default, rename_all = "camelCase")]
 pub struct LocalTranslationConfigDraft {
     pub base_url: String,
     pub model: String,
@@ -642,6 +646,10 @@ pub struct LocalTranslationConfigDraft {
     pub maximum_utterance_ms: u64,
     pub pre_roll_ms: u64,
     pub speech_threshold: f32,
+    pub voice_id: String,
+    pub tts_rate: f32,
+    pub tts_volume: f32,
+    pub tts_output_sample_rate_hz: u32,
 }
 
 impl From<LocalTranslationConfig> for LocalTranslationConfigDraft {
@@ -663,6 +671,10 @@ impl From<LocalTranslationConfig> for LocalTranslationConfigDraft {
             maximum_utterance_ms: value.maximum_utterance_ms,
             pre_roll_ms: value.pre_roll_ms,
             speech_threshold: value.speech_threshold,
+            voice_id: value.voice_id,
+            tts_rate: value.tts_rate,
+            tts_volume: value.tts_volume,
+            tts_output_sample_rate_hz: value.tts_output_sample_rate_hz,
         }
     }
 }
@@ -678,6 +690,15 @@ pub struct LocalTranslationTestResult {
     pub whisper_model_loaded: bool,
     pub ollama_reachable: bool,
     pub ollama_model_accepted: bool,
+    pub tts_voice_available: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalVoice {
+    pub id: String,
+    pub name: String,
+    pub language: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

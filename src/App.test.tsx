@@ -1,8 +1,15 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { axe } from "vitest-axe";
 import App, { resolveApplicationRoute } from "./App";
+import { defaultLocalTranslationConfig } from "./components/settings/LocalLlmSettings";
 import { ApplicationThemeProvider } from "./ui/ThemeProvider";
+
+afterEach(() => {
+  clearMocks();
+  delete (globalThis as typeof globalThis & { isTauri?: boolean }).isTauri;
+});
 
 describe("application routes", () => {
   it.each([
@@ -15,7 +22,7 @@ describe("application routes", () => {
   });
 
   it.each([
-    ["/", "heading", "Baka Trans"],
+    ["/", "heading", "Choose how to translate"],
     ["/?overlay=transparent", "main", "Look Through"],
     ["/?overlay=look-help", "main", "Look & Help"],
   ])("renders %s without the native runtime", async (path, role, name) => {
@@ -38,6 +45,7 @@ describe("application routes", () => {
       </ApplicationThemeProvider>,
     );
 
+    await user.click(screen.getByRole("button", { name: /Cloud API/ }));
     await user.click(screen.getByRole("tab", { name: "Translation" }));
     const keyInput = screen.getByPlaceholderText("Google Live Translation API key");
     await user.type(keyInput, "unsaved-key");
@@ -46,6 +54,81 @@ describe("application routes", () => {
 
     expect(screen.getByDisplayValue("unsaved-key")).toBeInTheDocument();
     unmount();
+  });
+
+  it("opens a focused local workspace and returns to the chooser", async () => {
+    const user = userEvent.setup();
+    window.history.replaceState({}, "", "/");
+    render(
+      <ApplicationThemeProvider>
+        <App />
+      </ApplicationThemeProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Local Whisper/ }));
+
+    expect(screen.getByText("Local setup needed")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Local LLM" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Translation" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Source language")).toHaveValue("ja");
+
+    await user.click(screen.getByRole("button", { name: "Change translation mode" }));
+    expect(screen.getByRole("heading", { name: "Choose how to translate" })).toBeInTheDocument();
+  });
+
+  it("rehydrates the backend transcript after changing workspaces", async () => {
+    const user = userEvent.setup();
+    Object.assign(globalThis, { isTauri: true });
+    mockIPC(
+      (command) => {
+        switch (command) {
+          case "list_audio_devices":
+            return { inputs: [], outputs: [] };
+          case "get_app_status":
+            return { sessionStatus: "idle", hasApiKey: false, transcriptCount: 1 };
+          case "get_transcript_snapshot":
+            return [
+              {
+                id: "persisted-utterance",
+                timestampMs: 1,
+                sourceText: "継続する会話",
+                translatedText: "Cuộc trò chuyện tiếp tục",
+                status: "final",
+                revision: 1,
+                updateMode: "snapshot",
+              },
+            ];
+          case "list_llm_profiles":
+            return [];
+          case "get_local_translation_config":
+            return { schemaVersion: 2, ...defaultLocalTranslationConfig };
+          case "list_local_tts_voices":
+            return [];
+          case "translation_credential_status":
+            return {
+              provider: "google_live_translate",
+              hasApiKey: false,
+            };
+          default:
+            return undefined;
+        }
+      },
+      { shouldMockEvents: true },
+    );
+
+    const view = render(
+      <ApplicationThemeProvider>
+        <App />
+      </ApplicationThemeProvider>,
+    );
+    await user.click(screen.getByRole("button", { name: /Cloud API/ }));
+    expect(await screen.findByText("Cuộc trò chuyện tiếp tục")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Change translation mode" }));
+    await user.click(screen.getByRole("button", { name: /Local Whisper/ }));
+    expect(await screen.findByText("Cuộc trò chuyện tiếp tục")).toBeInTheDocument();
+
+    view.unmount();
   });
 
   it.each([

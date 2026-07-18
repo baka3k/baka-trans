@@ -4,7 +4,7 @@ import { axe } from "vitest-axe";
 import { AppNavigation } from "./AppNavigation";
 
 describe("AppNavigation", () => {
-  it("changes setup destinations without invoking unrelated work", async () => {
+  it("shows only cloud setup destinations", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
     const { container } = render(
@@ -15,8 +15,21 @@ describe("AppNavigation", () => {
 
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect).toHaveBeenCalledWith("translation");
-    await user.click(screen.getByRole("tab", { name: "Local LLM" }));
-    expect(onSelect).toHaveBeenLastCalledWith("local_llm");
+    expect(screen.queryByRole("tab", { name: "Local LLM" })).not.toBeInTheDocument();
     expect((await axe(container)).violations).toEqual([]);
+  });
+
+  it("shows only local setup destinations", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    render(
+      <AppNavigation activeSection="live" experience="local" onSelect={onSelect} />,
+    );
+
+    await user.click(screen.getByRole("tab", { name: "Local LLM" }));
+
+    expect(onSelect).toHaveBeenCalledWith("local_llm");
+    expect(screen.queryByRole("tab", { name: "Translation" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Summary" })).not.toBeInTheDocument();
   });
 });

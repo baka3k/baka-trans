@@ -1,11 +1,12 @@
 import type {
   LocalTranslationConfigDraft,
   LocalTranslationTestResult,
+  LocalVoice,
 } from "../../types";
 
 export const defaultLocalTranslationConfig: LocalTranslationConfigDraft = {
   baseUrl: "http://localhost:11434",
-  model: "",
+  model: "gemma3:4b",
   timeoutSeconds: 30,
   temperature: 0,
   maxOutputTokens: 256,
@@ -20,6 +21,10 @@ export const defaultLocalTranslationConfig: LocalTranslationConfigDraft = {
   maximumUtteranceMs: 15000,
   preRollMs: 250,
   speechThreshold: 0.015,
+  voiceId: "",
+  ttsRate: 1,
+  ttsVolume: 1,
+  ttsOutputSampleRateHz: 24000,
 };
 
 interface LocalLlmSettingsProps {
@@ -28,9 +33,13 @@ interface LocalLlmSettingsProps {
   saving: boolean;
   testing: boolean;
   testResult: LocalTranslationTestResult | null;
+  voices: LocalVoice[];
+  previewing: boolean;
+  previewDisabled?: boolean;
   onChange: (draft: LocalTranslationConfigDraft) => void;
   onSave: () => void;
   onTest: () => void;
+  onPreview: () => void;
 }
 
 export function validateLocalTranslationDraft(draft: LocalTranslationConfigDraft): string[] {
@@ -41,11 +50,23 @@ export function validateLocalTranslationDraft(draft: LocalTranslationConfigDraft
   if (!draft.model.trim()) {
     errors.push("Choose an installed Ollama model.");
   }
+  if (!draft.voiceId.trim()) {
+    errors.push("Choose an installed local voice.");
+  }
   if (!draft.modelPath.trim()) {
     errors.push("Choose a Whisper GGML model file.");
   }
   if (draft.sampleRateHz !== 16000) {
     errors.push("Whisper input must remain fixed at 16000 Hz.");
+  }
+  if (draft.ttsOutputSampleRateHz !== 24000) {
+    errors.push("Local voice output must remain fixed at 24000 Hz.");
+  }
+  if (draft.ttsRate < 0.5 || draft.ttsRate > 2) {
+    errors.push("Speaking rate must be between 0.5 and 2.0.");
+  }
+  if (draft.ttsVolume < 0 || draft.ttsVolume > 1) {
+    errors.push("Voice volume must be between 0 and 1.");
   }
   if (draft.minimumSpeechMs < 100 || draft.minimumSpeechMs > 3000) {
     errors.push("Minimum speech must be between 100 and 3000 ms.");
@@ -68,9 +89,13 @@ export function LocalLlmSettings({
   saving,
   testing,
   testResult,
+  voices,
+  previewing,
+  previewDisabled = false,
   onChange,
   onSave,
   onTest,
+  onPreview,
 }: LocalLlmSettingsProps) {
   const errors = validateLocalTranslationDraft(draft);
   const update = (patch: Partial<LocalTranslationConfigDraft>) =>
@@ -85,7 +110,7 @@ export function LocalLlmSettings({
       <div className="panel-header">
         <div>
           <h2>Local LLM translation</h2>
-          <p>Japanese speech → Whisper → Ollama → Vietnamese text</p>
+          <p>Japanese speech → Whisper → Gemma → Vietnamese voice</p>
         </div>
         <span className={`panel-state ${testResult?.ok && !dirty ? "ok" : ""}`}>
           {testResult?.ok && !dirty ? "Ready" : dirty ? "Unsaved" : "Test required"}
@@ -104,10 +129,10 @@ export function LocalLlmSettings({
           <small>The native client always sends POST /api/chat, never /v1/chat/completions.</small>
         </label>
         <label className="field">
-          <span>Installed model</span>
+          <span>Installed Gemma model</span>
           <input
             value={draft.model}
-            placeholder="qwen2.5:7b"
+            placeholder="gemma3:4b"
             onChange={(event) => update({ model: event.currentTarget.value })}
           />
         </label>
@@ -143,6 +168,47 @@ export function LocalLlmSettings({
               placeholder="10m"
               onChange={(event) => update({ keepAlive: event.currentTarget.value || undefined })}
             />
+          </label>
+        </div>
+      </fieldset>
+
+      <fieldset className="local-config-group">
+        <legend>Vietnamese voice</legend>
+        <label className="field">
+          <span>Installed system voice</span>
+          <select
+            value={draft.voiceId}
+            onChange={(event) => update({ voiceId: event.currentTarget.value })}
+          >
+            <option value="">Choose a voice</option>
+            {voices.map((voice) => (
+              <option value={voice.id} key={voice.id}>
+                {voice.name} · {voice.language}
+              </option>
+            ))}
+          </select>
+          <small>Vietnamese voices are shown first. Install one in system speech settings if empty.</small>
+        </label>
+        <div className="field-grid two">
+          <NumberField
+            label="Speaking rate"
+            min={0.5}
+            max={2}
+            step={0.1}
+            value={draft.ttsRate}
+            onChange={(value) => update({ ttsRate: number(value, draft.ttsRate) })}
+          />
+          <NumberField
+            label="Volume"
+            min={0}
+            max={1}
+            step={0.05}
+            value={draft.ttsVolume}
+            onChange={(value) => update({ ttsVolume: number(value, draft.ttsVolume) })}
+          />
+          <label className="field">
+            <span>Playback format</span>
+            <input value="PCM16 mono · 24000 Hz" readOnly aria-readonly="true" />
           </label>
         </div>
       </fieldset>
@@ -242,6 +308,10 @@ export function LocalLlmSettings({
           label="Ollama reachable and model accepted"
           ok={Boolean(testResult?.ollamaReachable && testResult.ollamaModelAccepted && !dirty)}
         />
+        <Health
+          label="Selected system voice is available"
+          ok={Boolean(testResult?.ttsVoiceAvailable && !dirty)}
+        />
       </div>
 
       {errors[0] ? <p className="local-config-error" role="alert">{errors[0]}</p> : null}
@@ -257,9 +327,17 @@ export function LocalLlmSettings({
         >
           {testing ? "Testing local pipeline" : "Test local pipeline"}
         </button>
+        <button
+          onClick={onPreview}
+          disabled={
+            saving || testing || previewing || previewDisabled || dirty || errors.length > 0
+          }
+        >
+          {previewing ? "Playing voice" : "Test selected voice"}
+        </button>
       </div>
       <p className="local-text-only-note">
-        Local mode outputs translated text only. Existing cloud providers keep translated-audio playback.
+        Voice audio uses the translated output device and left/right channel selected in Audio.
       </p>
     </div>
   );

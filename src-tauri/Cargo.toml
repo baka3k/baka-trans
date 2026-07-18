@@ -41,8 +41,11 @@ objc2-vision = { version = "0.3.2", features = ["VNObservation", "VNRecognizeTex
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3", features = ["windows-native"] }
 windows = { version = "0.61", features = [
+  "Foundation",
   "Graphics_Imaging",
+  "Media_Core",
   "Media_Ocr",
+  "Media_SpeechSynthesis",
   "Storage_Streams",
   "Win32_Foundation",
   "Win32_Graphics_Gdi",

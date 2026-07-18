@@ -10,6 +10,7 @@ import type {
   LocalTranslationConfig,
   LocalTranslationConfigDraft,
   LocalTranslationTestResult,
+  LocalVoice,
   LlmProviderProfile,
   LlmProviderProfileDraft,
   LlmProviderTestResult,
@@ -22,10 +23,15 @@ import type {
   SessionConfig,
   TranslationCredentialStatus,
   TranslationProvider,
+  TranscriptItem,
 } from "./types";
 
 export function getAppStatus() {
   return invoke<AppStatus>("get_app_status");
+}
+
+export function getTranscriptSnapshot() {
+  return invoke<TranscriptItem[]>("get_transcript_snapshot");
 }
 
 export function listAudioDevices() {
@@ -95,6 +101,18 @@ export function saveLocalTranslationConfig(draft: LocalTranslationConfigDraft) {
 
 export function testLocalTranslationConfig(draft: LocalTranslationConfigDraft) {
   return invoke<LocalTranslationTestResult>("test_local_translation_config", { draft });
+}
+
+export function listLocalTtsVoices() {
+  return invoke<LocalVoice[]>("list_local_tts_voices");
+}
+
+export function previewLocalTts(
+  draft: LocalTranslationConfigDraft,
+  outputDeviceId: string,
+  outputChannel: AudioOutputChannel,
+) {
+  return invoke<void>("preview_local_tts", { draft, outputDeviceId, outputChannel });
 }
 
 export function listLlmProfiles() {

@@ -12,7 +12,7 @@ import type { LocalTranslationConfigDraft } from "../../types";
 describe("LocalLlmSettings", () => {
   it("requires Ollama and Whisper models before save or test", () => {
     expect(validateLocalTranslationDraft(defaultLocalTranslationConfig)).toEqual([
-      "Choose an installed Ollama model.",
+      "Choose an installed local voice.",
       "Choose a Whisper GGML model file.",
     ]);
   });
@@ -27,6 +27,7 @@ describe("LocalLlmSettings", () => {
         ...defaultLocalTranslationConfig,
         model: "qwen2.5:7b",
         modelPath: "C:\\models\\ggml-small.bin",
+        voiceId: "vi-voice",
       });
       const [dirty, setDirty] = useState(false);
       return (
@@ -47,6 +48,7 @@ describe("LocalLlmSettings", () => {
                   whisperModelLoaded: true,
                   ollamaReachable: true,
                   ollamaModelAccepted: true,
+                  ttsVoiceAvailable: true,
                 }
           }
           onChange={(next) => {
@@ -55,13 +57,16 @@ describe("LocalLlmSettings", () => {
           }}
           onSave={onSave}
           onTest={onTest}
+          voices={[{ id: "vi-voice", name: "Vietnamese", language: "vi-VN" }]}
+          previewing={false}
+          onPreview={() => undefined}
         />
       );
     }
 
     const { container } = render(<Harness />);
     expect(screen.getByText("Ready", { selector: ".panel-state" })).toBeInTheDocument();
-    await user.type(screen.getByLabelText("Installed model"), "-fast");
+    await user.type(screen.getByLabelText("Installed Gemma model"), "-fast");
     expect(screen.getByText("Unsaved")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Test local pipeline" })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Save local settings" }));
@@ -76,6 +81,7 @@ describe("LocalLlmSettings", () => {
           ...defaultLocalTranslationConfig,
           model: "qwen2.5:7b",
           modelPath: "C:\\models\\ggml-small.bin",
+          voiceId: "vi-voice",
         }}
         dirty={false}
         saving={false}
@@ -89,10 +95,14 @@ describe("LocalLlmSettings", () => {
           whisperModelLoaded: true,
           ollamaReachable: false,
           ollamaModelAccepted: false,
+          ttsVoiceAvailable: true,
         }}
         onChange={() => undefined}
         onSave={() => undefined}
         onTest={() => undefined}
+        voices={[{ id: "vi-voice", name: "Vietnamese", language: "vi-VN" }]}
+        previewing={false}
+        onPreview={() => undefined}
       />,
     );
 

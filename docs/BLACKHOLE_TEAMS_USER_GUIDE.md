@@ -115,7 +115,7 @@ At this point, it is normal to stop hearing Teams audio directly: Teams is sendi
 
 ### 7.1 Translation provider and API key
 
-1. Select **Google** or **OpenAI** in Baka Trans. Google Live Translation is the default provider.
+1. Choose **Cloud API** at launch, then select **Google** or **OpenAI**. Google Live Translation remains the default cloud provider.
 2. Obtain a key from the provider:
    - [Google Gemini API key instructions](https://ai.google.dev/gemini-api/docs/api-key)
    - [OpenAI API keys](https://platform.openai.com/api-keys)
@@ -124,9 +124,9 @@ At this point, it is normal to stop hearing Teams audio directly: Teams is sendi
 
 Baka Trans stores saved translation credentials through the backend and macOS Keychain. Do not paste API keys into chat, screenshots, logs, or shared documents.
 
-### Local text-only alternative
+### Local spoken alternative
 
-For Japanese-to-Vietnamese meetings, **Local** uses a user-provided multilingual Whisper GGML model and a local Ollama chat model. It does not use a cloud translation key and does not play translated audio. Open **Local LLM**, save the model/server settings, run **Test local pipeline**, then select **Local**. Keep **Meeting source** set to BlackHole; translated output controls are preserved for cloud mode but disabled while Local is selected. See the [local setup guide](../README.md#local-japanese-to-vietnamese-translation).
+For Japanese-to-Vietnamese meetings, choose **Local Whisper** at launch. This mode uses a user-provided multilingual Whisper GGML model, Gemma through local Ollama, and an installed Vietnamese macOS voice. It does not use a cloud translation key. Keep **Meeting source** set to BlackHole, select the translated headphones and channel, then save and test the local pipeline and selected voice under **Local LLM**. Generated speech is routed through Baka Trans rather than played directly to the macOS default output. See the [local setup guide](../README.md#local-japanese-to-vietnamese-translation).
 
 ### 7.2 Languages and session
 

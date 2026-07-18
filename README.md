@@ -26,19 +26,20 @@ npm run build
 
 ## Local Japanese-to-Vietnamese Translation
 
-Local mode is a text-only pipeline:
+The main window asks you to choose **Cloud API** or **Local Whisper** on every launch. Cloud API opens the existing Google/OpenAI workspace unchanged. Local Whisper runs this spoken pipeline:
 
 ```text
-PCM16 mono, 16000 Hz -> local Whisper (Japanese) -> Ollama /api/chat -> Vietnamese text
+PCM16 mono, 16000 Hz -> local Whisper (Japanese) -> Gemma via Ollama /api/chat -> Vietnamese text -> system TTS -> PCM16 mono, 24000 Hz -> selected audio output
 ```
 
-It does not require a Google/OpenAI translation key or a translated-audio output. Google and OpenAI modes keep their existing credential and audio-playback behavior.
+It does not require a Google/OpenAI translation key. The translated voice uses the same output-device and all/left/right routing controls as cloud playback. Google and OpenAI modes keep their existing credential and audio behavior.
 
 1. Install and start [Ollama](https://docs.ollama.com/quickstart).
-2. Pull a chat model with `ollama pull <model>` and keep the model name for Baka Trans. Ollama also documents its [model pull API](https://docs.ollama.com/api/pull).
+2. Pull Gemma with `ollama pull gemma3:4b`, or configure another installed Gemma variant. Ollama also documents its [model pull API](https://docs.ollama.com/api/pull).
 3. Download a multilingual Whisper GGML model (`tiny`, `base`, `small`, or a quantized variant; do not use an English-only `.en` model for Japanese). The [whisper.cpp model guide](https://github.com/ggml-org/whisper.cpp/blob/master/models/README.md) lists supported files and checksums. Model binaries are never committed or bundled by this repository.
-4. Open **Local LLM** in Baka Trans. Set the Ollama server/model and the absolute Whisper model path, save, then select **Test local pipeline**.
-5. Select **Local** under Translation. The language pair is fixed to Japanese (`ja`) -> Vietnamese (`vi`) for this version. Choose a meeting source and start.
+4. Install a Vietnamese system voice in Windows Speech settings or macOS system voice settings.
+5. Choose **Local Whisper**, then open **Local LLM**. Set the Gemma model, absolute Whisper model path, Vietnamese voice, rate, and volume. Save, then select **Test local pipeline**.
+6. Under **Audio**, choose the meeting source, translated output, and channel. Use **Test selected voice** to verify the routed output, then start. The language pair is fixed to Japanese (`ja`) -> Vietnamese (`vi`) for this version.
 
 The native client sends non-streaming requests to `POST /api/chat`; it never routes local translation through `/v1/chat/completions`. Default segmentation is 300 ms minimum speech, 700 ms trailing silence, 15 seconds maximum utterance, 250 ms pre-roll, and a 0.015 RMS speech threshold. Raise the threshold in noisy rooms; increase trailing silence if Japanese phrases are split too aggressively.
 
@@ -64,6 +65,9 @@ Common local errors:
 | `local_ollama_request_error` | Start Ollama and verify the configured origin, normally `http://localhost:11434`. |
 | `local_ollama_provider_error` | Pull the configured model and retry the Local LLM test. |
 | `local_translation_backlog_full` | Use shorter utterances, a smaller/faster model, or more capable hardware. |
+| `local_tts_voice_missing` | Install or reselect a system voice, then save and retest. |
+| `local_tts_backlog_full` | Reduce local-model latency or pause until speech catches up. |
+| `local_tts_playback_error` | Reconnect and reselect the translated output device. |
 
 ## Build Installer
 

@@ -19,7 +19,7 @@ impl Default for LocalTranslationConfig {
         Self {
             schema_version: CONFIG_SCHEMA_VERSION,
             base_url: "http://localhost:11434".to_string(),
-            model: String::new(),
+            model: "gemma3:4b".to_string(),
             timeout_seconds: 30,
             temperature: 0.0,
             max_output_tokens: 256,
@@ -34,6 +34,10 @@ impl Default for LocalTranslationConfig {
             maximum_utterance_ms: 15_000,
             pre_roll_ms: 250,
             speech_threshold: 0.015,
+            voice_id: String::new(),
+            tts_rate: 1.0,
+            tts_volume: 1.0,
+            tts_output_sample_rate_hz: crate::tts::LOCAL_TTS_SAMPLE_RATE,
         }
     }
 }
@@ -137,13 +141,28 @@ pub async fn test_config(
                 fallback_model,
                 fallback_endpoint,
                 error,
-                validate_model_path(draft.model_path.trim()).is_ok(),
-                false,
-                false,
-                false,
+                LocalTestHealth {
+                    whisper_model_readable: validate_model_path(draft.model_path.trim()).is_ok(),
+                    ..LocalTestHealth::default()
+                },
             ));
         }
     };
+    let tts_voice_available = crate::tts::voice_is_available(&config.voice_id)?;
+    if !tts_voice_available {
+        return Ok(failed_test_result(
+            config.model,
+            normalize_ollama_chat_url(&config.base_url)?,
+            AppError::new(
+                "local_tts_voice_missing",
+                "The selected system voice is no longer installed.",
+            ),
+            LocalTestHealth {
+                whisper_model_readable: true,
+                ..LocalTestHealth::default()
+            },
+        ));
+    }
     let model_path = config.model_path.clone();
     let use_gpu = config.use_gpu;
     let whisper_result =
@@ -155,10 +174,11 @@ pub async fn test_config(
             config.model,
             normalize_ollama_chat_url(&config.base_url)?,
             error,
-            true,
-            false,
-            false,
-            false,
+            LocalTestHealth {
+                whisper_model_readable: true,
+                tts_voice_available: true,
+                ..LocalTestHealth::default()
+            },
         ));
     }
 
@@ -172,17 +192,20 @@ pub async fn test_config(
                 config.model,
                 endpoint,
                 error,
-                true,
-                true,
-                reachable,
-                false,
+                LocalTestHealth {
+                    whisper_model_readable: true,
+                    whisper_model_loaded: true,
+                    ollama_reachable: reachable,
+                    tts_voice_available: true,
+                    ..LocalTestHealth::default()
+                },
             ));
         }
     };
     Ok(LocalTranslationTestResult {
         ok: true,
         message: format!(
-            "Whisper loaded and Ollama returned a {} character translation.",
+            "Whisper, Gemma, and the selected voice are ready. Probe translation: {} characters.",
             probe.chars().count()
         ),
         model: config.model,
@@ -191,27 +214,35 @@ pub async fn test_config(
         whisper_model_loaded: true,
         ollama_reachable: true,
         ollama_model_accepted: true,
+        tts_voice_available: true,
     })
+}
+
+#[derive(Default)]
+struct LocalTestHealth {
+    whisper_model_readable: bool,
+    whisper_model_loaded: bool,
+    ollama_reachable: bool,
+    ollama_model_accepted: bool,
+    tts_voice_available: bool,
 }
 
 fn failed_test_result(
     model: String,
     endpoint: String,
     error: AppError,
-    whisper_model_readable: bool,
-    whisper_model_loaded: bool,
-    ollama_reachable: bool,
-    ollama_model_accepted: bool,
+    health: LocalTestHealth,
 ) -> LocalTranslationTestResult {
     LocalTranslationTestResult {
         ok: false,
         message: error.message,
         model,
         endpoint,
-        whisper_model_readable,
-        whisper_model_loaded,
-        ollama_reachable,
-        ollama_model_accepted,
+        whisper_model_readable: health.whisper_model_readable,
+        whisper_model_loaded: health.whisper_model_loaded,
+        ollama_reachable: health.ollama_reachable,
+        ollama_model_accepted: health.ollama_model_accepted,
+        tts_voice_available: health.tts_voice_available,
     }
 }
 
@@ -307,6 +338,14 @@ pub fn normalize_and_validate(
         maximum_utterance_ms: draft.maximum_utterance_ms,
         pre_roll_ms: draft.pre_roll_ms,
         speech_threshold: draft.speech_threshold,
+        voice_id: require_non_empty(
+            &draft.voice_id,
+            "local_tts_voice_missing",
+            "Choose an installed local voice.",
+        )?,
+        tts_rate: draft.tts_rate.clamp(0.5, 2.0),
+        tts_volume: draft.tts_volume.clamp(0.0, 1.0),
+        tts_output_sample_rate_hz: crate::tts::LOCAL_TTS_SAMPLE_RATE,
     })
 }
 
@@ -569,6 +608,32 @@ mod tests {
         assert_eq!(config.language, "ja");
         assert_eq!(config.sample_rate_hz, 16_000);
         assert_eq!(config.temperature, 0.0);
+        assert_eq!(config.model, "gemma3:4b");
+        assert_eq!(config.tts_rate, 1.0);
+        assert_eq!(config.tts_volume, 1.0);
+        assert_eq!(config.tts_output_sample_rate_hz, 24_000);
+    }
+
+    #[test]
+    fn old_config_json_migrates_tts_defaults_without_losing_existing_values() {
+        let mut value = serde_json::to_value(LocalTranslationConfig::default()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.insert(
+            "model".to_string(),
+            Value::String("existing-gemma".to_string()),
+        );
+        object.remove("voiceId");
+        object.remove("ttsRate");
+        object.remove("ttsVolume");
+        object.remove("ttsOutputSampleRateHz");
+
+        let migrated: LocalTranslationConfig = serde_json::from_value(value).unwrap();
+
+        assert_eq!(migrated.model, "existing-gemma");
+        assert!(migrated.voice_id.is_empty());
+        assert_eq!(migrated.tts_rate, 1.0);
+        assert_eq!(migrated.tts_volume, 1.0);
+        assert_eq!(migrated.tts_output_sample_rate_hz, 24_000);
     }
 
     #[test]
@@ -642,8 +707,14 @@ mod tests {
 
     #[test]
     fn rejects_missing_models_and_invalid_audio_contracts() {
-        let missing =
-            normalize_and_validate(LocalTranslationConfigDraft::default(), true).unwrap_err();
+        let missing = normalize_and_validate(
+            LocalTranslationConfigDraft {
+                model: String::new(),
+                ..LocalTranslationConfigDraft::default()
+            },
+            true,
+        )
+        .unwrap_err();
         assert_eq!(missing.code, "local_ollama_model_missing");
 
         let mut draft = LocalTranslationConfigDraft {

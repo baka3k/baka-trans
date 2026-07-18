@@ -8,6 +8,8 @@ Coordinates with: `plans/realtime-meeting-translation-macos/phase-16-conversatio
 Coordinates with: `plans/260716-2033-local-llm-audio-translation`
 Updates: `plans/realtime-meeting-translation-macos/plan.md`
 
+2026-07-18 coordination update: `plans/260716-2033-local-llm-audio-translation` owns the new main-route mode chooser and dedicated Local Whisper workspace. This plan continues to own the Fluent 2 shell, tokens, responsive behavior, focus, and accessibility conventions that those surfaces must follow; the existing cloud workspace remains preserve-first.
+
 ## Objective
 
 Modernize the Baka Trans desktop interface into a clean, professional, accessible Fluent 2 product experience while preserving every existing workflow and business-logic contract. The work covers the main session window, settings and summary configuration, live translation workspace, transparent OCR translation overlay, and Look & Help overlay.

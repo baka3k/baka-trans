@@ -12,6 +12,7 @@ export type SettingsSection = "live" | "audio" | "translation" | "local_llm" | "
 
 interface AppNavigationProps {
   activeSection: SettingsSection;
+  experience?: "cloud" | "local";
   onSelect: (section: SettingsSection) => void;
 }
 
@@ -23,7 +24,7 @@ const destinations = [
   { value: "summary", label: "Summary", icon: <BotRegular fontSize={20} /> },
 ] satisfies Array<{ value: SettingsSection; label: string; icon: React.ReactElement }>;
 
-export function AppNavigation({ activeSection, onSelect }: AppNavigationProps) {
+export function AppNavigation({ activeSection, experience = "cloud", onSelect }: AppNavigationProps) {
   const [compact, setCompact] = useState(() => window.matchMedia("(max-width: 1040px)").matches);
 
   useEffect(() => {
@@ -37,6 +38,12 @@ export function AppNavigation({ activeSection, onSelect }: AppNavigationProps) {
     onSelect(data.value as SettingsSection);
   };
 
+  const visibleDestinations = destinations.filter((destination) =>
+    experience === "local"
+      ? ["live", "audio", "local_llm"].includes(destination.value)
+      : destination.value !== "local_llm",
+  );
+
   return (
     <nav className="app-navigation" aria-label="Workspace">
       <TabList
@@ -45,7 +52,7 @@ export function AppNavigation({ activeSection, onSelect }: AppNavigationProps) {
         selectedValue={activeSection}
         onTabSelect={handleSelect}
       >
-        {destinations.map((destination) => (
+        {visibleDestinations.map((destination) => (
           <Tab
             icon={destination.icon}
             key={destination.value}

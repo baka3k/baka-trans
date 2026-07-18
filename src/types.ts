@@ -34,6 +34,12 @@ export type TranslationActivityState =
   | "translating"
   | "ready"
   | "needs_attention";
+export type LocalPipelineStage =
+  | "listening"
+  | "transcribing"
+  | "translating"
+  | "synthesizing"
+  | "speaking";
 export type LlmProviderKind = "openai" | "openai_compatible" | "ollama" | "adk_litellm";
 export type MeetingSummaryTrigger = "manual" | "end_of_session";
 export type MeetingSummaryPromptPreset =
@@ -199,6 +205,10 @@ export interface LocalTranslationConfig {
   maximumUtteranceMs: number;
   preRollMs: number;
   speechThreshold: number;
+  voiceId: string;
+  ttsRate: number;
+  ttsVolume: number;
+  ttsOutputSampleRateHz: 24000;
 }
 
 export type LocalTranslationConfigDraft = Omit<LocalTranslationConfig, "schemaVersion">;
@@ -212,6 +222,13 @@ export interface LocalTranslationTestResult {
   whisperModelLoaded: boolean;
   ollamaReachable: boolean;
   ollamaModelAccepted: boolean;
+  ttsVoiceAvailable: boolean;
+}
+
+export interface LocalVoice {
+  id: string;
+  name: string;
+  language: string;
 }
 
 export interface LlmProviderProfile {

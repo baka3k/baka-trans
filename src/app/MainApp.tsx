@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import {
   ArrowClockwiseRegular as RefreshCwIcon,
+  ArrowLeftRegular as ArrowLeftIcon,
   ArrowDownloadRegular as DownloadIcon,
   BotRegular as BotIcon,
   CheckmarkRegular as CheckIcon,
@@ -42,11 +43,13 @@ import {
   forceTranslateBoundary,
   getLocalTranslationConfig,
   getAppStatus,
+  getTranscriptSnapshot,
   lookHelpStatus,
   closeOverlayWindow,
   closeLookHelpWindow,
   deleteLlmProfile,
   listAudioDevices,
+  listLocalTtsVoices,
   listLlmProfiles,
   openLookHelpWindow,
   openOverlayWindow,
@@ -54,6 +57,7 @@ import {
   overlayStatus,
   pauseSession,
   playTestTone,
+  previewLocalTts,
   resumeSession,
   runMeetingSummaryAgent,
   saveLlmProfile,
@@ -106,7 +110,9 @@ import type {
   LlmProviderProfile,
   LlmProviderProfileDraft,
   LocalTranslationConfigDraft,
+  LocalPipelineStage,
   LocalTranslationTestResult,
+  LocalVoice,
   ManualBoundaryEvent,
   ManualBoundaryReason,
   MeetingSummaryConfig,
@@ -136,6 +142,7 @@ function withCompatibleSize(Icon: FluentIcon) {
 }
 
 const Activity = withCompatibleSize(ActivityIcon);
+const ArrowLeft = withCompatibleSize(ArrowLeftIcon);
 const AlertTriangle = withCompatibleSize(AlertTriangleIcon);
 const Bot = withCompatibleSize(BotIcon);
 const Check = withCompatibleSize(CheckIcon);
@@ -262,11 +269,23 @@ const emptyProfileDraft: LlmProviderProfileDraft = {
   enabled: true,
 };
 
-export default function MainApp() {
+interface MainAppProps {
+  experience?: "cloud" | "local";
+  onRequestModeChange?: () => void;
+}
+
+export default function MainApp({
+  experience = "cloud",
+  onRequestModeChange,
+}: MainAppProps) {
   const [devices, setDevices] = useState<AudioDevices>({ inputs: [], outputs: [] });
   const [translationProvider, setTranslationProvider] =
-    useState<TranslationProvider>("google_live_translate");
-  const [sourceLanguage, setSourceLanguage] = useState<Language>("auto");
+    useState<TranslationProvider>(
+      experience === "local" ? "local_whisper_ollama" : "google_live_translate",
+    );
+  const [sourceLanguage, setSourceLanguage] = useState<Language>(
+    experience === "local" ? "ja" : "auto",
+  );
   const [targetLanguage, setTargetLanguage] = useState<Language>("vi");
   const [inputDeviceId, setInputDeviceId] = useState("");
   const [outputDeviceId, setOutputDeviceId] = useState("");
@@ -320,6 +339,10 @@ export default function MainApp() {
   const [localConfigSaving, setLocalConfigSaving] = useState(false);
   const [localConfigTesting, setLocalConfigTesting] = useState(false);
   const [localConfigTest, setLocalConfigTest] = useState<LocalTranslationTestResult | null>(null);
+  const [localVoices, setLocalVoices] = useState<LocalVoice[]>([]);
+  const [localVoicePreviewing, setLocalVoicePreviewing] = useState(false);
+  const [localPipelineStage, setLocalPipelineStage] =
+    useState<LocalPipelineStage>("listening");
   const conversationFeedRef = useRef<HTMLDivElement | null>(null);
   const feedAtBottomRef = useRef(true);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
@@ -344,14 +367,12 @@ export default function MainApp() {
     (device) => device.id === monitorOutputDeviceId,
   );
   const outputMonitorConflict =
-    translationProvider === "local_whisper_ollama"
-      ? false
-      : hasOutputMonitorConflict(
-          selectedOutput,
-          translationOutputChannel,
-          monitorOriginalAudio ? selectedMonitorOutput : undefined,
-          monitorOutputChannel,
-        );
+    hasOutputMonitorConflict(
+      selectedOutput,
+      translationOutputChannel,
+      monitorOriginalAudio ? selectedMonitorOutput : undefined,
+      monitorOutputChannel,
+    );
   const effectiveMonitorOriginalAudio = !isWindows && monitorOriginalAudio && !outputMonitorConflict;
   const routingWarnings = getRoutingWarnings(
     selectedOutput,
@@ -393,7 +414,7 @@ export default function MainApp() {
   const localProviderReady = Boolean(localConfigTest?.ok && !localConfigDirty);
   const providerReady =
     translationProvider === "local_whisper_ollama"
-      ? localProviderReady
+      ? localProviderReady && outputDeviceId.length > 0
       : apiKeyStored && outputDeviceId.length > 0;
   const canStart =
     (status === "idle" || status === "error") &&
@@ -458,9 +479,7 @@ export default function MainApp() {
       id: "translation",
       label: "Translated out",
       detail:
-        translationProvider === "local_whisper_ollama"
-          ? "Text only"
-          : formatRoute(selectedOutput, translationOutputChannel),
+        formatRoute(selectedOutput, translationOutputChannel),
       state: localMonitorActive
         ? translationOutLevel > 3
           ? "signal"
@@ -472,7 +491,7 @@ export default function MainApp() {
             : "idle",
       leftLevel: channelLevel(translationOutputChannel, "left", translationOutLevel),
       rightLevel: channelLevel(translationOutputChannel, "right", translationOutLevel),
-      disabled: translationProvider === "local_whisper_ollama" || !selectedOutput,
+      disabled: !selectedOutput,
     },
     {
       id: "monitor",
@@ -557,6 +576,7 @@ export default function MainApp() {
         if (event.payload === "idle") {
           setSourceLevel(null);
           setTranslatedLevel({ peak: 0, rms: 0, sampleCount: 0 });
+          setLocalPipelineStage("listening");
         }
       }),
       listen<TranscriptItem>("transcript-update", (event) => {
@@ -581,6 +601,9 @@ export default function MainApp() {
           rms: Math.max(0, Math.min(1, event.payload.rms)),
           sampleCount: event.payload.sampleCount,
         });
+      }),
+      listen<LocalPipelineStage>("local-pipeline-stage", (event) => {
+        setLocalPipelineStage(event.payload);
       }),
       listen<AppErrorPayload>("app-error", (event) => setError(event.payload)),
       listen<MeetingSummaryStatusEvent>("summary-agent-status", (event) => {
@@ -669,20 +692,31 @@ export default function MainApp() {
   async function hydrate() {
     setBusy(true);
     try {
-      const [deviceList, appStatus, profiles, localConfig] = await Promise.all([
+      const [deviceList, appStatus, transcriptSnapshot, profiles, localConfig, voices] =
+        await Promise.all([
         listAudioDevices(),
         getAppStatus(),
+        getTranscriptSnapshot(),
         listLlmProfiles(),
         getLocalTranslationConfig(),
+        experience === "local" ? listLocalTtsVoices() : Promise.resolve([]),
       ]);
       setDevices(deviceList);
       setStatus(appStatus.sessionStatus);
+      setTranscript(transcriptSnapshot);
       applyAppStatus(appStatus);
       await refreshTranslationCredentialStatus(translationProvider);
       applyProfiles(profiles);
       const { schemaVersion: _schemaVersion, ...localDraft } = localConfig;
-      setLocalConfigDraft(localDraft);
-      setLocalConfigDirty(false);
+      const preferredVoice =
+        voices.find((voice) => voice.language.toLowerCase().startsWith("vi")) ?? voices[0];
+      const migratedLocalDraft =
+        localDraft.voiceId || !preferredVoice
+          ? localDraft
+          : { ...localDraft, voiceId: preferredVoice.id };
+      setLocalVoices(voices);
+      setLocalConfigDraft(migratedLocalDraft);
+      setLocalConfigDirty(migratedLocalDraft !== localDraft);
       setLocalConfigTest(null);
       setKeyTestMessage("");
       const storedRouting = readRoutingProfile();
@@ -820,6 +854,18 @@ export default function MainApp() {
       setError(normalizeError(cause));
     } finally {
       setLocalConfigTesting(false);
+    }
+  }
+
+  async function previewLocalVoice() {
+    setLocalVoicePreviewing(true);
+    setError(null);
+    try {
+      await previewLocalTts(localConfigDraft, outputDeviceId, translationOutputChannel);
+    } catch (cause) {
+      setError(normalizeError(cause));
+    } finally {
+      setLocalVoicePreviewing(false);
     }
   }
 
@@ -1162,7 +1208,7 @@ export default function MainApp() {
   }
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell experience-${experience}`}>
       <header className="topbar">
         <div className="brand-lockup">
           <div className="brand-mark" aria-hidden="true">
@@ -1191,6 +1237,23 @@ export default function MainApp() {
           </div>
         </div>
         <div className="top-actions">
+          {onRequestModeChange ? (
+            <button
+              className="icon-button mode-change-button"
+              onClick={onRequestModeChange}
+              disabled={status !== "idle" && status !== "error"}
+              title={
+                status === "idle" || status === "error"
+                  ? "Change translation mode"
+                  : "Stop the session before changing mode"
+              }
+              aria-label="Change translation mode"
+              type="button"
+            >
+              <ArrowLeft size={18} />
+              <span>Change mode</span>
+            </button>
+          ) : null}
           <button
             className="icon-button"
             onClick={() => {
@@ -1293,6 +1356,7 @@ export default function MainApp() {
       <div className="application-layout">
         <AppNavigation
           activeSection={settingsOpen ? activeSettings : "live"}
+          experience={experience}
           onSelect={(section) => {
             setActiveSettings(section);
             setSettingsOpen(section !== "live");
@@ -1419,14 +1483,14 @@ export default function MainApp() {
                 devices={devices.outputs}
                 value={outputDeviceId}
                 onChange={updateOutputDevice}
-                disabled={localMonitorActive || translationProvider === "local_whisper_ollama"}
+                disabled={localMonitorActive}
               />
               <SelectField
                 label="Translated channel"
                 value={translationOutputChannel}
                 onChange={(value) => updateTranslationOutputChannel(value as AudioOutputChannel)}
                 options={channelOptions}
-                disabled={localMonitorActive || translationProvider === "local_whisper_ollama"}
+                disabled={localMonitorActive}
               />
               {!isWindows ? (
                 <>
@@ -1480,8 +1544,7 @@ export default function MainApp() {
                   className={translationToneActive ? "small-button danger" : "small-button"}
                   onClick={() => testTone("translation", outputDeviceId, translationOutputChannel)}
                   disabled={
-                    translationProvider === "local_whisper_ollama" ||
-                    (!translationToneActive && (!outputDeviceId || !canTestAudio))
+                    !translationToneActive && (!outputDeviceId || !canTestAudio)
                   }
                 >
                   {translationToneActive ? "Stop translated" : "Test translated"}
@@ -1536,8 +1599,11 @@ export default function MainApp() {
               <div className="panel-header">
                 <h2>Translation provider</h2>
               </div>
-              <div className="segmented-control" aria-label="Translation provider">
-                {translationProviders.map((provider) => (
+              {experience === "cloud" ? (
+                <div className="segmented-control" aria-label="Translation provider">
+                  {translationProviders
+                    .filter((provider) => provider.value !== "local_whisper_ollama")
+                    .map((provider) => (
                   <button
                     type="button"
                     className={translationProvider === provider.value ? "active" : ""}
@@ -1547,14 +1613,15 @@ export default function MainApp() {
                   >
                     {provider.label}
                   </button>
-                ))}
-              </div>
+                    ))}
+                </div>
+              ) : null}
               {translationProvider === "local_whisper_ollama" ? (
                 <div className="local-provider-callout">
                   <strong>No cloud key required</strong>
                   <span>
-                    Local mode transcribes Japanese at 16 kHz and returns Vietnamese text without
-                    translated-audio playback.
+                    Local mode transcribes Japanese with Whisper, translates with Gemma, and plays
+                    Vietnamese speech through your selected translated-audio output.
                   </span>
                   <button
                     className="small-button"
@@ -1648,6 +1715,11 @@ export default function MainApp() {
               saving={localConfigSaving}
               testing={localConfigTesting}
               testResult={localConfigTest}
+              voices={localVoices}
+              previewing={localVoicePreviewing}
+              previewDisabled={
+                !outputDeviceId || status !== "idle" || testingTone !== null || localMonitorActive
+              }
               onChange={(draft) => {
                 setLocalConfigDraft(draft);
                 setLocalConfigDirty(true);
@@ -1655,6 +1727,7 @@ export default function MainApp() {
               }}
               onSave={() => void saveLocalConfig()}
               onTest={() => void testLocalConfig()}
+              onPreview={() => void previewLocalVoice()}
             />
 
             <div className="panel summary-config-panel">
@@ -2000,6 +2073,9 @@ export default function MainApp() {
           ) : null}
 
           <section className="conversation-panel">
+            {experience === "local" ? (
+              <LocalPipelineRail stage={localPipelineStage} sessionStatus={status} />
+            ) : null}
             <LiveStatusRail
               sourceSignalState={sourceSignalState}
               sourceLevelPercent={inputSignalPercent}
@@ -2018,7 +2094,7 @@ export default function MainApp() {
                   sourceSignalState={sourceSignalState}
                   hasInput={Boolean(inputDeviceId)}
                   hasOutput={
-                    translationProvider === "local_whisper_ollama" || Boolean(outputDeviceId)
+                    Boolean(outputDeviceId)
                   }
                 />
               ) : (
@@ -2628,6 +2704,42 @@ export function LookHelpOverlayWindow() {
         <span>{copied ? "Result copied" : "Manual capture only"}</span>
       </footer>
     </main>
+  );
+}
+
+function LocalPipelineRail({
+  stage,
+  sessionStatus,
+}: {
+  stage: LocalPipelineStage;
+  sessionStatus: SessionStatus;
+}) {
+  const stages: Array<{ value: LocalPipelineStage; label: string; icon: React.ReactNode }> = [
+    { value: "listening", label: "Listening", icon: <Mic size={16} /> },
+    { value: "transcribing", label: "Whisper", icon: <FileText size={16} /> },
+    { value: "translating", label: "Gemma", icon: <Bot size={16} /> },
+    { value: "synthesizing", label: "Voice", icon: <Activity size={16} /> },
+    { value: "speaking", label: "Speaking", icon: <Volume2 size={16} /> },
+  ];
+  return (
+    <div className="local-pipeline-rail" aria-label="Local translation pipeline">
+      <span className="visually-hidden" role="status" aria-live="polite">
+        Local pipeline: {stages.find((item) => item.value === stage)?.label ?? "Listening"}
+      </span>
+      {stages.map((item) => {
+        const active = sessionStatus !== "idle" && stage === item.value;
+        return (
+          <div
+            className={`local-pipeline-step${active ? " active" : ""}`}
+            aria-current={active ? "step" : undefined}
+            key={item.value}
+          >
+            <span aria-hidden="true">{item.icon}</span>
+            <strong>{item.label}</strong>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

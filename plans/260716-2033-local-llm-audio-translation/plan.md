@@ -1,189 +1,249 @@
 ---
-title: "Local Whisper and Ollama Translation"
-status: pending
+title: "Mode Gateway and Local Spoken Translation"
+status: in_progress
 created: 2026-07-16
+updated: 2026-07-18
+mode: hi-plan --full
 ---
 
-# Local Whisper and Ollama Translation
+# Mode Gateway and Local Spoken Translation
 
 ## Overview
 
-Add a third realtime translation provider whose hot path is:
+Extend the implemented local Japanese-to-Vietnamese pipeline into a spoken translation mode while preserving the current cloud workspace and every existing cloud behavior.
 
 ```text
-Microphone / system audio
-  -> existing Rust CPAL capture and resample (PCM16 mono, 16 kHz)
-  -> local Whisper speech-to-text (Japanese)
-  -> Rust native Ollama request (POST http://localhost:11434/api/chat)
-  -> Vietnamese text
-  -> transcript-update event
-  -> existing React conversation UI
+Main application route
+  -> choose Cloud API or Local Whisper
+     -> Cloud API: current MainApp and Google/OpenAI pipelines
+     -> Local Whisper: dedicated local workspace
+        -> existing CPAL capture and 16 kHz normalization
+        -> existing whisper-rs transcription
+        -> existing native Ollama /api/chat client using Gemma
+        -> new local platform TTS adapter
+        -> existing CPAL output-device and channel-routed playback
 ```
 
-The capture, device selection, input level, original-audio monitor, pause/stop lifecycle, and routing-profile persistence remain on the current audio runtime. Only the provider-specific translation stage is added. Google Live Translation and OpenAI Realtime Translation must remain behaviorally unchanged.
+The cloud branch remains the regression baseline. The local branch replaces only the cloud translation and speech-generation stage. Device discovery, meeting-audio capture, original-audio monitoring, headset selection, left/right routing, meters, lifecycle controls, transcript storage, and export continue to use the current shared runtime.
 
-### Scope interpretation
+## Baseline Already Implemented
 
-- “Audio config for LLM” is treated as configuration for the local audio-to-text boundary: fixed 16 kHz PCM input plus tunable utterance segmentation, Whisper model/runtime settings, and validation. Ollama `/api/chat` receives Japanese text and returns Vietnamese text; it does not receive audio.
-- The local provider is text-only in this phase because the requested pipeline ends at Vietnamese text. Local TTS and translated-audio playback are explicit non-goals. Existing cloud providers continue to use the translated-audio output and meter.
-- The first local-provider contract is intentionally Japanese (`ja`) to Vietnamese (`vi`). General language-pair support can be added after this path is stable.
+The original phases 01-04 are present in current source even though this plan remained marked pending:
 
-## Current-State Findings
+- `whisper-rs` is installed and local Whisper inference runs through `spawn_blocking`.
+- The local segmenter and bounded ordered worker already produce Japanese source text.
+- The native Ollama client already posts to `/api/chat` and returns Vietnamese text.
+- Stable transcript IDs, revisions, snapshots, local config persistence, and a Local LLM settings panel already exist.
+- The session runtime already reuses CPAL capture at 16 kHz and skips cloud credentials for local mode.
 
-- `src-tauri/src/session.rs` already selects a provider-specific capture sample rate and starts a shared CPAL capture channel, but it always loads a cloud API key and always creates translated-audio playback before dispatching to Google or OpenAI.
-- Both existing providers use 16 kHz input or can reuse the same capture/resample code. No local Whisper dependency or model loader exists in `src-tauri/Cargo.toml`.
-- `src-tauri/src/llm.rs` supports reusable summary/Look & Help profiles through OpenAI-compatible `/chat/completions`. Its Ollama default is `http://localhost:11434/v1`; this is not the requested native Ollama `/api/chat` contract.
-- LLM profile controls currently live under Summary settings. Reusing those controls directly would couple a latency-sensitive translation runtime to summary-agent tuning and would not hold Whisper/audio segmentation settings.
-- `src/transcript.ts::mergeTranscriptDelta` merges a single-sided update into the last unfinished item rather than finding an item by stable `id`. A delayed local LLM result can therefore attach to the wrong utterance or duplicate a card.
-- The app navigation has `live`, `audio`, `translation`, and `summary`; a dedicated Local LLM destination can be added without mixing it into the cloud credential panel.
+The extension begins at Phase 05. It reverses the old text-only non-goal and adds local TTS plus translated-audio routing.
 
-## Architecture Decision
+## Scope Challenge Decisions
 
-### Provider and configuration boundary
+Three scope questions were resolved so the plan is directly implementable:
 
-Add `local_whisper_ollama` to `TranslationProvider`, but keep local runtime settings in a dedicated persisted `LocalTranslationConfig` rather than reusing `LlmProviderProfile`.
+1. **When is mode selected?** Show the chooser on every main-window launch. Do not show it for the transparent or Look & Help overlay routes. Do not remember a choice in the first release. A Change mode action returns to the chooser only after the active session has stopped.
+2. **What does Cloud API contain?** It opens the current cloud workspace and preserves Google Live, OpenAI Realtime, summaries, overlays, exports, credential handling, audio routing, and current controls. The Google implementation and event contract are not rewritten.
+3. **What local TTS is used?** Use platform-native installed voices behind a Rust `LocalTtsEngine` boundary: Windows `Windows.Media.SpeechSynthesis` and macOS `AVSpeechSynthesizer` buffer output. Normalize generated audio to PCM16 mono at 24 kHz and feed the existing CPAL playback runtime. This preserves selected headset and channel routing without adding a second model server. A Piper-style engine can be added later behind the same boundary.
 
-Recommended configuration contract:
+## Design Read
 
-| Group | Field | Default / rule |
+Reading this as: a preserve-first redesign of a desktop realtime translation utility, with a calm operational Fluent 2 language and a focused local workspace rather than a second copy of the cloud dashboard.
+
+- `DESIGN_VARIANCE: 3`: predictable placement and obvious mode boundaries.
+- `MOTION_INTENSITY: 2`: only focus, disclosure, and state transitions; honor reduced motion.
+- `VISUAL_DENSITY: 6`: compact operational controls with more space reserved for transcript and pipeline state.
+- Keep the installed Fluent UI system. Do not introduce a second design system.
+
+### Mode chooser
+
+- One short heading and two clearly differentiated actions: Cloud API and Local Whisper.
+- Cloud describes that it opens the existing Google/OpenAI workspace and requires cloud credentials.
+- Local describes Whisper -> Gemma -> local voice and links readiness to installed models/voices.
+- Full keyboard access, visible focus, no automatic selection, no decorative animation, and a single-column fallback below 768 px.
+
+### Local workspace
+
+- Keep the existing top-level session commands and transcript feed behavior.
+- Show a compact semantic pipeline rail for Listening, Transcribing, Translating, Synthesizing, and Speaking. These are real state indicators, not decoration.
+- Reuse current audio controls for meeting source, translated output device, output channel, original monitor, test tone, and source/output meters.
+- Keep advanced Whisper, Gemma, segmentation, and TTS voice settings in a settings surface, not in the live transcript area.
+- Provide Change mode without hiding the stop requirement or silently abandoning an active session.
+
+## Current-State Evidence
+
+- `src/App.tsx` currently routes only overlay query strings and otherwise renders `MainApp`, so the chooser belongs after overlay routing and before the main workspace.
+- `src/app/MainApp.tsx` currently owns cloud and local state together, defaults to Google, and contains the internal provider selector.
+- `src-tauri/src/session.rs` dispatches Google, OpenAI, and local providers. Google and OpenAI already receive the shared playback sender; local currently does not.
+- `src-tauri/src/audio.rs` already owns device discovery, Windows loopback enumeration, PCM capture, resampling, selected-output playback, left/right routing, test tone, and translated-audio metering.
+- `src-tauri/src/ai/local_whisper_ollama.rs` has the insertion seam immediately after `ollama.translate` succeeds.
+- Local mode currently bypasses output validation and playback creation. Frontend controls and docs explicitly label it text-only; those special cases must be removed.
+- The configured Ollama model is currently arbitrary and empty by default. The extension keeps the serialized field compatible but uses `gemma3:4b` as the new default and labels it as the Gemma model.
+
+Detailed evidence is recorded in [research/current-state-and-options.md](research/current-state-and-options.md).
+
+## Architecture
+
+### Workspace boundary
+
+Add an app-level `ApplicationMode = "cloud" | "local"` selection for the main route only.
+
+- Keep overlay route resolution first and unchanged.
+- Add `ModeChooser` and a small mode host in `App.tsx`.
+- Preserve the current cloud render path as the behavioral baseline.
+- Extract only the shared session view-model/actions required by the new local surface. Do not duplicate Tauri listeners, routing persistence, or session lifecycle logic.
+- In the cloud workspace, retain Google and OpenAI controls and behavior. Local configuration moves to the dedicated local workspace.
+- Returning to the chooser is rejected while a session is active unless the user stops it first.
+
+### Local configuration and migration
+
+Extend `LocalTranslationConfig` without breaking existing persisted JSON:
+
+| Group | Field | Rule |
 | --- | --- | --- |
-| Ollama | `baseUrl` | `http://localhost:11434`; normalize to exactly `/api/chat` |
-| Ollama | `model` | required, user-selected installed model |
-| Ollama | `timeoutSeconds` | 30, clamped to a safe range |
-| Ollama | `temperature` | 0.0 for deterministic translation |
-| Ollama | `maxOutputTokens` | bounded for short utterances |
-| Ollama | `keepAlive` | optional native Ollama keep-alive value |
-| Whisper | `modelPath` | required readable local GGML model path; do not bundle a model in this phase |
-| Whisper | `language` | `ja`, fixed for the first implementation |
-| Whisper | `threads` | bounded to available CPU capacity |
-| Whisper | `useGpu` | capability-dependent toggle with a safe CPU fallback |
-| Audio/STT | `sampleRateHz` | fixed/read-only `16000`; reject incompatible persisted values |
-| Audio/STT | `minimumSpeechMs` | ignore very short noise bursts |
-| Audio/STT | `silenceToCommitMs` | close an utterance after trailing silence |
-| Audio/STT | `maximumUtteranceMs` | force a boundary to cap latency and memory |
-| Audio/STT | `preRollMs` | retain a small buffer before speech begins |
+| Gemma | `model` | Preserve existing value; default empty values to `gemma3:4b` |
+| TTS | `voiceId` | Required installed voice matching target language `vi` |
+| TTS | `rate` | Default 1.0, clamped to a conservative platform-neutral range |
+| TTS | `volume` | Default 1.0, clamped to 0.0-1.0 |
+| TTS | `outputSampleRateHz` | Read-only 24000 normalized PCM contract |
 
-Persist this as `local-translation-config.json` beside the existing `llm-profiles.json`. Add Tauri commands to get, save, validate, and test the config. The test command must validate the Whisper model path and issue a non-streaming native Ollama `/api/chat` probe; it must not require or store an API key.
+Add commands to list installed local voices and synthesize a short routed test phrase. A local provider is ready only when Whisper loads, Gemma responds, a Vietnamese-capable voice is available, an output device is selected, and the test state is not stale after a runtime-critical edit.
 
-### Runtime boundary
+### TTS engine boundary
 
-Add `src-tauri/src/ai/local_whisper_ollama.rs` and keep `session.rs` as the lifecycle orchestrator.
+Add `src-tauri/src/tts.rs` with a platform-neutral contract:
 
-1. `session.rs` starts the existing capture runtime at 16 kHz and the existing optional original monitor.
-2. It does not start translated-audio playback for the local text-only provider and does not require `outputDeviceId` for this provider.
-3. A bounded segmenter receives `Vec<i16>`, applies the configured speech/silence boundaries, and flushes on manual Translate Now, stop, or maximum utterance length.
-4. Whisper runs through `spawn_blocking` so native inference never blocks the Tokio/Tauri event loop. Load one model context per session and release it at session end.
-5. Each committed utterance receives a stable ID and monotonically increasing sequence/revision. Emit the Japanese source text immediately as a pending translation.
-6. Send one ordered Ollama request at a time with `stream: false`, a translation-only system prompt, the selected model, and native `options`. Bound queues so a slow model cannot grow memory without limit.
-7. Upsert the Vietnamese result into the same transcript item and emit a snapshot update. Errors update the same item to `error` without ending unrelated completed items.
-8. Stop/pause/manual-boundary control uses the existing session control channel. Cancellation must prevent late Ollama responses from mutating a stopped or newer session.
-
-### Native Ollama request contract
-
-```json
-{
-  "model": "<configured model>",
-  "stream": false,
-  "messages": [
-    {
-      "role": "system",
-      "content": "Translate Japanese to Vietnamese. Return only the translation. Preserve names, numbers, and technical terms. Do not explain."
-    },
-    { "role": "user", "content": "<Japanese Whisper text>" }
-  ],
-  "options": {
-    "temperature": 0,
-    "num_predict": "<configured limit>"
-  }
-}
+```text
+LocalTtsEngine
+  list_voices() -> LocalVoice[]
+  synthesize(text, voice, rate, volume, cancellation)
+    -> SynthesizedAudio { pcm16_mono, sample_rate_hz }
 ```
 
-Parse `message.content`, reject an empty result, surface native Ollama `error` values, and include bounded latency metadata. URL normalization must accept either the server origin or a full `/api/chat` endpoint and must never append `/v1/chat/completions` for this runtime.
+- Windows uses `SpeechSynthesizer.SynthesizeTextToStreamAsync`, reads the returned stream, validates/decodes its audio container, and exposes installed `AllVoices`.
+- macOS uses `AVSpeechSynthesizer.writeUtterance(...toBufferCallback:)`, converts callback buffers to mono PCM16, and exposes installed voices.
+- Normalize both platform outputs to 24 kHz PCM16 mono before playback.
+- Add focused tests around decoding, channel downmix, sample-rate conversion, empty buffers, missing voices, cancellation, and unsupported formats.
+- Do not let platform TTS play directly to the OS default speaker. All audio must pass through the existing selected CPAL output.
 
-### Transcript event and UI reconciliation
+The platform-buffer approach is supported by the official Windows stream API and Apple buffer callback API. See the research report for source links.
 
-Extend the transcript update contract with explicit semantics instead of inferring behavior only from which text field is empty:
+### Runtime topology
 
-- stable `id` per utterance;
-- monotonic `revision` per item;
-- `updateMode: "delta" | "snapshot"` (existing providers use delta, local provider uses snapshots);
-- source-only snapshot means “translation pending,” not a new conversation card;
-- translated snapshot with the same ID replaces the pending state;
-- stale or duplicate revisions are ignored.
+```text
+CPAL capture 16 kHz
+  -> bounded utterance segmenter
+  -> Whisper worker
+  -> pending source transcript snapshot
+  -> ordered Gemma /api/chat request
+  -> final translated transcript snapshot
+  -> bounded TTS request queue
+  -> platform TTS synthesis
+  -> PCM16 mono 24 kHz
+  -> existing PlaybackRuntime
+  -> selected output device and selected all/left/right channel
+```
 
-Update both backend storage and `src/transcript.ts` to reconcile by `id` first. Preserve the current last-item delta fallback for Google/OpenAI until those providers are migrated to stable snapshot events. The conversation view must keep source and Vietnamese text on one card, preserve ordering when LLM responses are delayed, and scroll only under the existing at-bottom rules.
+- Create local playback at session start and require a translated output device, just like cloud modes.
+- Pass a playback sender into the local runtime without changing the Google/OpenAI function contracts.
+- Keep translation text final even if TTS later fails. Attach speech failure state separately and emit one actionable app error.
+- Serialize translated utterances into the TTS queue to preserve speech order. Bound the queue and never grow memory indefinitely.
+- Set `speaking` while local audio is actively being delivered and keep the existing translated-audio-level event/meter.
+- Pause stops accepting new local utterances and lets the current spoken sentence finish. Stop, mode change, shutdown, and generation invalidation cancel synthesis immediately, clear queued speech, and drop playback so late audio cannot play.
+- A slow TTS engine must not block capture, Whisper, the Tokio runtime, or the React event loop.
+
+### State and event compatibility
+
+- Retain `session-status`, `transcript-update`, `audio-level`, `translated-audio-level`, and `app-error`.
+- Add a local pipeline-stage event only if the existing session status cannot distinguish transcribing, translating, and synthesizing without changing cloud semantics.
+- Keep transcript snapshots keyed by stable ID and revision. Audio state must reference the same utterance ID for diagnostics but must not mutate already-final translation text.
+- Existing exports remain text-based and unchanged.
 
 ## Phases
 
-| Phase | Document | Outcome |
-| --- | --- | --- |
-| 01 | [phase-01-contracts-and-config.md](phase-01-contracts-and-config.md) | Provider types, persisted local configuration, native Ollama client contract, and Tauri commands |
-| 02 | [phase-02-local-runtime.md](phase-02-local-runtime.md) | Existing 16 kHz capture connected to segmentation, Whisper, ordered Ollama translation, and lifecycle control |
-| 03 | [phase-03-settings-and-transcript-ui.md](phase-03-settings-and-transcript-ui.md) | Separate Local LLM settings UI, provider-aware readiness, and stable text rendering |
-| 04 | [phase-04-verification-and-documentation.md](phase-04-verification-and-documentation.md) | Regression suite, local smoke test, docs, packaging notes, and acceptance evidence |
+| Phase | Document | State | Outcome |
+| --- | --- | --- | --- |
+| 01 | [phase-01-contracts-and-config.md](phase-01-contracts-and-config.md) | implemented baseline | Local provider/config/client contracts |
+| 02 | [phase-02-local-runtime.md](phase-02-local-runtime.md) | implemented baseline | Whisper -> Ollama text runtime |
+| 03 | [phase-03-settings-and-transcript-ui.md](phase-03-settings-and-transcript-ui.md) | implemented baseline | Local settings and snapshot UI |
+| 04 | [phase-04-verification-and-documentation.md](phase-04-verification-and-documentation.md) | partial baseline | Existing text-only tests/docs |
+| 05 | [phase-05-mode-gateway-and-workspaces.md](phase-05-mode-gateway-and-workspaces.md) | implemented | Main-route mode chooser and dedicated local workspace boundary |
+| 06 | [phase-06-local-tts-contracts.md](phase-06-local-tts-contracts.md) | implemented; macOS hardware pending | Cross-platform local voice/config/synthesis contracts |
+| 07 | [phase-07-spoken-runtime-and-routing.md](phase-07-spoken-runtime-and-routing.md) | implemented | Gemma result -> TTS -> selected CPAL output lifecycle |
+| 08 | [phase-08-regression-and-release-validation.md](phase-08-regression-and-release-validation.md) | automated checks complete; hardware pending | Cloud regression, hardware tests, docs, and release evidence |
 
-## Dependencies
+## Dependencies and Cross-Plan Coordination
 
-### Cross-plan coordination
+- Coordinates with `plans/realtime-meeting-translation-macos`, which owns shared capture, playback, session lifecycle, and Google/OpenAI behavior.
+- Coordinates with `plans/260712-2234-application-ui-modernization`, which owns the Fluent shell and accessibility conventions.
+- This plan owns the chooser, local workspace, Gemma defaults, TTS adapters, and local spoken runtime.
+- No plan is a hard blocker because the required audio and session foundation is implemented.
 
-- Coordinates with `plans/realtime-meeting-translation-macos`: that plan owns the session foundation; this plan owns the new local provider path and transcript reconciliation required by it.
-- Coordinates with `plans/260712-2234-application-ui-modernization`: that plan owns Fluent shell/layout; this plan adds one destination and provider-specific form while following the existing component and accessibility conventions.
-- Neither plan is a hard blocker because the necessary capture, event bus, conversation feed, and responsive settings shell already exist in current source.
+Runtime prerequisites:
 
-### Runtime dependencies
-
-- A Rust Whisper binding backed by whisper.cpp (recommended: `whisper-rs`) and its platform build requirements.
-- A user-provided compatible Whisper GGML model file.
-- A running local Ollama server with the configured model already installed.
-- No cloud translation credential for the local provider.
+- User-provided compatible multilingual Whisper GGML model.
+- Running local Ollama with the configured Gemma model, default `gemma3:4b`.
+- An installed Vietnamese-capable system voice.
+- A selected translated-audio output device.
 
 ## File Impact Map
 
 | Area | Expected files |
 | --- | --- |
-| Rust contracts | `src-tauri/src/models.rs` |
-| Local config/native Ollama | new `src-tauri/src/local_translation.rs` |
-| Whisper + pipeline | new `src-tauri/src/ai/local_whisper_ollama.rs`, `src-tauri/src/ai.rs` |
-| Session lifecycle | `src-tauri/src/session.rs` |
-| Tauri commands | `src-tauri/src/commands.rs`, `src-tauri/src/lib.rs` |
-| Rust dependencies | `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` |
-| Frontend bridge/contracts | `src/api.ts`, `src/types.ts` |
-| Settings shell/UI | `src/components/shell/AppNavigation.tsx`, `src/components/shell/ResponsiveSettingsPanel.tsx`, `src/app/MainApp.tsx`, `src/styles/app.css` |
-| Text reconciliation/tests | `src/transcript.ts`, `src/transcript.test.ts`, relevant component tests |
-| Documentation | `README.md`, audio platform guides as applicable, `docs/baka-trans-architecture.drawio` after behavior is verified |
+| Main route/mode host | `src/App.tsx`, new `src/app/ModeChooser.tsx`, route tests |
+| Shared/live workspace | `src/app/MainApp.tsx`, recommended local workspace component and shared session hook/view-model |
+| Local settings | `src/components/settings/LocalLlmSettings.tsx`, related tests |
+| Frontend contracts/bridge | `src/types.ts`, `src/api.ts` |
+| Styles | `src/styles/app.css` using existing Fluent tokens/conventions |
+| Rust config/contracts | `src-tauri/src/models.rs`, `src-tauri/src/local_translation.rs` |
+| TTS | new `src-tauri/src/tts.rs` with platform modules as needed |
+| Local worker | `src-tauri/src/ai/local_whisper_ollama.rs`, `src-tauri/src/ai.rs` |
+| Session/playback integration | `src-tauri/src/session.rs`; minimal helper exposure in `src-tauri/src/audio.rs` only if required |
+| Commands/registration | `src-tauri/src/commands.rs`, `src-tauri/src/lib.rs` |
+| Native dependencies | `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` |
+| Docs | `README.md`, Windows/macOS user/release guides, architecture diagrams |
 
 ## Risks and Mitigations
 
 | Risk | Mitigation |
 | --- | --- |
-| Whisper inference blocks capture/UI | Run inference in `spawn_blocking`, keep capture channel bounded, and test level events during inference |
-| Slow Ollama creates an unbounded backlog | One ordered translator worker, bounded utterance queue, maximum utterance length, visible overload error |
-| Translation attaches to the wrong source card | Stable ID + revision + snapshot contract; frontend upsert-by-ID tests with delayed/out-of-order fixtures |
-| Local provider still requires translated output | Make routing validation and playback creation provider-aware; preserve cloud-provider requirements |
-| Native Whisper dependency complicates Windows/macOS builds | Add CI/release checks in Phase 04; document CPU baseline and optional GPU behavior; do not silently require GPU |
-| Invalid or missing model path fails after Start | Validate on save/test and again before session start with actionable error codes |
-| Ollama endpoint accidentally uses OpenAI compatibility path | Separate native client and URL normalizer from `llm.rs`; assert exact `/api/chat` requests in tests |
-| Prompt leakage or explanatory text reaches UI | Deterministic prompt, low temperature, output cleanup, empty/error validation, and prompt-response unit fixtures |
-| Existing Google/OpenAI transcript behavior regresses | Keep legacy delta fallback and run the current provider merge/session tests unchanged |
+| Platform TTS emits different formats/sample rates | Normalize behind `LocalTtsEngine`; fixture tests per supported container/buffer format |
+| Vietnamese voice is not installed | Voice discovery plus readiness gate and actionable platform setup guidance |
+| TTS bypasses selected headset | Reject direct speaker APIs; require PCM through existing CPAL playback |
+| Local queues lag behind live speech | Separate bounded TTS queue, serialized ordering, explicit backlog error, no unbounded buffers |
+| Stop still plays queued speech | Generation token plus cancellation checks, queue clear, and immediate playback runtime drop |
+| Mode chooser breaks overlays | Resolve overlay routes before mode selection and add route isolation tests |
+| Refactoring `MainApp` regresses cloud UI | Preserve cloud JSX/event path, extract only shared controller seams, run snapshot/behavior regression tests |
+| Existing local config is lost | Add serde/default migration; preserve non-empty model/path/tuning fields |
+| Gemma response succeeds but TTS fails | Keep transcript final, show speech-specific error, allow replay after TTS recovery |
+| Output/monitor routing conflicts return | Reuse current conflict validation and opposite-channel rules for local audio |
 
 ## Success Criteria
 
-- Selecting Local LLM captures through the current audio runtime as mono PCM16 at exactly 16 kHz.
-- A Japanese utterance produces a Japanese source item, then Vietnamese text on the same conversation item after a native `POST /api/chat` request.
-- No `/v1/chat/completions` request is used by the local translation runtime.
-- Local settings persist across app restart and expose Ollama, Whisper, and audio segmentation validation separately from Summary profiles.
-- Local text-only mode can start without a cloud API key or translated-audio output; Google/OpenAI retain their current credential and playback requirements.
-- Delayed, duplicate, stale, empty, and failed translation updates do not create duplicate cards or overwrite a later utterance.
-- Pause, resume, Translate Now, stop, and app shutdown leave no active Whisper/Ollama worker or late transcript mutation.
-- Existing audio capture, input meter, original monitor, cloud providers, summary profiles, transcript export, and settings accessibility tests remain green.
-- `npm test`, `npm run build`, `cargo test`, `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings` pass on the supported development platform; Windows/macOS release checks are recorded before completion.
+- The main window always presents Cloud API and Local Whisper choices before entering a workspace; overlays still open directly.
+- Cloud API opens the existing cloud interface and Google/OpenAI capture, credentials, translation, playback, events, summaries, overlays, exports, and routing behave unchanged.
+- Local Whisper uses the current capture/device selection and produces `audio -> whisper-rs -> Japanese text -> Gemma -> Vietnamese text -> local TTS -> selected headset`.
+- The local translated output device, all/left/right channel, test tone, translated meter, and routing warnings reuse current audio features.
+- Local mode cannot start without a readable Whisper model, successful Gemma check, installed compatible voice, input device, and translated output device.
+- A successful translation remains visible if speech synthesis fails, and retrying speech does not duplicate the transcript item.
+- Speech order matches transcript order under slow Gemma/TTS, queues remain bounded, and no late audio or transcript mutation occurs after stop or mode change.
+- Existing persisted local settings migrate without losing user paths or tuning.
+- Keyboard navigation, focus return, 200% zoom, forced colors, reduced motion, and sub-768 px layout work for the chooser and local workspace.
+- `npm test`, `npm run build`, `cargo test`, `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings` pass.
+- Windows and macOS hardware validation confirms Vietnamese voice synthesis and playback to a non-default selected headset before the plan is complete.
+
+## Review and Validation
+
+- Adversarial review: [reports/red-team.md](reports/red-team.md)
+- Critical validation: [reports/validation.md](reports/validation.md)
+- The plan is GO with platform voice availability and real-device playback retained as release gates.
 
 ## Implementation Handoff
 
-Implement in phase order. Do not begin Phase 02 until the configuration and event contracts in Phase 01 are covered by tests. Do not remove the legacy transcript delta path until both existing cloud providers emit stable snapshot events.
+Implement Phases 05-08 in order. Keep the existing Google implementation untouched unless a regression test exposes a shared-runtime defect. Do not mark Phase 08 complete without real Windows and macOS output-device evidence.
 
 Suggested command:
 
 ```text
-/hi-craft plans/260716-2033-local-llm-audio-translation/plan.md
+/hi-craft plans/260716-2033-local-llm-audio-translation/plan.md --full
 ```

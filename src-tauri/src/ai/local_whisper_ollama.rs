@@ -2,11 +2,13 @@ use crate::error::{AppError, AppResult};
 use crate::local_translation::OllamaClient;
 use crate::models::{
     LocalTranslationConfig, ManualBoundaryEvent, ManualBoundaryStatus, SessionStatus,
-    TranscriptItem, TranscriptStatus, TranscriptUpdateMode,
+    TranscriptItem, TranscriptStatus, TranscriptUpdateMode, TranslatedAudioLevelEvent,
 };
 use crate::session::AppState;
+use crate::tts;
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager};
@@ -19,6 +21,7 @@ use whisper_rs::{convert_integer_to_float_audio, FullParams, SamplingStrategy, W
 use super::RealtimeControl;
 
 const UTTERANCE_QUEUE_CAPACITY: usize = 4;
+const TTS_QUEUE_CAPACITY: usize = 4;
 const STOP_DRAIN_TIMEOUT_SECONDS: u64 = 2;
 const CANCELLATION_GRACE_SECONDS: u64 = 2;
 
@@ -37,16 +40,54 @@ struct TranslationWorker {
     generation: u64,
     active_generation: Arc<AtomicU64>,
     cancellation: Arc<AtomicBool>,
+    activity: Arc<PipelineActivity>,
+    tts_tx: mpsc::Sender<TtsRequest>,
+}
+
+#[derive(Default)]
+struct PipelineActivity {
+    translation_stage: AtomicU8,
+    speech_stage: AtomicU8,
+}
+
+const ACTIVITY_INACTIVE: u8 = 0;
+const TRANSLATION_TRANSCRIBING: u8 = 1;
+const TRANSLATION_TRANSLATING: u8 = 2;
+const SPEECH_SYNTHESIZING: u8 = 1;
+const SPEECH_PLAYING: u8 = 2;
+
+struct TtsRequest {
+    utterance_id: String,
+    translated_text: String,
+}
+
+struct TtsWorker {
+    app: AppHandle,
+    config: LocalTranslationConfig,
+    playback_tx: std_mpsc::SyncSender<Vec<i16>>,
+    generation: u64,
+    active_generation: Arc<AtomicU64>,
+    cancellation: Arc<AtomicBool>,
+    activity: Arc<PipelineActivity>,
 }
 
 pub struct LocalTranslationRuntime {
     config: LocalTranslationConfig,
     context: Arc<WhisperContext>,
+    playback_tx: std_mpsc::SyncSender<Vec<i16>>,
 }
 
 impl LocalTranslationRuntime {
-    pub fn new(config: LocalTranslationConfig, context: Arc<WhisperContext>) -> Self {
-        Self { config, context }
+    pub fn new(
+        config: LocalTranslationConfig,
+        context: Arc<WhisperContext>,
+        playback_tx: std_mpsc::SyncSender<Vec<i16>>,
+    ) -> Self {
+        Self {
+            config,
+            context,
+            playback_tx,
+        }
     }
 }
 
@@ -65,10 +106,29 @@ pub async fn run_local_translation(
     generation: u64,
     active_generation: Arc<AtomicU64>,
 ) -> AppResult<()> {
-    let LocalTranslationRuntime { config, context } = runtime;
+    let LocalTranslationRuntime {
+        config,
+        context,
+        playback_tx,
+    } = runtime;
     let ollama = OllamaClient::new(&config)?;
     let (utterance_tx, utterance_rx) = mpsc::channel(UTTERANCE_QUEUE_CAPACITY);
     let cancellation = Arc::new(AtomicBool::new(false));
+    let activity = Arc::new(PipelineActivity::default());
+    let (tts_tx, tts_rx) = mpsc::channel(TTS_QUEUE_CAPACITY);
+    let tts_worker = spawn_tts_worker(
+        TtsWorker {
+            app: app.clone(),
+            config: config.clone(),
+            playback_tx,
+            generation,
+            active_generation: active_generation.clone(),
+            cancellation: cancellation.clone(),
+            activity: activity.clone(),
+        },
+        tts_rx,
+    );
+    let mut tts_worker = Some(tts_worker);
     let worker = spawn_translation_worker(
         TranslationWorker {
             app: app.clone(),
@@ -79,11 +139,14 @@ pub async fn run_local_translation(
             generation,
             active_generation: active_generation.clone(),
             cancellation: cancellation.clone(),
+            activity,
+            tts_tx,
         },
         utterance_rx,
     );
     let mut worker = Some(worker);
     let mut segmenter = PcmSegmenter::new(&config);
+    emit_local_pipeline_stage(&app, "listening")?;
     loop {
         tokio::select! {
             maybe_audio = audio_rx.recv() => {
@@ -113,6 +176,7 @@ pub async fn run_local_translation(
                         }
                         drop(utterance_tx);
                         drain_worker(&mut worker, &cancellation).await?;
+                        drain_worker(&mut tts_worker, &cancellation).await?;
                         return Ok(());
                     }
                 }
@@ -161,21 +225,19 @@ pub async fn run_local_translation(
                         }
                     }
                     Some(RealtimeControl::Stop) => {
-                        if let Some(segment) = segmenter.flush() {
-                            let _ = enqueue_segment(
-                                &app,
-                                &utterance_tx,
-                                segment,
-                                &transcript_store,
-                                generation,
-                                &active_generation,
-                            );
-                        }
+                        cancellation.store(true, Ordering::SeqCst);
                         drop(utterance_tx);
                         drain_worker(&mut worker, &cancellation).await?;
+                        drain_worker(&mut tts_worker, &cancellation).await?;
                         return Ok(());
                     }
-                    None => return Ok(()),
+                    None => {
+                        cancellation.store(true, Ordering::SeqCst);
+                        drop(utterance_tx);
+                        drain_worker(&mut worker, &cancellation).await?;
+                        drain_worker(&mut tts_worker, &cancellation).await?;
+                        return Ok(());
+                    }
                 }
             }
         }
@@ -196,12 +258,18 @@ fn spawn_translation_worker(
             generation,
             active_generation,
             cancellation,
+            activity,
+            tts_tx,
         } = worker;
         while let Some(utterance) = utterance_rx.recv().await {
             if !is_worker_active(generation, &active_generation, &cancellation) {
                 break;
             }
+            activity
+                .translation_stage
+                .store(TRANSLATION_TRANSCRIBING, Ordering::SeqCst);
             let started = Instant::now();
+            settle_pipeline_activity(&app, generation, &activity)?;
             let utterance_id = utterance.id.clone();
             let timestamp_ms = utterance.timestamp_ms;
             let threads = config.threads;
@@ -243,6 +311,10 @@ fn spawn_translation_worker(
                             error_message: Some(error.message),
                         },
                     )?;
+                    activity
+                        .translation_stage
+                        .store(ACTIVITY_INACTIVE, Ordering::SeqCst);
+                    settle_pipeline_activity(&app, generation, &activity)?;
                     continue;
                 }
             };
@@ -268,11 +340,10 @@ fn spawn_translation_worker(
                 &active_generation,
                 pending.clone(),
             )?;
-            app.state::<AppState>().set_pipeline_status_if_active(
-                &app,
-                generation,
-                SessionStatus::Translating,
-            )?;
+            activity
+                .translation_stage
+                .store(TRANSLATION_TRANSLATING, Ordering::SeqCst);
+            settle_pipeline_activity(&app, generation, &activity)?;
             if !is_worker_active(generation, &active_generation, &cancellation) {
                 break;
             }
@@ -283,6 +354,7 @@ fn spawn_translation_worker(
             }
             match translation {
                 Ok((translated_text, _ollama_latency_ms)) => {
+                    let speech_text = translated_text.clone();
                     emit_snapshot(
                         &app,
                         &transcript_store,
@@ -296,6 +368,32 @@ fn spawn_translation_worker(
                             ..pending
                         },
                     )?;
+                    match tts_tx.try_send(TtsRequest {
+                        utterance_id: utterance_id.clone(),
+                        translated_text: speech_text,
+                    }) {
+                        Ok(()) => {}
+                        Err(mpsc::error::TrySendError::Full(_)) => {
+                            let _ = app.emit(
+                                "app-error",
+                                AppError::new(
+                                    "local_tts_backlog_full",
+                                    "Local speech is falling behind. The translated text was kept, but this sentence will not be spoken.",
+                                ),
+                            );
+                        }
+                        Err(mpsc::error::TrySendError::Closed(_)) => {
+                            if is_worker_active(generation, &active_generation, &cancellation) {
+                                let _ = app.emit(
+                                    "app-error",
+                                    AppError::new(
+                                        "local_tts_worker_closed",
+                                        "The local speech worker stopped unexpectedly.",
+                                    ),
+                                );
+                            }
+                        }
+                    }
                 }
                 Err(error) => {
                     emit_snapshot(
@@ -313,14 +411,158 @@ fn spawn_translation_worker(
                     )?;
                 }
             }
-            app.state::<AppState>().set_pipeline_status_if_active(
-                &app,
-                generation,
-                SessionStatus::Listening,
-            )?;
+            activity
+                .translation_stage
+                .store(ACTIVITY_INACTIVE, Ordering::SeqCst);
+            settle_pipeline_activity(&app, generation, &activity)?;
         }
+        activity
+            .translation_stage
+            .store(ACTIVITY_INACTIVE, Ordering::SeqCst);
         Ok(())
     })
+}
+
+fn spawn_tts_worker(
+    worker: TtsWorker,
+    mut tts_rx: mpsc::Receiver<TtsRequest>,
+) -> JoinHandle<AppResult<()>> {
+    tokio::spawn(async move {
+        let TtsWorker {
+            app,
+            config,
+            playback_tx,
+            generation,
+            active_generation,
+            cancellation,
+            activity,
+        } = worker;
+        while let Some(request) = tts_rx.recv().await {
+            if !is_worker_active(generation, &active_generation, &cancellation) {
+                break;
+            }
+            activity
+                .speech_stage
+                .store(SPEECH_SYNTHESIZING, Ordering::SeqCst);
+            settle_pipeline_activity(&app, generation, &activity)?;
+            let synthesis =
+                tts::synthesize(&request.translated_text, &config, cancellation.clone()).await;
+            if !is_worker_active(generation, &active_generation, &cancellation) {
+                break;
+            }
+            match synthesis {
+                Ok(audio) => {
+                    let sample_count = audio.pcm16_mono.len();
+                    let translated_level = translated_audio_level(&audio.pcm16_mono);
+                    if let Err(error) = playback_tx.try_send(audio.pcm16_mono) {
+                        let message = match error {
+                            std_mpsc::TrySendError::Full(_) => {
+                                "Translated audio output is overloaded. This sentence remains in the transcript but was not played."
+                            }
+                            std_mpsc::TrySendError::Disconnected(_) => {
+                                "The selected translated audio output disconnected."
+                            }
+                        };
+                        let _ = app.emit(
+                            "app-error",
+                            AppError::new(
+                                "local_tts_playback_error",
+                                format!("{message} Utterance {}.", request.utterance_id),
+                            ),
+                        );
+                    } else {
+                        app.emit("translated-audio-level", translated_level)
+                            .map_err(|err| AppError::new("event_emit_error", err.to_string()))?;
+                        activity
+                            .speech_stage
+                            .store(SPEECH_PLAYING, Ordering::SeqCst);
+                        settle_pipeline_activity(&app, generation, &activity)?;
+                        let playback_ms = (sample_count as u64 * 1_000)
+                            .saturating_div(u64::from(tts::LOCAL_TTS_SAMPLE_RATE));
+                        tokio::time::sleep(Duration::from_millis(playback_ms)).await;
+                        app.emit(
+                            "translated-audio-level",
+                            TranslatedAudioLevelEvent {
+                                sample_count: 0,
+                                rms: 0.0,
+                                peak: 0.0,
+                            },
+                        )
+                        .map_err(|err| AppError::new("event_emit_error", err.to_string()))?;
+                    }
+                }
+                Err(error) if error.code == "local_tts_cancelled" => {
+                    activity
+                        .speech_stage
+                        .store(ACTIVITY_INACTIVE, Ordering::SeqCst);
+                    break;
+                }
+                Err(error) => {
+                    let _ = app.emit("app-error", error);
+                }
+            }
+            activity
+                .speech_stage
+                .store(ACTIVITY_INACTIVE, Ordering::SeqCst);
+            settle_pipeline_activity(&app, generation, &activity)?;
+        }
+        activity
+            .speech_stage
+            .store(ACTIVITY_INACTIVE, Ordering::SeqCst);
+        Ok(())
+    })
+}
+
+fn settle_pipeline_activity(
+    app: &AppHandle,
+    generation: u64,
+    activity: &PipelineActivity,
+) -> AppResult<()> {
+    let (status, stage) = pipeline_activity_state(activity);
+    app.state::<AppState>()
+        .set_pipeline_status_if_active(app, generation, status)?;
+    emit_local_pipeline_stage(app, stage)
+}
+
+fn pipeline_activity_state(activity: &PipelineActivity) -> (SessionStatus, &'static str) {
+    match activity.speech_stage.load(Ordering::SeqCst) {
+        SPEECH_SYNTHESIZING => return (SessionStatus::Speaking, "synthesizing"),
+        SPEECH_PLAYING => return (SessionStatus::Speaking, "speaking"),
+        _ => {}
+    }
+    match activity.translation_stage.load(Ordering::SeqCst) {
+        TRANSLATION_TRANSCRIBING => (SessionStatus::Listening, "transcribing"),
+        TRANSLATION_TRANSLATING => (SessionStatus::Translating, "translating"),
+        _ => (SessionStatus::Listening, "listening"),
+    }
+}
+
+fn translated_audio_level(samples: &[i16]) -> TranslatedAudioLevelEvent {
+    if samples.is_empty() {
+        return TranslatedAudioLevelEvent {
+            sample_count: 0,
+            rms: 0.0,
+            peak: 0.0,
+        };
+    }
+    let scale = f32::from(i16::MAX);
+    let mut square_sum = 0.0_f32;
+    let mut peak = 0.0_f32;
+    for sample in samples {
+        let normalized = f32::from(*sample).abs() / scale;
+        peak = peak.max(normalized);
+        square_sum += normalized * normalized;
+    }
+    TranslatedAudioLevelEvent {
+        sample_count: samples.len(),
+        rms: (square_sum / samples.len() as f32).sqrt(),
+        peak,
+    }
+}
+
+fn emit_local_pipeline_stage(app: &AppHandle, stage: &'static str) -> AppResult<()> {
+    app.emit("local-pipeline-stage", stage)
+        .map_err(|err| AppError::new("event_emit_error", err.to_string()))
 }
 
 fn enqueue_segment(
@@ -790,6 +1032,47 @@ mod tests {
         assert!(is_worker_active(7, &generation, &cancellation));
         cancellation.store(true, Ordering::SeqCst);
         assert!(!is_worker_active(7, &generation, &cancellation));
+    }
+
+    #[test]
+    fn translated_audio_level_reports_pcm_energy() {
+        let level = translated_audio_level(&[0, i16::MAX, -i16::MAX]);
+        assert_eq!(level.sample_count, 3);
+        assert!((level.peak - 1.0).abs() < f32::EPSILON);
+        assert!((level.rms - (2.0_f32 / 3.0).sqrt()).abs() < 0.0001);
+
+        let silence = translated_audio_level(&[]);
+        assert_eq!(silence.sample_count, 0);
+        assert_eq!(silence.peak, 0.0);
+        assert_eq!(silence.rms, 0.0);
+    }
+
+    #[test]
+    fn speech_activity_has_priority_over_overlapping_translation() {
+        let activity = PipelineActivity::default();
+        activity
+            .translation_stage
+            .store(TRANSLATION_TRANSCRIBING, Ordering::SeqCst);
+        assert_eq!(
+            pipeline_activity_state(&activity),
+            (SessionStatus::Listening, "transcribing")
+        );
+
+        activity
+            .speech_stage
+            .store(SPEECH_PLAYING, Ordering::SeqCst);
+        assert_eq!(
+            pipeline_activity_state(&activity),
+            (SessionStatus::Speaking, "speaking")
+        );
+
+        activity
+            .translation_stage
+            .store(TRANSLATION_TRANSLATING, Ordering::SeqCst);
+        assert_eq!(
+            pipeline_activity_state(&activity),
+            (SessionStatus::Speaking, "speaking")
+        );
     }
 
     #[tokio::test]
