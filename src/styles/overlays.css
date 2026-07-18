@@ -39,6 +39,19 @@
   border-radius: 10px;
 }
 
+.look-through-live-button,
+.look-help-capture-button {
+  background: var(--colorBrandBackground);
+  border-color: var(--colorBrandBackground);
+  color: var(--colorNeutralForegroundOnBrand);
+}
+
+.look-through-live-button:hover:not(:disabled),
+.look-help-capture-button:hover:not(:disabled) {
+  background: var(--colorBrandBackgroundHover);
+  border-color: var(--colorBrandBackgroundHover);
+}
+
 .look-through-panel header,
 .look-help-panel header {
   font-size: 13px;

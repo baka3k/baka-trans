@@ -76,6 +76,20 @@ describe("application routes", () => {
     expect(screen.getByRole("heading", { name: "Choose how to translate" })).toBeInTheDocument();
   });
 
+  it("opens audio settings from the live empty state", async () => {
+    const user = userEvent.setup();
+    render(
+      <ApplicationThemeProvider>
+        <App />
+      </ApplicationThemeProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Cloud API/ }));
+    await user.click(screen.getByRole("button", { name: "Open audio settings" }));
+
+    expect(screen.getByRole("dialog", { name: "Audio settings" })).toBeInTheDocument();
+  });
+
   it("rehydrates the backend transcript after changing workspaces", async () => {
     const user = userEvent.setup();
     Object.assign(globalThis, { isTauri: true });

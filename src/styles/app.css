@@ -11,7 +11,8 @@ html,
 body,
 #root,
 .application-theme {
-  min-height: 100%;
+  height: 100%;
+  min-height: 0;
 }
 
 .application-theme {
@@ -47,21 +48,22 @@ body {
 .mode-chooser {
   align-items: center;
   background:
-    radial-gradient(circle at 18% 12%, var(--colorBrandBackground2), transparent 36%),
+    radial-gradient(circle at 12% 4%, var(--colorBrandBackground2), transparent 34%),
     var(--colorNeutralBackground2);
   display: flex;
   justify-content: center;
   min-height: 100dvh;
-  padding: 32px;
+  overflow: auto;
+  padding: clamp(20px, 4vw, 48px);
 }
 
 .mode-chooser-card {
   background: var(--colorNeutralBackground1);
   border: 1px solid var(--colorNeutralStroke2);
-  border-radius: 20px;
-  box-shadow: var(--shadow16);
-  max-width: 840px;
-  padding: 36px;
+  border-radius: 18px;
+  box-shadow: var(--shadow28);
+  max-width: 900px;
+  padding: clamp(24px, 4vw, 42px);
   width: 100%;
 }
 
@@ -86,7 +88,8 @@ body {
 }
 
 .mode-chooser-heading h1 {
-  font-size: clamp(28px, 5vw, 42px);
+  font-size: clamp(30px, 5vw, 44px);
+  font-weight: 680;
   letter-spacing: -0.035em;
   margin: 6px 0 10px;
 }
@@ -101,9 +104,9 @@ body {
 
 .mode-options {
   display: grid;
-  gap: 14px;
+  gap: 16px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin-top: 30px;
+  margin-top: 32px;
 }
 
 .mode-option {
@@ -114,10 +117,15 @@ body {
   color: var(--colorNeutralForeground1);
   display: flex;
   gap: 14px;
-  min-height: 170px;
-  padding: 20px;
+  height: auto;
+  justify-content: flex-start;
+  min-height: 164px;
+  min-width: 0;
+  padding: 22px;
   text-align: left;
   transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+  white-space: normal;
+  width: 100%;
 }
 
 .mode-option:hover {
@@ -147,14 +155,15 @@ body {
 }
 
 .mode-option.local .mode-option-icon {
-  background: var(--colorPaletteGreenBackground2);
-  color: var(--colorPaletteGreenForeground1);
+  background: var(--colorBrandBackground2);
+  color: var(--colorBrandForeground1);
 }
 
 .mode-option-copy {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
 }
 
 .mode-option-copy strong {
@@ -163,15 +172,20 @@ body {
 
 .mode-option-copy > span {
   color: var(--colorNeutralForeground2);
+  font-weight: 400;
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .mode-option-copy small {
   align-items: center;
   color: var(--colorNeutralForeground3);
   display: flex;
+  font-weight: 400;
   gap: 5px;
+  line-height: 1.4;
   margin-top: 4px;
+  white-space: normal;
 }
 
 .mode-change-button {
@@ -180,16 +194,25 @@ body {
 }
 
 .app-shell {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 0;
+  height: 100dvh;
+  min-height: 0;
   min-width: 0;
+  overflow: hidden;
   padding: 0;
 }
 
 .topbar {
+  align-items: center;
   background: var(--colorNeutralBackground1);
   border-color: transparent transparent var(--colorNeutralStroke2);
   border-radius: 0;
   box-shadow: none;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(180px, 1fr) auto;
   min-height: 64px;
   padding: 10px 16px;
   position: relative;
@@ -199,6 +222,8 @@ body {
 .brand-mark {
   background: var(--colorBrandBackground);
   border-radius: 10px;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18);
+  color: var(--colorNeutralForegroundOnBrand);
   height: 40px;
   width: 40px;
 }
@@ -209,6 +234,8 @@ body {
 }
 
 .top-actions {
+  justify-content: flex-end;
+  min-width: 0;
   flex-wrap: nowrap;
 }
 
@@ -223,7 +250,8 @@ body {
   display: grid;
   gap: 12px 20px;
   grid-template-columns: minmax(300px, 420px) auto minmax(140px, 1fr);
-  min-height: 78px;
+  min-height: 76px;
+  min-width: 0;
   padding: 10px 16px;
   position: relative;
   z-index: 19;
@@ -274,16 +302,19 @@ body {
 
 .application-layout {
   display: grid;
-  flex: 1;
-  grid-template-columns: 96px minmax(0, 1fr);
+  grid-template-columns: 120px minmax(0, 1fr);
+  height: 100%;
   min-height: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .app-navigation {
   background: var(--colorNeutralBackground1);
   border-right: 1px solid var(--colorNeutralStroke2);
   min-width: 0;
-  padding: 12px 6px;
+  overflow: hidden;
+  padding: 12px 8px;
 }
 
 .app-navigation [role="tablist"] {
@@ -292,10 +323,10 @@ body {
 
 .app-navigation [role="tab"] {
   border-radius: 8px;
-  font-size: 12px;
+  font-size: 13px;
   justify-content: center;
-  min-height: 54px;
-  padding-inline: 4px;
+  min-height: 56px;
+  padding-inline: 8px;
 }
 
 .app-navigation [role="tab"] > span {
@@ -309,7 +340,10 @@ body {
   gap: 0;
   grid-template-areas: "translation settings";
   grid-template-columns: minmax(0, 1fr) minmax(360px, 400px);
+  height: 100%;
   min-height: 0;
+  min-width: 0;
+  overflow: hidden;
   position: relative;
 }
 
@@ -320,8 +354,10 @@ body {
 
 .translation-column {
   grid-area: translation;
-  height: calc(100dvh - 142px);
+  height: 100%;
+  min-height: 0;
   min-width: 0;
+  overflow: hidden;
   padding: 16px;
 }
 
@@ -329,7 +365,9 @@ body {
   background: var(--colorNeutralBackground1);
   border-left: 1px solid var(--colorNeutralStroke2);
   grid-area: settings;
-  max-height: calc(100dvh - 142px);
+  height: 100%;
+  max-height: none;
+  min-height: 0;
   overflow: auto;
   padding: 0 16px 20px;
   position: static;
@@ -350,9 +388,10 @@ body {
 }
 
 .settings-panel-heading span {
-  color: var(--colorNeutralForeground3);
+  color: var(--colorBrandForeground1);
   display: block;
   font-size: 12px;
+  font-weight: 650;
 }
 
 .settings-panel-heading h2 {
@@ -378,6 +417,28 @@ body {
   border-radius: 0;
   box-shadow: none;
   padding: 0;
+}
+
+.settings-column select,
+.settings-column input:not([type="checkbox"]):not([type="radio"]),
+.settings-column textarea {
+  background: var(--colorNeutralBackground2);
+  border-color: var(--colorNeutralStroke1);
+  min-height: 40px;
+}
+
+.settings-column select:focus,
+.settings-column input:focus,
+.settings-column textarea:focus {
+  background: var(--colorNeutralBackground1);
+  border-color: var(--colorBrandStroke1);
+  outline-color: var(--colorStrokeFocus2);
+}
+
+.settings-column .field > span,
+.settings-column .device-label {
+  font-size: 13px;
+  font-weight: 650;
 }
 
 .settings-column .controls-panel {
@@ -521,6 +582,41 @@ body {
 
 .conversation-panel {
   background: var(--colorNeutralBackground1);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.experience-local .conversation-panel {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.conversation-feed {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--colorNeutralBackground2) 88%, transparent), var(--colorNeutralBackground2));
+}
+
+.conversation-empty {
+  background: var(--colorNeutralBackground1);
+  border-color: var(--colorNeutralStroke1);
+  box-shadow: var(--shadow4);
+  max-width: 440px;
+  min-width: min(440px, 100%);
+}
+
+.empty-state-action {
+  background: var(--colorBrandBackground);
+  border-color: var(--colorBrandBackground);
+  color: var(--colorNeutralForegroundOnBrand);
+  margin-top: 6px;
+}
+
+button.primary,
+.empty-state-action {
+  color: var(--colorNeutralForegroundOnBrand);
+}
+
+.empty-state-action:hover:not(:disabled) {
+  background: var(--colorBrandBackgroundHover);
+  border-color: var(--colorBrandBackgroundHover);
 }
 
 @media (max-width: 1279px) {
@@ -541,12 +637,12 @@ body {
   .settings-column {
     border-left: 1px solid var(--colorNeutralStroke1);
     box-shadow: var(--shadow28);
-    height: calc(100dvh - 142px);
-    inset: 142px 0 0 auto;
+    height: 100%;
+    inset: 0 0 0 auto;
     max-height: none;
     max-width: 420px;
-    position: fixed;
-    width: min(420px, calc(100vw - 76px));
+    position: absolute;
+    width: min(420px, calc(100% - 48px));
     z-index: 40;
   }
 
@@ -559,10 +655,10 @@ body {
     border: 0;
     border-radius: 0;
     display: block;
-    height: auto;
-    inset: 142px 0 0 96px;
+    height: 100%;
+    inset: 0;
     padding: 0;
-    position: fixed;
+    position: absolute;
     width: auto;
     z-index: 30;
   }
@@ -618,18 +714,13 @@ body {
   }
 
   .translation-column {
-    height: calc(100dvh - 196px);
+    height: 100%;
     min-height: 0;
     padding: 12px;
   }
 
   .settings-column {
-    height: calc(100dvh - 196px);
-    inset-block-start: 196px;
-  }
-
-  .settings-backdrop {
-    inset: 196px 0 0 0;
+    height: 100%;
   }
 
   .topbar {
@@ -672,7 +763,10 @@ body {
   }
 
   .topbar {
-    min-height: 56px;
+    gap: 8px;
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+    padding: 8px;
   }
 
   .brand-mark {
@@ -681,13 +775,18 @@ body {
   }
 
   .status-row .status-chip {
-    display: none;
+    font-size: 12px;
+    height: 22px;
+    padding-inline: 7px;
   }
 
   .top-actions {
     display: flex;
+    justify-content: flex-start;
     overflow-x: auto;
-    width: auto;
+    padding-bottom: 2px;
+    scrollbar-width: thin;
+    width: 100%;
   }
 
   .top-actions .icon-button {
@@ -699,7 +798,7 @@ body {
   .session-command-bar {
     align-items: stretch;
     grid-template-columns: minmax(0, 1fr);
-    min-height: 116px;
+    min-height: 0;
     padding: 8px;
   }
 
@@ -725,19 +824,14 @@ body {
   }
 
   .translation-column {
-    height: calc(100dvh - 224px);
+    height: 100%;
     padding: 8px;
   }
 
   .settings-column {
-    height: calc(100dvh - 224px);
-    inset-block-start: 224px;
+    height: 100%;
     max-width: none;
-    width: 100vw;
-  }
-
-  .settings-backdrop {
-    inset-block-start: 224px;
+    width: 100%;
   }
 
   .live-status-rail {

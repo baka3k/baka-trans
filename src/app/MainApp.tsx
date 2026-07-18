@@ -2096,6 +2096,10 @@ export default function MainApp({
                   hasOutput={
                     Boolean(outputDeviceId)
                   }
+                  onOpenAudioSettings={() => {
+                    setActiveSettings("audio");
+                    setSettingsOpen(true);
+                  }}
                 />
               ) : (
                 conversationItems.map((item) => (
@@ -2835,18 +2839,26 @@ function ConversationEmptyState({
   sourceSignalState,
   hasInput,
   hasOutput,
+  onOpenAudioSettings,
 }: {
   status: SessionStatus;
   sourceSignalState: SourceSignalState;
   hasInput: boolean;
   hasOutput: boolean;
+  onOpenAudioSettings: () => void;
 }) {
   const copy = emptyConversationCopy(status, sourceSignalState, hasInput, hasOutput);
+  const needsSetup = !hasInput || !hasOutput;
   return (
     <div className="empty-state conversation-empty">
       <FileText size={28} />
       <strong>{copy.title}</strong>
       <p>{copy.body}</p>
+      {needsSetup ? (
+        <button className="empty-state-action" onClick={onOpenAudioSettings} type="button">
+          <Settings2 size={16} /> Open audio settings
+        </button>
+      ) : null}
     </div>
   );
 }
