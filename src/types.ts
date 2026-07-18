@@ -225,6 +225,25 @@ export interface LocalTranslationTestResult {
   ttsVoiceAvailable: boolean;
 }
 
+export interface WhisperModelOption {
+  id: string;
+  label: string;
+  description: string;
+  fileName: string;
+  sizeMib: number;
+  recommended: boolean;
+}
+
+export interface WhisperModelDownloadProgress {
+  modelId: string;
+  fileName: string;
+  downloadedBytes: number;
+  totalBytes?: number;
+  percent?: number;
+  status: "downloading" | "completed" | "error";
+  message: string;
+}
+
 export interface LocalVoice {
   id: string;
   name: string;

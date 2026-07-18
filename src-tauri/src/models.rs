@@ -695,6 +695,29 @@ pub struct LocalTranslationTestResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct WhisperModelOption {
+    pub id: String,
+    pub label: String,
+    pub description: String,
+    pub file_name: String,
+    pub size_mib: u64,
+    pub recommended: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WhisperModelDownloadProgress {
+    pub model_id: String,
+    pub file_name: String,
+    pub downloaded_bytes: u64,
+    pub total_bytes: Option<u64>,
+    pub percent: Option<u8>,
+    pub status: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct LocalVoice {
     pub id: String,
     pub name: String,

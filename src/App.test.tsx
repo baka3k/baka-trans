@@ -118,6 +118,8 @@ describe("application routes", () => {
             return { schemaVersion: 2, ...defaultLocalTranslationConfig };
           case "list_local_tts_voices":
             return [];
+          case "list_whisper_models":
+            return [];
           case "translation_credential_status":
             return {
               provider: "google_live_translate",

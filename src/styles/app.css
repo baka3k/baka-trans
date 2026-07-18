@@ -479,6 +479,66 @@ body {
   padding: 0 8px 0 0;
 }
 
+.whisper-download-card {
+  background: linear-gradient(135deg, var(--colorBrandBackground2), var(--colorNeutralBackground2));
+  border: 1px solid var(--colorBrandStroke2);
+  border-radius: 10px;
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 14px;
+}
+
+.whisper-download-copy {
+  display: grid;
+  gap: 3px;
+}
+
+.whisper-download-copy strong {
+  font-size: 14px;
+}
+
+.whisper-download-copy span,
+.whisper-download-status {
+  color: var(--colorNeutralForeground2);
+  font-size: 12px;
+}
+
+.whisper-download-controls {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.whisper-download-controls .field {
+  margin: 0;
+}
+
+.whisper-download-button {
+  min-height: 40px;
+  white-space: nowrap;
+}
+
+.whisper-download-status {
+  display: grid;
+  gap: 7px;
+}
+
+.whisper-download-status progress {
+  accent-color: var(--colorBrandBackground);
+  height: 6px;
+  width: 100%;
+}
+
+.whisper-download-status.completed {
+  color: var(--colorPaletteGreenForeground1);
+}
+
+.whisper-download-status.error {
+  color: var(--colorPaletteRedForeground1);
+}
+
 .local-health-grid {
   display: grid;
   gap: 8px;
@@ -738,6 +798,11 @@ button.primary,
 }
 
 @media (max-width: 720px) {
+  .whisper-download-controls {
+    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .mode-chooser {
     align-items: flex-start;
     padding: 18px;

@@ -48,8 +48,10 @@ import {
   closeOverlayWindow,
   closeLookHelpWindow,
   deleteLlmProfile,
+  downloadWhisperModel,
   listAudioDevices,
   listLocalTtsVoices,
+  listWhisperModels,
   listLlmProfiles,
   openLookHelpWindow,
   openOverlayWindow,
@@ -131,6 +133,8 @@ import type {
   TranslationActivityState,
   TranslatedAudioLevelEvent,
   TranscriptItem,
+  WhisperModelDownloadProgress,
+  WhisperModelOption,
 } from "../types";
 
 type CompatibleIconProps = React.ComponentProps<FluentIcon> & { size?: number };
@@ -341,6 +345,11 @@ export default function MainApp({
   const [localConfigTest, setLocalConfigTest] = useState<LocalTranslationTestResult | null>(null);
   const [localVoices, setLocalVoices] = useState<LocalVoice[]>([]);
   const [localVoicePreviewing, setLocalVoicePreviewing] = useState(false);
+  const [whisperModels, setWhisperModels] = useState<WhisperModelOption[]>([]);
+  const [selectedWhisperModelId, setSelectedWhisperModelId] = useState("");
+  const [whisperDownload, setWhisperDownload] =
+    useState<WhisperModelDownloadProgress | null>(null);
+  const [whisperDownloading, setWhisperDownloading] = useState(false);
   const [localPipelineStage, setLocalPipelineStage] =
     useState<LocalPipelineStage>("listening");
   const conversationFeedRef = useRef<HTMLDivElement | null>(null);
@@ -605,6 +614,9 @@ export default function MainApp({
       listen<LocalPipelineStage>("local-pipeline-stage", (event) => {
         setLocalPipelineStage(event.payload);
       }),
+      listen<WhisperModelDownloadProgress>("whisper-model-download-progress", (event) => {
+        setWhisperDownload(event.payload);
+      }),
       listen<AppErrorPayload>("app-error", (event) => setError(event.payload)),
       listen<MeetingSummaryStatusEvent>("summary-agent-status", (event) => {
         setSummaryStatus(event.payload.message);
@@ -692,7 +704,7 @@ export default function MainApp({
   async function hydrate() {
     setBusy(true);
     try {
-      const [deviceList, appStatus, transcriptSnapshot, profiles, localConfig, voices] =
+      const [deviceList, appStatus, transcriptSnapshot, profiles, localConfig, voices, models] =
         await Promise.all([
         listAudioDevices(),
         getAppStatus(),
@@ -700,6 +712,7 @@ export default function MainApp({
         listLlmProfiles(),
         getLocalTranslationConfig(),
         experience === "local" ? listLocalTtsVoices() : Promise.resolve([]),
+        experience === "local" ? listWhisperModels() : Promise.resolve([]),
       ]);
       setDevices(deviceList);
       setStatus(appStatus.sessionStatus);
@@ -715,6 +728,10 @@ export default function MainApp({
           ? localDraft
           : { ...localDraft, voiceId: preferredVoice.id };
       setLocalVoices(voices);
+      setWhisperModels(models);
+      setSelectedWhisperModelId(
+        models.find((model) => model.recommended)?.id ?? models[0]?.id ?? "",
+      );
       setLocalConfigDraft(migratedLocalDraft);
       setLocalConfigDirty(migratedLocalDraft !== localDraft);
       setLocalConfigTest(null);
@@ -866,6 +883,43 @@ export default function MainApp({
       setError(normalizeError(cause));
     } finally {
       setLocalVoicePreviewing(false);
+    }
+  }
+
+  async function downloadSelectedWhisperModel() {
+    if (!selectedWhisperModelId || whisperDownloading) {
+      return;
+    }
+    const selectedModel = whisperModels.find((model) => model.id === selectedWhisperModelId);
+    setWhisperDownloading(true);
+    setWhisperDownload({
+      modelId: selectedWhisperModelId,
+      fileName: selectedModel?.fileName ?? selectedWhisperModelId,
+      downloadedBytes: 0,
+      percent: 0,
+      status: "downloading",
+      message: "Preparing download…",
+    });
+    setError(null);
+    try {
+      const modelPath = await downloadWhisperModel(selectedWhisperModelId);
+      setLocalConfigDraft((current) => ({ ...current, modelPath }));
+      setLocalConfigDirty(true);
+      setLocalConfigTest(null);
+    } catch (cause) {
+      const normalized = normalizeError(cause);
+      setWhisperDownload((current) => ({
+        modelId: current?.modelId ?? selectedWhisperModelId,
+        fileName: current?.fileName ?? selectedModel?.fileName ?? selectedWhisperModelId,
+        downloadedBytes: current?.downloadedBytes ?? 0,
+        totalBytes: current?.totalBytes,
+        percent: current?.percent,
+        status: "error",
+        message: normalized.message,
+      }));
+      setError(normalized);
+    } finally {
+      setWhisperDownloading(false);
     }
   }
 
@@ -1717,6 +1771,10 @@ export default function MainApp({
               testResult={localConfigTest}
               voices={localVoices}
               previewing={localVoicePreviewing}
+              whisperModels={whisperModels}
+              selectedWhisperModelId={selectedWhisperModelId}
+              whisperDownload={whisperDownload}
+              whisperDownloading={whisperDownloading}
               previewDisabled={
                 !outputDeviceId || status !== "idle" || testingTone !== null || localMonitorActive
               }
@@ -1728,6 +1786,8 @@ export default function MainApp({
               onSave={() => void saveLocalConfig()}
               onTest={() => void testLocalConfig()}
               onPreview={() => void previewLocalVoice()}
+              onWhisperModelSelect={setSelectedWhisperModelId}
+              onWhisperDownload={() => void downloadSelectedWhisperModel()}
             />
 
             <div className="panel summary-config-panel">

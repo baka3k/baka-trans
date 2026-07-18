@@ -9,6 +9,17 @@ import {
 } from "./LocalLlmSettings";
 import type { LocalTranslationConfigDraft } from "../../types";
 
+const whisperModels = [
+  {
+    id: "small-q5_1",
+    label: "Small Q5",
+    description: "Good Japanese accuracy without the full model size.",
+    fileName: "ggml-small-q5_1.bin",
+    sizeMib: 181,
+    recommended: true,
+  },
+];
+
 describe("LocalLlmSettings", () => {
   it("requires Ollama and Whisper models before save or test", () => {
     expect(validateLocalTranslationDraft(defaultLocalTranslationConfig)).toEqual([
@@ -60,6 +71,12 @@ describe("LocalLlmSettings", () => {
           voices={[{ id: "vi-voice", name: "Vietnamese", language: "vi-VN" }]}
           previewing={false}
           onPreview={() => undefined}
+          whisperModels={whisperModels}
+          selectedWhisperModelId="small-q5_1"
+          whisperDownload={null}
+          whisperDownloading={false}
+          onWhisperModelSelect={() => undefined}
+          onWhisperDownload={() => undefined}
         />
       );
     }
@@ -103,11 +120,69 @@ describe("LocalLlmSettings", () => {
         voices={[{ id: "vi-voice", name: "Vietnamese", language: "vi-VN" }]}
         previewing={false}
         onPreview={() => undefined}
+        whisperModels={whisperModels}
+        selectedWhisperModelId="small-q5_1"
+        whisperDownload={null}
+        whisperDownloading={false}
+        onWhisperModelSelect={() => undefined}
+        onWhisperDownload={() => undefined}
       />,
     );
 
     expect(screen.getByText("Whisper model readable and loaded").closest("div")).toHaveClass("ok");
     expect(screen.getByText("Ollama reachable and model accepted").closest("div")).not.toHaveClass("ok");
     expect(screen.getByText("Could not connect to Ollama.")).toBeInTheDocument();
+  });
+
+  it("offers a managed Whisper download and reports progress", async () => {
+    const user = userEvent.setup();
+    const onDownload = vi.fn();
+    const baseProps = {
+      draft: { ...defaultLocalTranslationConfig, voiceId: "vi-voice" },
+      dirty: false,
+      saving: false,
+      testing: false,
+      testResult: null,
+      onChange: () => undefined,
+      onSave: () => undefined,
+      onTest: () => undefined,
+      voices: [],
+      previewing: false,
+      onPreview: () => undefined,
+      whisperModels,
+      selectedWhisperModelId: "small-q5_1",
+      onWhisperModelSelect: () => undefined,
+      onWhisperDownload: onDownload,
+    };
+    const { rerender } = render(
+      <LocalLlmSettings
+        {...baseProps}
+        whisperDownload={null}
+        whisperDownloading={false}
+      />,
+    );
+
+    expect(screen.getByLabelText("Model")).toHaveValue("small-q5_1");
+    expect(screen.getByText(/181 MiB/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Download model" }));
+    expect(onDownload).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <LocalLlmSettings
+        {...baseProps}
+        whisperDownload={{
+          modelId: "small-q5_1",
+          fileName: "ggml-small-q5_1.bin",
+          downloadedBytes: 95,
+          totalBytes: 190,
+          percent: 50,
+          status: "downloading",
+          message: "Downloading model…",
+        }}
+        whisperDownloading
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Downloading 50%" })).toBeDisabled();
+    expect(screen.getByRole("progressbar", { name: "Downloading ggml-small-q5_1.bin" })).toHaveValue(50);
   });
 });

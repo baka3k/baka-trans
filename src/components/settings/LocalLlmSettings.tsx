@@ -2,6 +2,8 @@ import type {
   LocalTranslationConfigDraft,
   LocalTranslationTestResult,
   LocalVoice,
+  WhisperModelDownloadProgress,
+  WhisperModelOption,
 } from "../../types";
 
 export const defaultLocalTranslationConfig: LocalTranslationConfigDraft = {
@@ -36,10 +38,16 @@ interface LocalLlmSettingsProps {
   voices: LocalVoice[];
   previewing: boolean;
   previewDisabled?: boolean;
+  whisperModels: WhisperModelOption[];
+  selectedWhisperModelId: string;
+  whisperDownload: WhisperModelDownloadProgress | null;
+  whisperDownloading: boolean;
   onChange: (draft: LocalTranslationConfigDraft) => void;
   onSave: () => void;
   onTest: () => void;
   onPreview: () => void;
+  onWhisperModelSelect: (modelId: string) => void;
+  onWhisperDownload: () => void;
 }
 
 export function validateLocalTranslationDraft(draft: LocalTranslationConfigDraft): string[] {
@@ -92,10 +100,16 @@ export function LocalLlmSettings({
   voices,
   previewing,
   previewDisabled = false,
+  whisperModels,
+  selectedWhisperModelId,
+  whisperDownload,
+  whisperDownloading,
   onChange,
   onSave,
   onTest,
   onPreview,
+  onWhisperModelSelect,
+  onWhisperDownload,
 }: LocalLlmSettingsProps) {
   const errors = validateLocalTranslationDraft(draft);
   const update = (patch: Partial<LocalTranslationConfigDraft>) =>
@@ -215,6 +229,57 @@ export function LocalLlmSettings({
 
       <fieldset className="local-config-group">
         <legend>Whisper</legend>
+        <div className="whisper-download-card">
+          <div className="whisper-download-copy">
+            <strong>Download a speech model</strong>
+            <span>Stored privately in this app's data folder and selected automatically.</span>
+          </div>
+          <div className="whisper-download-controls">
+            <label className="field">
+              <span>Model</span>
+              <select
+                value={selectedWhisperModelId}
+                disabled={whisperDownloading || whisperModels.length === 0}
+                onChange={(event) => onWhisperModelSelect(event.currentTarget.value)}
+              >
+                {whisperModels.length === 0 ? <option value="">Loading models…</option> : null}
+                {whisperModels.map((model) => (
+                  <option value={model.id} key={model.id}>
+                    {model.label} · {model.sizeMib} MiB{model.recommended ? " · Recommended" : ""}
+                  </option>
+                ))}
+              </select>
+              <small>
+                {whisperModels.find((model) => model.id === selectedWhisperModelId)?.description ??
+                  "Choose a multilingual Whisper model."}
+              </small>
+            </label>
+            <button
+              type="button"
+              className="primary whisper-download-button"
+              onClick={onWhisperDownload}
+              disabled={whisperDownloading || saving || testing || !selectedWhisperModelId}
+            >
+              {whisperDownloading
+                ? whisperDownload?.percent !== undefined
+                  ? `Downloading ${whisperDownload.percent}%`
+                  : "Downloading…"
+                : "Download model"}
+            </button>
+          </div>
+          {whisperDownload ? (
+            <div className={`whisper-download-status ${whisperDownload.status}`} aria-live="polite">
+              {whisperDownload.status === "downloading" ? (
+                <progress
+                  max={100}
+                  value={whisperDownload.percent}
+                  aria-label={`Downloading ${whisperDownload.fileName}`}
+                />
+              ) : null}
+              <span>{whisperDownload.message}</span>
+            </div>
+          ) : null}
+        </div>
         <label className="field">
           <span>GGML model path</span>
           <input
@@ -222,7 +287,7 @@ export function LocalLlmSettings({
             placeholder="C:\\models\\ggml-small.bin"
             onChange={(event) => update({ modelPath: event.currentTarget.value })}
           />
-          <small>Use an absolute path to a model file. Model binaries are not bundled.</small>
+          <small>The download above fills this path. You can still enter another absolute GGML path.</small>
         </label>
         <div className="field-grid two">
           <label className="field">

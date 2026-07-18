@@ -11,6 +11,7 @@ import type {
   LocalTranslationConfigDraft,
   LocalTranslationTestResult,
   LocalVoice,
+  WhisperModelOption,
   LlmProviderProfile,
   LlmProviderProfileDraft,
   LlmProviderTestResult,
@@ -101,6 +102,14 @@ export function saveLocalTranslationConfig(draft: LocalTranslationConfigDraft) {
 
 export function testLocalTranslationConfig(draft: LocalTranslationConfigDraft) {
   return invoke<LocalTranslationTestResult>("test_local_translation_config", { draft });
+}
+
+export function listWhisperModels() {
+  return invoke<WhisperModelOption[]>("list_whisper_models");
+}
+
+export function downloadWhisperModel(modelId: string) {
+  return invoke<string>("download_whisper_model", { modelId });
 }
 
 export function listLocalTtsVoices() {

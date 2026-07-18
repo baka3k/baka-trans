@@ -36,9 +36,9 @@ It does not require a Google/OpenAI translation key. The translated voice uses t
 
 1. Install and start [Ollama](https://docs.ollama.com/quickstart).
 2. Pull Gemma with `ollama pull gemma3:4b`, or configure another installed Gemma variant. Ollama also documents its [model pull API](https://docs.ollama.com/api/pull).
-3. Download a multilingual Whisper GGML model (`tiny`, `base`, `small`, or a quantized variant; do not use an English-only `.en` model for Japanese). The [whisper.cpp model guide](https://github.com/ggml-org/whisper.cpp/blob/master/models/README.md) lists supported files and checksums. Model binaries are never committed or bundled by this repository.
+3. Open **Local LLM**, choose a multilingual Whisper model, and select **Download model**. The app stores it in its private data folder and fills the GGML path automatically. You can still use an existing absolute model path. The [whisper.cpp model guide](https://github.com/ggml-org/whisper.cpp/blob/master/models/README.md) lists the official model files.
 4. Install a Vietnamese system voice in Windows Speech settings or macOS system voice settings.
-5. Choose **Local Whisper**, then open **Local LLM**. Set the Gemma model, absolute Whisper model path, Vietnamese voice, rate, and volume. Save, then select **Test local pipeline**.
+5. Choose **Local Whisper**, then open **Local LLM**. Set the Gemma model, download or select a Whisper model, choose a Vietnamese voice, rate, and volume. Save, then select **Test local pipeline**.
 6. Under **Audio**, choose the meeting source, translated output, and channel. Use **Test selected voice** to verify the routed output, then start. The language pair is fixed to Japanese (`ja`) -> Vietnamese (`vi`) for this version.
 
 The native client sends non-streaming requests to `POST /api/chat`; it never routes local translation through `/v1/chat/completions`. Default segmentation is 300 ms minimum speech, 700 ms trailing silence, 15 seconds maximum utterance, 250 ms pre-roll, and a 0.015 RMS speech threshold. Raise the threshold in noisy rooms; increase trailing silence if Japanese phrases are split too aggressively.

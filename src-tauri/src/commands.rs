@@ -7,7 +7,7 @@ use crate::models::{
     LookHelpConfig, LookHelpStatus, ManualBoundaryRequest, MeetingSummaryConfig,
     MeetingSummaryResult, MeetingSummaryStatus, MeetingSummaryStatusEvent, OverlayConfig,
     OverlayGeometry, OverlayStatus, SessionConfig, TranscriptItem, TranslationCredentialStatus,
-    TranslationProvider,
+    TranslationProvider, WhisperModelOption,
 };
 use crate::session::AppState;
 use crate::{ai, llm, local_translation, look_help, overlay, security, summary_agent, tts};
@@ -148,6 +148,16 @@ pub async fn test_local_translation_config(
     draft: LocalTranslationConfigDraft,
 ) -> AppResult<LocalTranslationTestResult> {
     local_translation::test_config(draft).await
+}
+
+#[tauri::command]
+pub fn list_whisper_models() -> Vec<WhisperModelOption> {
+    local_translation::whisper_models()
+}
+
+#[tauri::command]
+pub async fn download_whisper_model(app: AppHandle, model_id: String) -> AppResult<String> {
+    local_translation::download_whisper_model(&app, model_id.trim()).await
 }
 
 #[tauri::command]

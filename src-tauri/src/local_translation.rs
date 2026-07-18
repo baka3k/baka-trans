@@ -1,18 +1,296 @@
 use crate::error::{AppError, AppResult};
 use crate::models::{
     LocalTranslationConfig, LocalTranslationConfigDraft, LocalTranslationTestResult,
+    WhisperModelDownloadProgress, WhisperModelOption,
 };
+use futures_util::StreamExt;
 use reqwest::{Client, StatusCode};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
+use tauri::{AppHandle, Emitter};
+use tokio::io::AsyncWriteExt;
 use url::Url;
 use whisper_rs::{WhisperContext, WhisperContextParameters};
 
 const CONFIG_SCHEMA_VERSION: u32 = 1;
 const CONFIG_DIR_NAME: &str = "dev.baka3k.baka-trans";
 const CONFIG_FILE_NAME: &str = "local-translation-config.json";
+const WHISPER_MODEL_DIR_NAME: &str = "whisper-models";
+const WHISPER_MODEL_SOURCE: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
 const TRANSLATION_SYSTEM_PROMPT: &str = "Translate Japanese to Vietnamese. Return only the translation. Preserve names, numbers, and technical terms. Do not explain.";
+static WHISPER_DOWNLOAD_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+#[derive(Clone, Copy)]
+struct WhisperModelSpec {
+    id: &'static str,
+    label: &'static str,
+    description: &'static str,
+    file_name: &'static str,
+    size_mib: u64,
+    recommended: bool,
+}
+
+const WHISPER_MODEL_SPECS: [WhisperModelSpec; 3] = [
+    WhisperModelSpec {
+        id: "base-q5_1",
+        label: "Base Q5",
+        description: "Fast and compact; suitable for a quick local setup.",
+        file_name: "ggml-base-q5_1.bin",
+        size_mib: 57,
+        recommended: false,
+    },
+    WhisperModelSpec {
+        id: "small-q5_1",
+        label: "Small Q5",
+        description: "Good Japanese accuracy without the full model size.",
+        file_name: "ggml-small-q5_1.bin",
+        size_mib: 181,
+        recommended: true,
+    },
+    WhisperModelSpec {
+        id: "small",
+        label: "Small",
+        description: "Higher accuracy, with a larger download and slower inference.",
+        file_name: "ggml-small.bin",
+        size_mib: 466,
+        recommended: false,
+    },
+];
+
+struct WhisperDownloadGuard;
+
+impl WhisperDownloadGuard {
+    fn acquire() -> AppResult<Self> {
+        WHISPER_DOWNLOAD_ACTIVE
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| {
+                AppError::new(
+                    "local_whisper_download_busy",
+                    "Another Whisper model download is already in progress.",
+                )
+            })?;
+        Ok(Self)
+    }
+}
+
+impl Drop for WhisperDownloadGuard {
+    fn drop(&mut self) {
+        WHISPER_DOWNLOAD_ACTIVE.store(false, Ordering::Release);
+    }
+}
+
+pub fn whisper_models() -> Vec<WhisperModelOption> {
+    WHISPER_MODEL_SPECS
+        .iter()
+        .map(|model| WhisperModelOption {
+            id: model.id.to_string(),
+            label: model.label.to_string(),
+            description: model.description.to_string(),
+            file_name: model.file_name.to_string(),
+            size_mib: model.size_mib,
+            recommended: model.recommended,
+        })
+        .collect()
+}
+
+pub async fn download_whisper_model(app: &AppHandle, model_id: &str) -> AppResult<String> {
+    let spec = whisper_model_spec(model_id)?;
+    let _guard = WhisperDownloadGuard::acquire()?;
+    let model_dir = whisper_model_dir()?;
+    let destination = model_dir.join(spec.file_name);
+    let temporary = model_dir.join(format!("{}.part", spec.file_name));
+
+    if destination
+        .metadata()
+        .is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0)
+    {
+        emit_whisper_download_progress(
+            app,
+            spec,
+            destination
+                .metadata()
+                .ok()
+                .map(|metadata| metadata.len())
+                .unwrap_or(0),
+            destination.metadata().ok().map(|metadata| metadata.len()),
+            "completed",
+            "Model is already downloaded.",
+        );
+        return Ok(destination.to_string_lossy().into_owned());
+    }
+
+    tokio::fs::create_dir_all(&model_dir).await.map_err(|err| {
+        AppError::new(
+            "local_whisper_download_write_error",
+            format!("Could not create the Whisper model folder: {err}"),
+        )
+    })?;
+    let _ = tokio::fs::remove_file(&temporary).await;
+
+    let result: AppResult<String> = async {
+        let url = format!("{WHISPER_MODEL_SOURCE}/{}?download=true", spec.file_name);
+        let response = Client::builder()
+            .timeout(Duration::from_secs(30 * 60))
+            .build()
+            .map_err(|err| AppError::new("local_whisper_download_client_error", err.to_string()))?
+            .get(url)
+            .send()
+            .await
+            .map_err(|err| {
+                AppError::new(
+                    "local_whisper_download_network_error",
+                    format!("Could not start the Whisper model download: {err}"),
+                )
+            })?
+            .error_for_status()
+            .map_err(|err| {
+                AppError::new(
+                    "local_whisper_download_http_error",
+                    format!("The Whisper model server rejected the download: {err}"),
+                )
+            })?;
+        let total_bytes = response.content_length();
+        let mut stream = response.bytes_stream();
+        let mut file = tokio::fs::File::create(&temporary).await.map_err(|err| {
+            AppError::new(
+                "local_whisper_download_write_error",
+                format!("Could not create the temporary model file: {err}"),
+            )
+        })?;
+        let mut downloaded_bytes = 0_u64;
+        let mut last_percent = None;
+
+        emit_whisper_download_progress(
+            app,
+            spec,
+            downloaded_bytes,
+            total_bytes,
+            "downloading",
+            "Downloading model…",
+        );
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|err| {
+                AppError::new(
+                    "local_whisper_download_network_error",
+                    format!("The Whisper model download was interrupted: {err}"),
+                )
+            })?;
+            file.write_all(&chunk).await.map_err(|err| {
+                AppError::new(
+                    "local_whisper_download_write_error",
+                    format!("Could not write the Whisper model: {err}"),
+                )
+            })?;
+            downloaded_bytes += chunk.len() as u64;
+            let percent = download_percent(downloaded_bytes, total_bytes);
+            if percent != last_percent {
+                last_percent = percent;
+                emit_whisper_download_progress(
+                    app,
+                    spec,
+                    downloaded_bytes,
+                    total_bytes,
+                    "downloading",
+                    "Downloading model…",
+                );
+            }
+        }
+
+        file.flush().await.map_err(|err| {
+            AppError::new(
+                "local_whisper_download_write_error",
+                format!("Could not finish writing the Whisper model: {err}"),
+            )
+        })?;
+        drop(file);
+
+        if downloaded_bytes == 0 || total_bytes.is_some_and(|total| total != downloaded_bytes) {
+            return Err(AppError::new(
+                "local_whisper_download_incomplete",
+                "The Whisper model download was incomplete. Please try again.",
+            ));
+        }
+
+        tokio::fs::rename(&temporary, &destination)
+            .await
+            .map_err(|err| {
+                AppError::new(
+                    "local_whisper_download_write_error",
+                    format!("Could not install the downloaded Whisper model: {err}"),
+                )
+            })?;
+        emit_whisper_download_progress(
+            app,
+            spec,
+            downloaded_bytes,
+            total_bytes.or(Some(downloaded_bytes)),
+            "completed",
+            "Model downloaded. Save settings, then test the local pipeline.",
+        );
+        Ok(destination.to_string_lossy().into_owned())
+    }
+    .await;
+
+    if let Err(error) = &result {
+        let _ = tokio::fs::remove_file(&temporary).await;
+        emit_whisper_download_progress(app, spec, 0, None, "error", &error.message);
+    }
+    result
+}
+
+fn whisper_model_spec(model_id: &str) -> AppResult<&'static WhisperModelSpec> {
+    WHISPER_MODEL_SPECS
+        .iter()
+        .find(|model| model.id == model_id)
+        .ok_or_else(|| {
+            AppError::new(
+                "local_whisper_model_unknown",
+                "Choose a supported Whisper model from the download list.",
+            )
+        })
+}
+
+fn whisper_model_dir() -> AppResult<PathBuf> {
+    let config = config_path()?;
+    let parent = config.parent().ok_or_else(|| {
+        AppError::new(
+            "local_config_path_error",
+            "Local translation config path has no parent directory.",
+        )
+    })?;
+    Ok(parent.join(WHISPER_MODEL_DIR_NAME))
+}
+
+fn download_percent(downloaded_bytes: u64, total_bytes: Option<u64>) -> Option<u8> {
+    total_bytes
+        .filter(|total| *total > 0)
+        .map(|total| ((downloaded_bytes.saturating_mul(100) / total).min(100)) as u8)
+}
+
+fn emit_whisper_download_progress(
+    app: &AppHandle,
+    spec: &WhisperModelSpec,
+    downloaded_bytes: u64,
+    total_bytes: Option<u64>,
+    status: &str,
+    message: &str,
+) {
+    let _ = app.emit(
+        "whisper-model-download-progress",
+        WhisperModelDownloadProgress {
+            model_id: spec.id.to_string(),
+            file_name: spec.file_name.to_string(),
+            downloaded_bytes,
+            total_bytes,
+            percent: download_percent(downloaded_bytes, total_bytes),
+            status: status.to_string(),
+            message: message.to_string(),
+        },
+    );
+}
 
 impl Default for LocalTranslationConfig {
     fn default() -> Self {
@@ -612,6 +890,32 @@ mod tests {
         assert_eq!(config.tts_rate, 1.0);
         assert_eq!(config.tts_volume, 1.0);
         assert_eq!(config.tts_output_sample_rate_hz, 24_000);
+    }
+
+    #[test]
+    fn whisper_download_catalog_is_multilingual_and_allowlisted() {
+        let models = whisper_models();
+        assert_eq!(models.len(), 3);
+        assert_eq!(models.iter().filter(|model| model.recommended).count(), 1);
+        assert!(models.iter().all(|model| {
+            model.file_name.starts_with("ggml-")
+                && model.file_name.ends_with(".bin")
+                && !model.file_name.contains(".en")
+        }));
+        assert_eq!(
+            whisper_model_spec("../../arbitrary-model")
+                .unwrap_err()
+                .code,
+            "local_whisper_model_unknown"
+        );
+    }
+
+    #[test]
+    fn whisper_download_percentage_is_bounded() {
+        assert_eq!(download_percent(50, Some(100)), Some(50));
+        assert_eq!(download_percent(101, Some(100)), Some(100));
+        assert_eq!(download_percent(50, None), None);
+        assert_eq!(download_percent(50, Some(0)), None);
     }
 
     #[test]
