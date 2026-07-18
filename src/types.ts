@@ -205,11 +205,17 @@ export interface LocalTranslationConfig {
   maximumUtteranceMs: number;
   preRollMs: number;
   speechThreshold: number;
+  ttsProvider: LocalTtsProvider;
+  vieneuBaseUrl: string;
+  vieneuStyle: VieNeuReadingStyle;
   voiceId: string;
   ttsRate: number;
   ttsVolume: number;
   ttsOutputSampleRateHz: 24000;
 }
+
+export type LocalTtsProvider = "system" | "vieneu";
+export type VieNeuReadingStyle = "tu_nhien" | "tin_tuc" | "doc_truyen";
 
 export type LocalTranslationConfigDraft = Omit<LocalTranslationConfig, "schemaVersion">;
 

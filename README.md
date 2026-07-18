@@ -29,7 +29,7 @@ npm run build
 The main window asks you to choose **Cloud API** or **Local Whisper** on every launch. Cloud API opens the existing Google/OpenAI workspace unchanged. Local Whisper runs this spoken pipeline:
 
 ```text
-PCM16 mono, 16000 Hz -> local Whisper (Japanese) -> Gemma via Ollama /api/chat -> Vietnamese text -> system TTS -> PCM16 mono, 24000 Hz -> selected audio output
+PCM16 mono, 16000 Hz -> local Whisper (Japanese) -> Gemma via Ollama /api/chat -> Vietnamese text -> system TTS or VieNeu-TTS -> PCM16 mono, 24000 Hz -> selected audio output
 ```
 
 It does not require a Google/OpenAI translation key. The translated voice uses the same output-device and all/left/right routing controls as cloud playback. Google and OpenAI modes keep their existing credential and audio behavior.
@@ -37,8 +37,8 @@ It does not require a Google/OpenAI translation key. The translated voice uses t
 1. Install and start [Ollama](https://docs.ollama.com/quickstart).
 2. Pull Gemma with `ollama pull gemma3:4b`, or configure another installed Gemma variant. Ollama also documents its [model pull API](https://docs.ollama.com/api/pull).
 3. Open **Local LLM**, choose a multilingual Whisper model, and select **Download model**. The app stores it in its private data folder and fills the GGML path automatically. You can still use an existing absolute model path. The [whisper.cpp model guide](https://github.com/ggml-org/whisper.cpp/blob/master/models/README.md) lists the official model files.
-4. Install a Vietnamese system voice in Windows Speech settings or macOS system voice settings.
-5. Choose **Local Whisper**, then open **Local LLM**. Set the Gemma model, download or select a Whisper model, choose a Vietnamese voice, rate, and volume. Save, then select **Test local pipeline**.
+4. Choose a speech engine. For System TTS, install a Vietnamese voice in Windows Speech settings or macOS system voice settings. For VieNeu-TTS, start the [local VieNeu bridge](sidecars/vieneu-tts/README.md).
+5. Choose **Local Whisper**, then open **Local LLM**. Set the Gemma model, download or select a Whisper model, select the speech engine, refresh and choose a Vietnamese voice, rate, and volume. Save, then select **Test local pipeline**.
 6. Under **Audio**, choose the meeting source, translated output, and channel. Use **Test selected voice** to verify the routed output, then start. The language pair is fixed to Japanese (`ja`) -> Vietnamese (`vi`) for this version.
 
 The native client sends non-streaming requests to `POST /api/chat`; it never routes local translation through `/v1/chat/completions`. Default segmentation is 300 ms minimum speech, 700 ms trailing silence, 15 seconds maximum utterance, 250 ms pre-roll, and a 0.015 RMS speech threshold. Raise the threshold in noisy rooms; increase trailing silence if Japanese phrases are split too aggressively.
@@ -65,7 +65,9 @@ Common local errors:
 | `local_ollama_request_error` | Start Ollama and verify the configured origin, normally `http://localhost:11434`. |
 | `local_ollama_provider_error` | Pull the configured model and retry the Local LLM test. |
 | `local_translation_backlog_full` | Use shorter utterances, a smaller/faster model, or more capable hardware. |
-| `local_tts_voice_missing` | Install or reselect a system voice, then save and retest. |
+| `local_vieneu_unreachable` | Start `sidecars/vieneu-tts/server.py` and verify the loopback bridge URL. |
+| `local_vieneu_provider_error` | Check the VieNeu bridge terminal, model download, selected preset voice, and reading style. |
+| `local_tts_voice_missing` | Refresh and reselect the configured system or VieNeu voice, then save and retest. |
 | `local_tts_backlog_full` | Reduce local-model latency or pause until speech catches up. |
 | `local_tts_playback_error` | Reconnect and reselect the translated output device. |
 

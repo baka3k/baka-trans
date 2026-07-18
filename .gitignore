@@ -5,3 +5,5 @@ src-tauri/target/
 .DS_Store
 .serena/
 .cache/**
+sidecars/vieneu-tts/.venv/
+sidecars/vieneu-tts/__pycache__/

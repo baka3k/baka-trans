@@ -3,11 +3,11 @@ use crate::error::{AppError, AppResult};
 use crate::models::{
     ApiKeyTestResult, AppStatus, AudioDevices, AudioOutputChannel, ExportRequest,
     ExportedTranscript, LlmProviderProfile, LlmProviderProfileDraft, LlmProviderTestResult,
-    LocalTranslationConfig, LocalTranslationConfigDraft, LocalTranslationTestResult, LocalVoice,
-    LookHelpConfig, LookHelpStatus, ManualBoundaryRequest, MeetingSummaryConfig,
-    MeetingSummaryResult, MeetingSummaryStatus, MeetingSummaryStatusEvent, OverlayConfig,
-    OverlayGeometry, OverlayStatus, SessionConfig, TranscriptItem, TranslationCredentialStatus,
-    TranslationProvider, WhisperModelOption,
+    LocalTranslationConfig, LocalTranslationConfigDraft, LocalTranslationTestResult,
+    LocalTtsProvider, LocalVoice, LookHelpConfig, LookHelpStatus, ManualBoundaryRequest,
+    MeetingSummaryConfig, MeetingSummaryResult, MeetingSummaryStatus, MeetingSummaryStatusEvent,
+    OverlayConfig, OverlayGeometry, OverlayStatus, SessionConfig, TranscriptItem,
+    TranslationCredentialStatus, TranslationProvider, WhisperModelOption,
 };
 use crate::session::AppState;
 use crate::{ai, llm, local_translation, look_help, overlay, security, summary_agent, tts};
@@ -161,8 +161,11 @@ pub async fn download_whisper_model(app: AppHandle, model_id: String) -> AppResu
 }
 
 #[tauri::command]
-pub fn list_local_tts_voices() -> AppResult<Vec<LocalVoice>> {
-    tts::list_voices()
+pub async fn list_local_tts_voices(
+    provider: LocalTtsProvider,
+    vieneu_base_url: String,
+) -> AppResult<Vec<LocalVoice>> {
+    tts::list_voices(provider, &vieneu_base_url).await
 }
 
 #[tauri::command]

@@ -1,0 +1,11 @@
+[project]
+name = "baka-trans-vieneu-bridge"
+version = "0.1.0"
+description = "Loopback-only VieNeu-TTS bridge for baka-trans"
+requires-python = ">=3.10"
+dependencies = [
+  "vieneu==3.2.3",
+]
+
+[tool.uv]
+package = false

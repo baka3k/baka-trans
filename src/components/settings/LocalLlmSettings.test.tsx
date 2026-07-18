@@ -23,9 +23,21 @@ const whisperModels = [
 describe("LocalLlmSettings", () => {
   it("requires Ollama and Whisper models before save or test", () => {
     expect(validateLocalTranslationDraft(defaultLocalTranslationConfig)).toEqual([
-      "Choose an installed local voice.",
+      "Choose an available local voice.",
       "Choose a Whisper GGML model file.",
     ]);
+  });
+
+  it("validates the VieNeu loopback endpoint", () => {
+    expect(
+      validateLocalTranslationDraft({
+        ...defaultLocalTranslationConfig,
+        ttsProvider: "vieneu",
+        vieneuBaseUrl: "https://example.com",
+        voiceId: "Pham Tuyen",
+        modelPath: "C:\\models\\ggml-small.bin",
+      }),
+    ).toContain("Enter a loopback VieNeu-TTS bridge URL.");
   });
 
   it("keeps edits local, clears readiness, and remains accessible", async () => {

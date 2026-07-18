@@ -621,6 +621,9 @@ pub struct LocalTranslationConfig {
     pub maximum_utterance_ms: u64,
     pub pre_roll_ms: u64,
     pub speech_threshold: f32,
+    pub tts_provider: LocalTtsProvider,
+    pub vieneu_base_url: String,
+    pub vieneu_style: String,
     pub voice_id: String,
     pub tts_rate: f32,
     pub tts_volume: f32,
@@ -646,6 +649,9 @@ pub struct LocalTranslationConfigDraft {
     pub maximum_utterance_ms: u64,
     pub pre_roll_ms: u64,
     pub speech_threshold: f32,
+    pub tts_provider: LocalTtsProvider,
+    pub vieneu_base_url: String,
+    pub vieneu_style: String,
     pub voice_id: String,
     pub tts_rate: f32,
     pub tts_volume: f32,
@@ -671,12 +677,23 @@ impl From<LocalTranslationConfig> for LocalTranslationConfigDraft {
             maximum_utterance_ms: value.maximum_utterance_ms,
             pre_roll_ms: value.pre_roll_ms,
             speech_threshold: value.speech_threshold,
+            tts_provider: value.tts_provider,
+            vieneu_base_url: value.vieneu_base_url,
+            vieneu_style: value.vieneu_style,
             voice_id: value.voice_id,
             tts_rate: value.tts_rate,
             tts_volume: value.tts_volume,
             tts_output_sample_rate_hz: value.tts_output_sample_rate_hz,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalTtsProvider {
+    #[default]
+    System,
+    Vieneu,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

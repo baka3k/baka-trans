@@ -23,6 +23,9 @@ export const defaultLocalTranslationConfig: LocalTranslationConfigDraft = {
   maximumUtteranceMs: 15000,
   preRollMs: 250,
   speechThreshold: 0.015,
+  ttsProvider: "system",
+  vieneuBaseUrl: "http://127.0.0.1:23334",
+  vieneuStyle: "tu_nhien",
   voiceId: "",
   ttsRate: 1,
   ttsVolume: 1,
@@ -36,6 +39,7 @@ interface LocalLlmSettingsProps {
   testing: boolean;
   testResult: LocalTranslationTestResult | null;
   voices: LocalVoice[];
+  voicesLoading?: boolean;
   previewing: boolean;
   previewDisabled?: boolean;
   whisperModels: WhisperModelOption[];
@@ -46,6 +50,7 @@ interface LocalLlmSettingsProps {
   onSave: () => void;
   onTest: () => void;
   onPreview: () => void;
+  onRefreshVoices?: () => void;
   onWhisperModelSelect: (modelId: string) => void;
   onWhisperDownload: () => void;
 }
@@ -59,7 +64,10 @@ export function validateLocalTranslationDraft(draft: LocalTranslationConfigDraft
     errors.push("Choose an installed Ollama model.");
   }
   if (!draft.voiceId.trim()) {
-    errors.push("Choose an installed local voice.");
+    errors.push("Choose an available local voice.");
+  }
+  if (draft.ttsProvider === "vieneu" && !/^http:\/\/(localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::\d+)?\/?$/i.test(draft.vieneuBaseUrl.trim())) {
+    errors.push("Enter a loopback VieNeu-TTS bridge URL.");
   }
   if (!draft.modelPath.trim()) {
     errors.push("Choose a Whisper GGML model file.");
@@ -98,6 +106,7 @@ export function LocalLlmSettings({
   testing,
   testResult,
   voices,
+  voicesLoading = false,
   previewing,
   previewDisabled = false,
   whisperModels,
@@ -108,6 +117,7 @@ export function LocalLlmSettings({
   onSave,
   onTest,
   onPreview,
+  onRefreshVoices = () => undefined,
   onWhisperModelSelect,
   onWhisperDownload,
 }: LocalLlmSettingsProps) {
@@ -189,7 +199,50 @@ export function LocalLlmSettings({
       <fieldset className="local-config-group">
         <legend>Vietnamese voice</legend>
         <label className="field">
-          <span>Installed system voice</span>
+          <span>Speech engine</span>
+          <select
+            value={draft.ttsProvider}
+            onChange={(event) =>
+              update({
+                ttsProvider: event.currentTarget.value as LocalTranslationConfigDraft["ttsProvider"],
+                voiceId: "",
+              })
+            }
+          >
+            <option value="system">System TTS</option>
+            <option value="vieneu">VieNeu-TTS v3 Turbo</option>
+          </select>
+        </label>
+        {draft.ttsProvider === "vieneu" ? (
+          <div className="field-grid two">
+            <label className="field">
+              <span>VieNeu bridge URL</span>
+              <input
+                value={draft.vieneuBaseUrl}
+                placeholder="http://127.0.0.1:23334"
+                onChange={(event) => update({ vieneuBaseUrl: event.currentTarget.value })}
+              />
+              <small>Start the loopback bridge in sidecars/vieneu-tts before refreshing voices.</small>
+            </label>
+            <label className="field">
+              <span>Reading style</span>
+              <select
+                value={draft.vieneuStyle}
+                onChange={(event) =>
+                  update({
+                    vieneuStyle: event.currentTarget.value as LocalTranslationConfigDraft["vieneuStyle"],
+                  })
+                }
+              >
+                <option value="tu_nhien">Natural</option>
+                <option value="tin_tuc">News</option>
+                <option value="doc_truyen">Storytelling</option>
+              </select>
+            </label>
+          </div>
+        ) : null}
+        <label className="field">
+          <span>{draft.ttsProvider === "vieneu" ? "VieNeu preset voice" : "Installed system voice"}</span>
           <select
             value={draft.voiceId}
             onChange={(event) => update({ voiceId: event.currentTarget.value })}
@@ -201,8 +254,15 @@ export function LocalLlmSettings({
               </option>
             ))}
           </select>
-          <small>Vietnamese voices are shown first. Install one in system speech settings if empty.</small>
+          <small>
+            {draft.ttsProvider === "vieneu"
+              ? "Preset voices are loaded from the local VieNeu bridge."
+              : "Vietnamese voices are shown first. Install one in system speech settings if empty."}
+          </small>
         </label>
+        <button type="button" onClick={onRefreshVoices} disabled={voicesLoading || saving || testing}>
+          {voicesLoading ? "Refreshing voices" : "Refresh voice list"}
+        </button>
         <div className="field-grid two">
           <NumberField
             label="Speaking rate"
@@ -375,7 +435,7 @@ export function LocalLlmSettings({
           ok={Boolean(testResult?.ollamaReachable && testResult.ollamaModelAccepted && !dirty)}
         />
         <Health
-          label="Selected system voice is available"
+          label="Selected local voice is available"
           ok={Boolean(testResult?.ttsVoiceAvailable && !dirty)}
         />
       </div>

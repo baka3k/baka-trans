@@ -344,6 +344,7 @@ export default function MainApp({
   const [localConfigTesting, setLocalConfigTesting] = useState(false);
   const [localConfigTest, setLocalConfigTest] = useState<LocalTranslationTestResult | null>(null);
   const [localVoices, setLocalVoices] = useState<LocalVoice[]>([]);
+  const [localVoicesLoading, setLocalVoicesLoading] = useState(false);
   const [localVoicePreviewing, setLocalVoicePreviewing] = useState(false);
   const [whisperModels, setWhisperModels] = useState<WhisperModelOption[]>([]);
   const [selectedWhisperModelId, setSelectedWhisperModelId] = useState("");
@@ -704,16 +705,24 @@ export default function MainApp({
   async function hydrate() {
     setBusy(true);
     try {
-      const [deviceList, appStatus, transcriptSnapshot, profiles, localConfig, voices, models] =
+      const [deviceList, appStatus, transcriptSnapshot, profiles, localConfig, models] =
         await Promise.all([
         listAudioDevices(),
         getAppStatus(),
         getTranscriptSnapshot(),
         listLlmProfiles(),
         getLocalTranslationConfig(),
-        experience === "local" ? listLocalTtsVoices() : Promise.resolve([]),
         experience === "local" ? listWhisperModels() : Promise.resolve([]),
       ]);
+      let voices: LocalVoice[] = [];
+      let voiceLoadError: AppErrorPayload | null = null;
+      if (experience === "local") {
+        try {
+          voices = await listLocalTtsVoices(localConfig.ttsProvider, localConfig.vieneuBaseUrl);
+        } catch (cause) {
+          voiceLoadError = normalizeError(cause);
+        }
+      }
       setDevices(deviceList);
       setStatus(appStatus.sessionStatus);
       setTranscript(transcriptSnapshot);
@@ -739,6 +748,9 @@ export default function MainApp({
       const storedRouting = readRoutingProfile();
       applyRoutingProfile(resolveRoutingProfile(deviceList, storedRouting), true);
       setLastRefreshedAt(Date.now());
+      if (voiceLoadError) {
+        setError(voiceLoadError);
+      }
     } catch (cause) {
       setError(normalizeError(cause));
     } finally {
@@ -883,6 +895,33 @@ export default function MainApp({
       setError(normalizeError(cause));
     } finally {
       setLocalVoicePreviewing(false);
+    }
+  }
+
+  async function refreshLocalVoices() {
+    setLocalVoicesLoading(true);
+    setError(null);
+    try {
+      const voices = await listLocalTtsVoices(
+        localConfigDraft.ttsProvider,
+        localConfigDraft.vieneuBaseUrl,
+      );
+      setLocalVoices(voices);
+      if (!voices.some((voice) => voice.id === localConfigDraft.voiceId)) {
+        const preferredVoice =
+          voices.find((voice) => voice.language.toLowerCase().startsWith("vi")) ?? voices[0];
+        setLocalConfigDraft((current) => ({
+          ...current,
+          voiceId: preferredVoice?.id ?? "",
+        }));
+        setLocalConfigDirty(true);
+        setLocalConfigTest(null);
+      }
+    } catch (cause) {
+      setLocalVoices([]);
+      setError(normalizeError(cause));
+    } finally {
+      setLocalVoicesLoading(false);
     }
   }
 
@@ -1770,6 +1809,7 @@ export default function MainApp({
               testing={localConfigTesting}
               testResult={localConfigTest}
               voices={localVoices}
+              voicesLoading={localVoicesLoading}
               previewing={localVoicePreviewing}
               whisperModels={whisperModels}
               selectedWhisperModelId={selectedWhisperModelId}
@@ -1779,6 +1819,9 @@ export default function MainApp({
                 !outputDeviceId || status !== "idle" || testingTone !== null || localMonitorActive
               }
               onChange={(draft) => {
+                if (draft.ttsProvider !== localConfigDraft.ttsProvider) {
+                  setLocalVoices([]);
+                }
                 setLocalConfigDraft(draft);
                 setLocalConfigDirty(true);
                 setLocalConfigTest(null);
@@ -1786,6 +1829,7 @@ export default function MainApp({
               onSave={() => void saveLocalConfig()}
               onTest={() => void testLocalConfig()}
               onPreview={() => void previewLocalVoice()}
+              onRefreshVoices={() => void refreshLocalVoices()}
               onWhisperModelSelect={setSelectedWhisperModelId}
               onWhisperDownload={() => void downloadSelectedWhisperModel()}
             />

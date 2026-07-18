@@ -1,7 +1,7 @@
 use crate::error::{AppError, AppResult};
 use crate::models::{
     LocalTranslationConfig, LocalTranslationConfigDraft, LocalTranslationTestResult,
-    WhisperModelDownloadProgress, WhisperModelOption,
+    LocalTtsProvider, WhisperModelDownloadProgress, WhisperModelOption,
 };
 use futures_util::StreamExt;
 use reqwest::{Client, StatusCode};
@@ -312,6 +312,9 @@ impl Default for LocalTranslationConfig {
             maximum_utterance_ms: 15_000,
             pre_roll_ms: 250,
             speech_threshold: 0.015,
+            tts_provider: LocalTtsProvider::System,
+            vieneu_base_url: "http://127.0.0.1:23334".to_string(),
+            vieneu_style: "tu_nhien".to_string(),
             voice_id: String::new(),
             tts_rate: 1.0,
             tts_volume: 1.0,
@@ -426,14 +429,18 @@ pub async fn test_config(
             ));
         }
     };
-    let tts_voice_available = crate::tts::voice_is_available(&config.voice_id)?;
+    let tts_voice_available = crate::tts::voice_is_available(&config).await?;
     if !tts_voice_available {
+        let provider_name = match config.tts_provider {
+            LocalTtsProvider::System => "system",
+            LocalTtsProvider::Vieneu => "VieNeu-TTS",
+        };
         return Ok(failed_test_result(
             config.model,
             normalize_ollama_chat_url(&config.base_url)?,
             AppError::new(
                 "local_tts_voice_missing",
-                "The selected system voice is no longer installed.",
+                format!("The selected {provider_name} voice is no longer available."),
             ),
             LocalTestHealth {
                 whisper_model_readable: true,
@@ -593,6 +600,24 @@ pub fn normalize_and_validate(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned);
+    let vieneu_base_url = match draft.tts_provider {
+        LocalTtsProvider::System => {
+            let value = draft.vieneu_base_url.trim();
+            if value.is_empty() {
+                "http://127.0.0.1:23334".to_string()
+            } else {
+                value.to_string()
+            }
+        }
+        LocalTtsProvider::Vieneu => crate::tts::normalize_vieneu_base_url(&draft.vieneu_base_url)?,
+    };
+    let vieneu_style = draft.vieneu_style.trim();
+    if !matches!(vieneu_style, "tu_nhien" | "tin_tuc" | "doc_truyen") {
+        return Err(AppError::new(
+            "local_vieneu_style_invalid",
+            "Choose a supported VieNeu-TTS reading style.",
+        ));
+    }
 
     Ok(LocalTranslationConfig {
         schema_version: CONFIG_SCHEMA_VERSION,
@@ -616,6 +641,9 @@ pub fn normalize_and_validate(
         maximum_utterance_ms: draft.maximum_utterance_ms,
         pre_roll_ms: draft.pre_roll_ms,
         speech_threshold: draft.speech_threshold,
+        tts_provider: draft.tts_provider,
+        vieneu_base_url,
+        vieneu_style: vieneu_style.to_string(),
         voice_id: require_non_empty(
             &draft.voice_id,
             "local_tts_voice_missing",
@@ -890,6 +918,9 @@ mod tests {
         assert_eq!(config.tts_rate, 1.0);
         assert_eq!(config.tts_volume, 1.0);
         assert_eq!(config.tts_output_sample_rate_hz, 24_000);
+        assert_eq!(config.tts_provider, LocalTtsProvider::System);
+        assert_eq!(config.vieneu_base_url, "http://127.0.0.1:23334");
+        assert_eq!(config.vieneu_style, "tu_nhien");
     }
 
     #[test]
@@ -930,6 +961,9 @@ mod tests {
         object.remove("ttsRate");
         object.remove("ttsVolume");
         object.remove("ttsOutputSampleRateHz");
+        object.remove("ttsProvider");
+        object.remove("vieneuBaseUrl");
+        object.remove("vieneuStyle");
 
         let migrated: LocalTranslationConfig = serde_json::from_value(value).unwrap();
 
@@ -938,6 +972,9 @@ mod tests {
         assert_eq!(migrated.tts_rate, 1.0);
         assert_eq!(migrated.tts_volume, 1.0);
         assert_eq!(migrated.tts_output_sample_rate_hz, 24_000);
+        assert_eq!(migrated.tts_provider, LocalTtsProvider::System);
+        assert_eq!(migrated.vieneu_base_url, "http://127.0.0.1:23334");
+        assert_eq!(migrated.vieneu_style, "tu_nhien");
     }
 
     #[test]
