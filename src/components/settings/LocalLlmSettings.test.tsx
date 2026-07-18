@@ -162,7 +162,7 @@ describe("LocalLlmSettings", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Model")).toHaveValue("small-q5_1");
+    expect(screen.getByLabelText("Whisper model to download")).toHaveValue("small-q5_1");
     expect(screen.getByText(/181 MiB/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Download model" }));
     expect(onDownload).toHaveBeenCalledTimes(1);

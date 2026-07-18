@@ -22,7 +22,7 @@ const WHISPER_MODEL_SOURCE: &str = "https://huggingface.co/ggerganov/whisper.cpp
 const TRANSLATION_SYSTEM_PROMPT: &str = "Translate Japanese to Vietnamese. Return only the translation. Preserve names, numbers, and technical terms. Do not explain.";
 static WHISPER_DOWNLOAD_ACTIVE: AtomicBool = AtomicBool::new(false);
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct WhisperModelSpec {
     id: &'static str,
     label: &'static str,

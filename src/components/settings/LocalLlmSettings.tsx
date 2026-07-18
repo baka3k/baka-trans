@@ -238,6 +238,7 @@ export function LocalLlmSettings({
             <label className="field">
               <span>Model</span>
               <select
+                aria-label="Whisper model to download"
                 value={selectedWhisperModelId}
                 disabled={whisperDownloading || whisperModels.length === 0}
                 onChange={(event) => onWhisperModelSelect(event.currentTarget.value)}
