@@ -1,5 +1,6 @@
 # Engineering Logs
 
+- [2026-07-18 — Responsive UI redesign](2026-07-18-responsive-ui-redesign.md)
 - [2026-07-18 — Local spoken translation](2026-07-18-local-spoken-translation.md)
 - [2026-07-16 — Local Whisper and Ollama translation](2026-07-16-local-whisper-ollama-translation.md)
 - [2026-07-12 — Application UI modernization](2026-07-12-application-ui-modernization.md)
