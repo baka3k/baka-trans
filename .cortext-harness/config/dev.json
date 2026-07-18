@@ -25,7 +25,7 @@
       "EMBEDDING_MODEL": "jinaai/jina-embeddings-v3",
       "BATCH_SIZE": "1",
       "MAX_EMBED_CHARS": "500",
-      "device": "cpu"
+      "device": "cuda"
     },
     "source": {
       "projects": [
@@ -47,10 +47,10 @@
       "FALKORDB_PORT": "6379",
       "FALKORDB_USER": "",
       "FALKORDB_PASSWORD": "",
-      "FALKORDB_GRAPH": "hyper_graph",
+      "FALKORDB_GRAPH": "bakatrans-doc",
       "FALKORDB_SSL": "false",
       "NEO4J_URI": "redis://localhost:6379",
-      "NEO4J_DB": "hyper_graph",
+      "NEO4J_DB": "bakatrans-doc",
       "NEO4J_USER": "",
       "NEO4J_PASS": "",
       "QDRANT_HOST": "localhost",
@@ -58,22 +58,14 @@
       "EMBEDDING_MODEL": "BAAI/bge-m3",
       "BATCH_SIZE": "1",
       "MAX_EMBED_CHARS": "500",
-      "device": "cpu"
+      "device": "cuda"
     },
     "source": {
       "projects": [
         {
           "git": "QDRANT_HOST [localhost]:",
           "folder": [
-            "docs",
-            "docs/design-docs",
-            "docs/exec-plans",
-            "docs/exec-plans/active",
-            "docs/exec-plans/completed",
-            "docs/generated",
-            "docs/logs",
-            "docs/product-specs",
-            "docs/references"
+            "C:\\ai\\baka-trans\\plans"
           ]
         }
       ]
