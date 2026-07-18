@@ -28,16 +28,65 @@ describe("LocalLlmSettings", () => {
     ]);
   });
 
-  it("validates the VieNeu loopback endpoint", () => {
+  it("requires managed VieNeu setup instead of a bridge URL", () => {
     expect(
       validateLocalTranslationDraft({
         ...defaultLocalTranslationConfig,
         ttsProvider: "vieneu",
         vieneuBaseUrl: "https://example.com",
-        voiceId: "Pham Tuyen",
         modelPath: "C:\\models\\ggml-small.bin",
+      }, {
+        phase: "not_installed",
+        runtimeAvailable: true,
+        modelInstalled: false,
+        running: false,
+        modelVersion: "v3-turbo-int8-2026-07",
+        installedBytes: 0,
+        totalBytes: 256068309,
+        message: "Install VieNeu-TTS.",
       }),
-    ).toContain("Enter a loopback VieNeu-TTS bridge URL.");
+    ).toContain("Install VieNeu-TTS before choosing a neural voice.");
+  });
+
+  it("offers one-click managed VieNeu installation", async () => {
+    const user = userEvent.setup();
+    const onInstall = vi.fn();
+    render(
+      <LocalLlmSettings
+        draft={{ ...defaultLocalTranslationConfig, ttsProvider: "vieneu" }}
+        dirty={false}
+        saving={false}
+        testing={false}
+        testResult={null}
+        voices={[]}
+        previewing={false}
+        whisperModels={whisperModels}
+        selectedWhisperModelId="small-q5_1"
+        whisperDownload={null}
+        whisperDownloading={false}
+        vieneuRuntime={{
+          phase: "not_installed",
+          runtimeAvailable: true,
+          modelInstalled: false,
+          running: false,
+          modelVersion: "v3-turbo-int8-2026-07",
+          installedBytes: 0,
+          totalBytes: 256068309,
+          message: "Install VieNeu-TTS to continue.",
+        }}
+        onChange={() => undefined}
+        onSave={() => undefined}
+        onTest={() => undefined}
+        onPreview={() => undefined}
+        onWhisperModelSelect={() => undefined}
+        onWhisperDownload={() => undefined}
+        onVieNeuInstall={onInstall}
+      />,
+    );
+
+    expect(screen.queryByText("VieNeu bridge URL")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Install VieNeu-TTS" }));
+    expect(onInstall).toHaveBeenCalledTimes(1);
   });
 
   it("keeps edits local, clears readiness, and remains accessible", async () => {

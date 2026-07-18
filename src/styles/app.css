@@ -479,6 +479,62 @@ body {
   padding: 0 8px 0 0;
 }
 
+.vieneu-runtime-card {
+  background: var(--colorNeutralBackground2);
+  border: 1px solid var(--colorNeutralStroke2);
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+  padding: 14px;
+}
+
+.vieneu-runtime-card.installed {
+  border-color: var(--colorPaletteGreenBorder1);
+}
+
+.vieneu-runtime-heading {
+  align-items: start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.vieneu-runtime-heading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.vieneu-runtime-heading span,
+.vieneu-runtime-card p,
+.vieneu-runtime-progress {
+  color: var(--colorNeutralForeground2);
+  font-size: 12px;
+  margin: 0;
+}
+
+.vieneu-runtime-badge {
+  background: var(--colorNeutralBackground4);
+  border-radius: 999px;
+  padding: 3px 8px;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.vieneu-runtime-progress {
+  display: grid;
+  gap: 5px;
+}
+
+.vieneu-runtime-progress progress {
+  accent-color: var(--colorBrandBackground);
+  width: 100%;
+}
+
+.vieneu-runtime-actions {
+  margin-top: 0;
+}
+
 .whisper-download-card {
   background: linear-gradient(135deg, var(--colorBrandBackground2), var(--colorNeutralBackground2));
   border: 1px solid var(--colorBrandStroke2);

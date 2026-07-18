@@ -12,6 +12,7 @@ import type {
   LocalTranslationTestResult,
   LocalTtsProvider,
   LocalVoice,
+  VieNeuRuntimeStatus,
   WhisperModelOption,
   LlmProviderProfile,
   LlmProviderProfileDraft,
@@ -113,8 +114,24 @@ export function downloadWhisperModel(modelId: string) {
   return invoke<string>("download_whisper_model", { modelId });
 }
 
-export function listLocalTtsVoices(provider: LocalTtsProvider, vieneuBaseUrl: string) {
-  return invoke<LocalVoice[]>("list_local_tts_voices", { provider, vieneuBaseUrl });
+export function listLocalTtsVoices(provider: LocalTtsProvider) {
+  return invoke<LocalVoice[]>("list_local_tts_voices", { provider });
+}
+
+export function getVieNeuRuntimeStatus() {
+  return invoke<VieNeuRuntimeStatus>("get_vieneu_runtime_status");
+}
+
+export function installVieNeuRuntime() {
+  return invoke<VieNeuRuntimeStatus>("install_vieneu_runtime");
+}
+
+export function cancelVieNeuRuntimeInstall() {
+  return invoke<void>("cancel_vieneu_runtime_install");
+}
+
+export function restartVieNeuRuntime() {
+  return invoke<VieNeuRuntimeStatus>("restart_vieneu_runtime");
 }
 
 export function previewLocalTts(

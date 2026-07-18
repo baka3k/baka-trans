@@ -23,7 +23,7 @@ Windows captures the selected output with WASAPI loopback. The original Teams au
 
 ## Local Spoken Translation
 
-For Japanese-to-Vietnamese meetings, choose **Local Whisper** at launch. Configure and test Whisper, Gemma in Ollama, and either an installed Vietnamese Windows voice or the local VieNeu-TTS bridge under **Local LLM**. Select both **Meeting source** and **Translated audio**, choose the target channel, then use **Test selected voice**. The translated text appears on the conversation card before the selected TTS engine plays it through the selected output. See the [local setup and troubleshooting section](../README.md#local-japanese-to-vietnamese-translation).
+For Japanese-to-Vietnamese meetings, choose **Local Whisper** at launch. Configure and test Whisper, Gemma in Ollama, and either an installed Vietnamese Windows voice or app-managed VieNeu-TTS under **Local LLM**. VieNeu-TTS installs with one button and needs no Python, terminal, or bridge URL. Select both **Meeting source** and **Translated audio**, choose the target channel, then use **Test selected voice**. The translated text appears on the conversation card before the selected TTS engine plays it through the selected output. See the [local setup and troubleshooting section](../README.md#local-japanese-to-vietnamese-translation).
 
 ## Bluetooth and Device Changes
 
@@ -41,7 +41,7 @@ For Japanese-to-Vietnamese meetings, choose **Local Whisper** at launch. Configu
 | Bluetooth audio becomes low quality | Select the stereo endpoint or use a wired/USB headset. |
 | Loopback fails on a specific driver | Update the audio driver. As a last resort, install VB-CABLE and use its input/output pair. |
 | Local Start is disabled | Save and test Local LLM settings after every runtime-critical edit, then select both meeting source and translated output. |
-| No Vietnamese voice appears | For System TTS, install a Windows Vietnamese voice. For VieNeu-TTS, start the local bridge, verify its URL, and select **Refresh voice list**. |
+| No Vietnamese voice appears | For System TTS, install a Windows Vietnamese voice. For VieNeu-TTS, finish **Install VieNeu-TTS**, then select **Refresh voice list**. |
 | Local translation is slow | Use a smaller/quantized multilingual Whisper model, a faster Ollama model, or reduce the maximum utterance duration. |
 
 VB-CABLE is a fallback, not part of the normal setup. VoiceMeeter is intentionally not included because its mixer and routing controls are unnecessary for the standard Baka Trans workflow.

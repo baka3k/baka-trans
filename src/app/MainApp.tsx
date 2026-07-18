@@ -29,7 +29,7 @@ import {
   WarningRegular as AlertTriangleIcon,
   type FluentIcon,
 } from "@fluentui/react-icons";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { AppNavigation, type SettingsSection } from "../components/shell/AppNavigation";
 import { ResponsiveSettingsPanel } from "../components/shell/ResponsiveSettingsPanel";
 import { SessionCommandBar } from "../components/session/SessionCommandBar";
@@ -41,6 +41,7 @@ import {
   captureLookHelp,
   exportTranscript,
   forceTranslateBoundary,
+  getVieNeuRuntimeStatus,
   getLocalTranslationConfig,
   getAppStatus,
   getTranscriptSnapshot,
@@ -60,6 +61,9 @@ import {
   pauseSession,
   playTestTone,
   previewLocalTts,
+  installVieNeuRuntime,
+  cancelVieNeuRuntimeInstall,
+  restartVieNeuRuntime,
   resumeSession,
   runMeetingSummaryAgent,
   saveLlmProfile,
@@ -115,6 +119,8 @@ import type {
   LocalPipelineStage,
   LocalTranslationTestResult,
   LocalVoice,
+  VieNeuRuntimeProgress,
+  VieNeuRuntimeStatus,
   ManualBoundaryEvent,
   ManualBoundaryReason,
   MeetingSummaryConfig,
@@ -351,6 +357,9 @@ export default function MainApp({
   const [whisperDownload, setWhisperDownload] =
     useState<WhisperModelDownloadProgress | null>(null);
   const [whisperDownloading, setWhisperDownloading] = useState(false);
+  const [vieneuRuntime, setVieNeuRuntime] = useState<VieNeuRuntimeStatus | null>(null);
+  const [vieneuProgress, setVieNeuProgress] = useState<VieNeuRuntimeProgress | null>(null);
+  const [vieneuBusy, setVieNeuBusy] = useState(false);
   const [localPipelineStage, setLocalPipelineStage] =
     useState<LocalPipelineStage>("listening");
   const conversationFeedRef = useRef<HTMLDivElement | null>(null);
@@ -597,19 +606,23 @@ export default function MainApp({
       }),
       listen<AudioLevelEvent>("audio-level", (event) => {
         const receivedAtMs = Date.now();
-        setNowMs(receivedAtMs);
-        setSourceLevel({
-          inputDeviceId: event.payload.inputDeviceId,
-          peak: Math.max(0, Math.min(1, event.payload.peak)),
-          rms: Math.max(0, Math.min(1, event.payload.rms)),
-          receivedAtMs,
+        startTransition(() => {
+          setNowMs(receivedAtMs);
+          setSourceLevel({
+            inputDeviceId: event.payload.inputDeviceId,
+            peak: Math.max(0, Math.min(1, event.payload.peak)),
+            rms: Math.max(0, Math.min(1, event.payload.rms)),
+            receivedAtMs,
+          });
         });
       }),
       listen<TranslatedAudioLevelEvent>("translated-audio-level", (event) => {
-        setTranslatedLevel({
-          peak: Math.max(0, Math.min(1, event.payload.peak)),
-          rms: Math.max(0, Math.min(1, event.payload.rms)),
-          sampleCount: event.payload.sampleCount,
+        startTransition(() => {
+          setTranslatedLevel({
+            peak: Math.max(0, Math.min(1, event.payload.peak)),
+            rms: Math.max(0, Math.min(1, event.payload.rms)),
+            sampleCount: event.payload.sampleCount,
+          });
         });
       }),
       listen<LocalPipelineStage>("local-pipeline-stage", (event) => {
@@ -617,6 +630,28 @@ export default function MainApp({
       }),
       listen<WhisperModelDownloadProgress>("whisper-model-download-progress", (event) => {
         setWhisperDownload(event.payload);
+      }),
+      listen<VieNeuRuntimeProgress>("vieneu-runtime-progress", (event) => {
+        setVieNeuProgress(event.payload);
+        setVieNeuRuntime((current) =>
+          current
+            ? {
+                ...current,
+                phase: event.payload.phase,
+                running:
+                  event.payload.phase === "ready"
+                    ? true
+                    : event.payload.phase === "starting" || event.payload.phase === "recovering"
+                      ? false
+                      : current.running,
+                installedBytes:
+                  event.payload.phase === "installed"
+                    ? event.payload.totalBytes
+                    : current.installedBytes,
+                message: event.payload.message,
+              }
+            : current,
+        );
       }),
       listen<AppErrorPayload>("app-error", (event) => setError(event.payload)),
       listen<MeetingSummaryStatusEvent>("summary-agent-status", (event) => {
@@ -705,7 +740,7 @@ export default function MainApp({
   async function hydrate() {
     setBusy(true);
     try {
-      const [deviceList, appStatus, transcriptSnapshot, profiles, localConfig, models] =
+      const [deviceList, appStatus, transcriptSnapshot, profiles, localConfig, models, runtime] =
         await Promise.all([
         listAudioDevices(),
         getAppStatus(),
@@ -713,12 +748,16 @@ export default function MainApp({
         listLlmProfiles(),
         getLocalTranslationConfig(),
         experience === "local" ? listWhisperModels() : Promise.resolve([]),
+        experience === "local" ? getVieNeuRuntimeStatus() : Promise.resolve(null),
       ]);
       let voices: LocalVoice[] = [];
       let voiceLoadError: AppErrorPayload | null = null;
-      if (experience === "local") {
+      if (
+        experience === "local" &&
+        (localConfig.ttsProvider === "system" || runtime?.modelInstalled)
+      ) {
         try {
-          voices = await listLocalTtsVoices(localConfig.ttsProvider, localConfig.vieneuBaseUrl);
+          voices = await listLocalTtsVoices(localConfig.ttsProvider);
         } catch (cause) {
           voiceLoadError = normalizeError(cause);
         }
@@ -737,6 +776,7 @@ export default function MainApp({
           ? localDraft
           : { ...localDraft, voiceId: preferredVoice.id };
       setLocalVoices(voices);
+      setVieNeuRuntime(runtime);
       setWhisperModels(models);
       setSelectedWhisperModelId(
         models.find((model) => model.recommended)?.id ?? models[0]?.id ?? "",
@@ -902,10 +942,7 @@ export default function MainApp({
     setLocalVoicesLoading(true);
     setError(null);
     try {
-      const voices = await listLocalTtsVoices(
-        localConfigDraft.ttsProvider,
-        localConfigDraft.vieneuBaseUrl,
-      );
+      const voices = await listLocalTtsVoices(localConfigDraft.ttsProvider);
       setLocalVoices(voices);
       if (!voices.some((voice) => voice.id === localConfigDraft.voiceId)) {
         const preferredVoice =
@@ -922,6 +959,48 @@ export default function MainApp({
       setError(normalizeError(cause));
     } finally {
       setLocalVoicesLoading(false);
+    }
+  }
+
+  async function installManagedVieNeu() {
+    if (vieneuBusy) return;
+    setVieNeuBusy(true);
+    setError(null);
+    try {
+      const runtime = await installVieNeuRuntime();
+      setVieNeuRuntime(runtime);
+      setVieNeuProgress(null);
+      if (localConfigDraft.ttsProvider === "vieneu" && runtime.modelInstalled) {
+        await refreshLocalVoices();
+      }
+    } catch (cause) {
+      setError(normalizeError(cause));
+      setVieNeuRuntime(await getVieNeuRuntimeStatus().catch(() => vieneuRuntime));
+    } finally {
+      setVieNeuBusy(false);
+    }
+  }
+
+  async function cancelManagedVieNeu() {
+    await cancelVieNeuRuntimeInstall().catch((cause) => setError(normalizeError(cause)));
+  }
+
+  async function restartManagedVieNeu() {
+    if (vieneuBusy) return;
+    setVieNeuBusy(true);
+    setError(null);
+    try {
+      const runtime = await restartVieNeuRuntime();
+      setVieNeuRuntime(runtime);
+      setVieNeuProgress(null);
+      if (localConfigDraft.ttsProvider === "vieneu") {
+        await refreshLocalVoices();
+      }
+    } catch (cause) {
+      setError(normalizeError(cause));
+      setVieNeuRuntime(await getVieNeuRuntimeStatus().catch(() => vieneuRuntime));
+    } finally {
+      setVieNeuBusy(false);
     }
   }
 
@@ -1815,6 +1894,9 @@ export default function MainApp({
               selectedWhisperModelId={selectedWhisperModelId}
               whisperDownload={whisperDownload}
               whisperDownloading={whisperDownloading}
+              vieneuRuntime={vieneuRuntime}
+              vieneuProgress={vieneuProgress}
+              vieneuBusy={vieneuBusy}
               previewDisabled={
                 !outputDeviceId || status !== "idle" || testingTone !== null || localMonitorActive
               }
@@ -1832,6 +1914,9 @@ export default function MainApp({
               onRefreshVoices={() => void refreshLocalVoices()}
               onWhisperModelSelect={setSelectedWhisperModelId}
               onWhisperDownload={() => void downloadSelectedWhisperModel()}
+              onVieNeuInstall={() => void installManagedVieNeu()}
+              onVieNeuCancel={() => void cancelManagedVieNeu()}
+              onVieNeuRestart={() => void restartManagedVieNeu()}
             />
 
             <div className="panel summary-config-panel">

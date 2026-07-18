@@ -217,6 +217,39 @@ export interface LocalTranslationConfig {
 export type LocalTtsProvider = "system" | "vieneu";
 export type VieNeuReadingStyle = "tu_nhien" | "tin_tuc" | "doc_truyen";
 
+export type VieNeuRuntimePhase =
+  | "not_installed"
+  | "paused"
+  | "downloading"
+  | "verifying"
+  | "installed"
+  | "starting"
+  | "ready"
+  | "recovering"
+  | "repair_needed"
+  | "error"
+  | "unsupported";
+
+export interface VieNeuRuntimeStatus {
+  phase: VieNeuRuntimePhase;
+  runtimeAvailable: boolean;
+  modelInstalled: boolean;
+  running: boolean;
+  modelVersion: string;
+  installedBytes: number;
+  totalBytes: number;
+  message: string;
+}
+
+export interface VieNeuRuntimeProgress {
+  phase: VieNeuRuntimePhase;
+  downloadedBytes: number;
+  verifiedBytes: number;
+  totalBytes: number;
+  percent?: number;
+  message: string;
+}
+
 export type LocalTranslationConfigDraft = Omit<LocalTranslationConfig, "schemaVersion">;
 
 export interface LocalTranslationTestResult {

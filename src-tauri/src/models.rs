@@ -733,6 +733,47 @@ pub struct WhisperModelDownloadProgress {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum VieNeuRuntimePhase {
+    #[default]
+    NotInstalled,
+    Paused,
+    Downloading,
+    Verifying,
+    Installed,
+    Starting,
+    Ready,
+    Recovering,
+    RepairNeeded,
+    Error,
+    Unsupported,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct VieNeuRuntimeStatus {
+    pub phase: VieNeuRuntimePhase,
+    pub runtime_available: bool,
+    pub model_installed: bool,
+    pub running: bool,
+    pub model_version: String,
+    pub installed_bytes: u64,
+    pub total_bytes: u64,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct VieNeuRuntimeProgress {
+    pub phase: VieNeuRuntimePhase,
+    pub downloaded_bytes: u64,
+    pub verified_bytes: u64,
+    pub total_bytes: u64,
+    pub percent: Option<u8>,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalVoice {

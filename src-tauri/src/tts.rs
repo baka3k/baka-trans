@@ -1,11 +1,12 @@
 use crate::error::{AppError, AppResult};
 use crate::models::{LocalTranslationConfig, LocalTtsProvider, LocalVoice};
+use crate::vieneu::{VieNeuConnection, VieNeuManager};
 use reqwest::Client;
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use url::Url;
+use tauri::{AppHandle, Manager};
 
 pub const LOCAL_TTS_SAMPLE_RATE: u32 = 24_000;
 const VIENEU_MAX_AUDIO_BYTES: u64 = 64 * 1024 * 1024;
@@ -17,25 +18,32 @@ pub struct SynthesizedAudio {
 }
 
 pub async fn list_voices(
+    app: Option<&AppHandle>,
     provider: LocalTtsProvider,
-    vieneu_base_url: &str,
 ) -> AppResult<Vec<LocalVoice>> {
     match provider {
         LocalTtsProvider::System => platform::list_voices(),
-        LocalTtsProvider::Vieneu => list_vieneu_voices(vieneu_base_url).await,
+        LocalTtsProvider::Vieneu => {
+            let (client, connection) = managed_vieneu(app).await?;
+            list_vieneu_voices(&client, &connection).await
+        }
     }
 }
 
-pub async fn voice_is_available(config: &LocalTranslationConfig) -> AppResult<bool> {
+pub async fn voice_is_available(
+    app: Option<&AppHandle>,
+    config: &LocalTranslationConfig,
+) -> AppResult<bool> {
     let voice_id = config.voice_id.trim();
     Ok(!voice_id.is_empty()
-        && list_voices(config.tts_provider, &config.vieneu_base_url)
+        && list_voices(app, config.tts_provider)
             .await?
             .iter()
             .any(|voice| voice.id == voice_id))
 }
 
 pub async fn synthesize(
+    app: Option<&AppHandle>,
     text: &str,
     config: &LocalTranslationConfig,
     cancelled: Arc<AtomicBool>,
@@ -52,61 +60,33 @@ pub async fn synthesize(
     }
     match config.tts_provider {
         LocalTtsProvider::System => platform::synthesize(text, config, cancelled).await,
-        LocalTtsProvider::Vieneu => synthesize_vieneu(text, config, cancelled).await,
+        LocalTtsProvider::Vieneu => {
+            let (client, connection) = managed_vieneu(app).await?;
+            synthesize_vieneu(&client, &connection, text, config, cancelled).await
+        }
     }
 }
 
-pub fn normalize_vieneu_base_url(base_url: &str) -> AppResult<String> {
-    let trimmed = base_url.trim();
-    if trimmed.is_empty() {
-        return Err(AppError::new(
-            "local_vieneu_base_url_missing",
-            "Enter the VieNeu-TTS bridge URL.",
-        ));
-    }
-    let mut url = Url::parse(trimmed).map_err(|error| {
+async fn managed_vieneu(app: Option<&AppHandle>) -> AppResult<(Client, VieNeuConnection)> {
+    let app = app.ok_or_else(|| {
         AppError::new(
-            "local_vieneu_base_url_invalid",
-            format!("Enter a valid VieNeu-TTS bridge URL: {error}"),
+            "vieneu_runtime_unavailable",
+            "VieNeu-TTS requires the managed desktop runtime.",
         )
     })?;
-    if url.scheme() != "http" || !is_loopback_host(url.host_str().unwrap_or_default()) {
-        return Err(AppError::new(
-            "local_vieneu_base_url_invalid",
-            "VieNeu-TTS must use an http loopback URL such as http://127.0.0.1:23334.",
-        ));
-    }
-    if !url.username().is_empty() || url.password().is_some() || url.query().is_some() {
-        return Err(AppError::new(
-            "local_vieneu_base_url_invalid",
-            "VieNeu-TTS bridge URL cannot contain credentials or query parameters.",
-        ));
-    }
-    if !matches!(url.path(), "" | "/") {
-        return Err(AppError::new(
-            "local_vieneu_base_url_invalid",
-            "Use the VieNeu-TTS bridge origin without an endpoint path.",
-        ));
-    }
-    url.set_path("");
-    url.set_fragment(None);
-    Ok(url.as_str().trim_end_matches('/').to_string())
+    let manager = app.state::<VieNeuManager>();
+    let connection = manager.ensure_running(app).await?;
+    Ok((manager.http_client(), connection))
 }
 
-fn is_loopback_host(host: &str) -> bool {
-    host.eq_ignore_ascii_case("localhost")
-        || host
-            .parse::<std::net::IpAddr>()
-            .is_ok_and(|ip| ip.is_loopback())
-}
-
-async fn list_vieneu_voices(base_url: &str) -> AppResult<Vec<LocalVoice>> {
-    let endpoint = vieneu_endpoint(base_url, "voices")?;
-    let response = Client::builder()
-        .timeout(Duration::from_secs(15))
-        .build()
-        .map_err(|error| AppError::new("local_vieneu_client_error", error.to_string()))?
-        .get(endpoint)
+async fn list_vieneu_voices(
+    client: &Client,
+    connection: &VieNeuConnection,
+) -> AppResult<Vec<LocalVoice>> {
+    let response = client
+        .get(format!("{}/voices", connection.base_url))
+        .bearer_auth(&connection.token)
+        .timeout(Duration::from_secs(5))
         .send()
         .await
         .map_err(|error| {
@@ -138,17 +118,16 @@ async fn list_vieneu_voices(base_url: &str) -> AppResult<Vec<LocalVoice>> {
 }
 
 async fn synthesize_vieneu(
+    client: &Client,
+    connection: &VieNeuConnection,
     text: &str,
     config: &LocalTranslationConfig,
     cancelled: Arc<AtomicBool>,
 ) -> AppResult<SynthesizedAudio> {
-    let endpoint = vieneu_endpoint(&config.vieneu_base_url, "synthesize")?;
-    let client = Client::builder()
-        .timeout(Duration::from_secs(config.timeout_seconds.max(30)))
-        .build()
-        .map_err(|error| AppError::new("local_vieneu_client_error", error.to_string()))?;
     let request = client
-        .post(endpoint)
+        .post(format!("{}/synthesize", connection.base_url))
+        .bearer_auth(&connection.token)
+        .timeout(Duration::from_secs(180))
         .json(&json!({
             "text": text,
             "voice": config.voice_id,
@@ -230,19 +209,17 @@ async fn synthesize_vieneu(
     decode_wav_pcm16(&bytes)
 }
 
-fn vieneu_endpoint(base_url: &str, path: &str) -> AppResult<String> {
-    let base_url = normalize_vieneu_base_url(base_url)?;
-    Ok(format!("{base_url}/{path}"))
-}
-
 fn vieneu_error_message(body: &str, fallback: &str) -> String {
     serde_json::from_str::<Value>(body)
         .ok()
         .and_then(|value| {
-            value
-                .get("error")
-                .and_then(Value::as_str)
-                .map(str::to_string)
+            let error = value.get("error")?;
+            error.as_str().map(str::to_string).or_else(|| {
+                error
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
         })
         .filter(|message| !message.trim().is_empty())
         .unwrap_or_else(|| fallback.to_string())
@@ -822,24 +799,19 @@ mod tests {
         assert!(samples.iter().any(|sample| *sample != 0));
     }
 
-    #[test]
-    fn vieneu_url_accepts_only_loopback_origins() {
-        assert_eq!(
-            normalize_vieneu_base_url("http://127.0.0.1:23334/").unwrap(),
-            "http://127.0.0.1:23334"
-        );
-        assert!(normalize_vieneu_base_url("https://127.0.0.1:23334").is_err());
-        assert!(normalize_vieneu_base_url("http://example.com:23334").is_err());
-        assert!(normalize_vieneu_base_url("http://localhost:23334/voices").is_err());
-    }
-
     #[tokio::test]
     async fn vieneu_adapter_lists_voices_and_decodes_audio() {
         let voices_url = serve_once(
             "application/json",
             br#"[{"id":"Pham Tuyen","name":"Pham Tuyen - Natural","language":"vi-VN"}]"#.to_vec(),
         );
-        let voices = list_voices(LocalTtsProvider::Vieneu, &voices_url)
+        let client = Client::new();
+        let voices_connection = VieNeuConnection {
+            base_url: voices_url,
+            token: "test-token".to_string(),
+            nonce: "test-nonce".to_string(),
+        };
+        let voices = list_vieneu_voices(&client, &voices_connection)
             .await
             .unwrap();
         assert_eq!(voices[0].id, "Pham Tuyen");
@@ -850,14 +822,24 @@ mod tests {
         );
         let config = LocalTranslationConfig {
             tts_provider: LocalTtsProvider::Vieneu,
-            vieneu_base_url: audio_url,
             vieneu_style: "tu_nhien".to_string(),
             voice_id: "Pham Tuyen".to_string(),
             ..LocalTranslationConfig::default()
         };
-        let audio = synthesize("Xin chao.", &config, Arc::new(AtomicBool::new(false)))
-            .await
-            .unwrap();
+        let audio_connection = VieNeuConnection {
+            base_url: audio_url,
+            token: "test-token".to_string(),
+            nonce: "test-nonce".to_string(),
+        };
+        let audio = synthesize_vieneu(
+            &client,
+            &audio_connection,
+            "Xin chao.",
+            &config,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .await
+        .unwrap();
         assert_eq!(audio.sample_rate_hz, LOCAL_TTS_SAMPLE_RATE);
         assert_eq!(audio.pcm16_mono.len(), 2);
     }
@@ -897,7 +879,7 @@ mod tests {
             voice_id: voice.id,
             ..LocalTranslationConfig::default()
         };
-        let audio = synthesize("Xin chào.", &config, Arc::new(AtomicBool::new(false)))
+        let audio = synthesize(None, "Xin chào.", &config, Arc::new(AtomicBool::new(false)))
             .await
             .expect("Windows synthesis should return PCM");
         assert_eq!(audio.sample_rate_hz, LOCAL_TTS_SAMPLE_RATE);

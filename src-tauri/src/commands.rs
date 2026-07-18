@@ -7,18 +7,27 @@ use crate::models::{
     LocalTtsProvider, LocalVoice, LookHelpConfig, LookHelpStatus, ManualBoundaryRequest,
     MeetingSummaryConfig, MeetingSummaryResult, MeetingSummaryStatus, MeetingSummaryStatusEvent,
     OverlayConfig, OverlayGeometry, OverlayStatus, SessionConfig, TranscriptItem,
-    TranslationCredentialStatus, TranslationProvider, WhisperModelOption,
+    TranslationCredentialStatus, TranslationProvider, VieNeuRuntimeStatus, WhisperModelOption,
 };
 use crate::session::AppState;
-use crate::{ai, llm, local_translation, look_help, overlay, security, summary_agent, tts};
+use crate::{ai, llm, local_translation, look_help, overlay, security, summary_agent, tts, vieneu};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
+
+async fn run_blocking<T>(operation: impl FnOnce() -> AppResult<T> + Send + 'static) -> AppResult<T>
+where
+    T: Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(operation)
+        .await
+        .map_err(|error| AppError::new("background_task_error", error.to_string()))?
+}
 
 #[tauri::command]
-pub fn get_app_status(state: State<'_, AppState>) -> AppResult<AppStatus> {
-    state.app_status()
+pub async fn get_app_status(app: AppHandle) -> AppResult<AppStatus> {
+    run_blocking(move || app.state::<AppState>().app_status()).await
 }
 
 #[tauri::command]
@@ -27,8 +36,8 @@ pub fn get_transcript_snapshot(state: State<'_, AppState>) -> AppResult<Vec<Tran
 }
 
 #[tauri::command]
-pub fn list_audio_devices() -> AppResult<AudioDevices> {
-    audio::list_devices()
+pub async fn list_audio_devices() -> AppResult<AudioDevices> {
+    run_blocking(audio::list_devices).await
 }
 
 #[tauri::command]
@@ -41,8 +50,12 @@ pub async fn start_session(
 }
 
 #[tauri::command]
-pub fn pause_session(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
-    state.pause_session(app)
+pub async fn pause_session(app: AppHandle) -> AppResult<()> {
+    run_blocking(move || {
+        let state = app.state::<AppState>();
+        state.pause_session(app.clone())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -51,8 +64,12 @@ pub async fn resume_session(app: AppHandle, state: State<'_, AppState>) -> AppRe
 }
 
 #[tauri::command]
-pub fn stop_session(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
-    state.stop_session(app)
+pub async fn stop_session(app: AppHandle) -> AppResult<()> {
+    run_blocking(move || {
+        let state = app.state::<AppState>();
+        state.stop_session(app.clone())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -65,28 +82,33 @@ pub fn force_translate_boundary(
 }
 
 #[tauri::command]
-pub fn save_api_key(api_key: String) -> AppResult<()> {
-    security::save_api_key(&api_key)
+pub async fn save_api_key(api_key: String) -> AppResult<()> {
+    run_blocking(move || security::save_api_key(&api_key)).await
 }
 
 #[tauri::command]
-pub fn save_translation_api_key(provider: TranslationProvider, api_key: String) -> AppResult<()> {
-    security::save_translation_api_key(provider, &api_key)
+pub async fn save_translation_api_key(
+    provider: TranslationProvider,
+    api_key: String,
+) -> AppResult<()> {
+    run_blocking(move || security::save_translation_api_key(provider, &api_key)).await
 }
 
 #[tauri::command]
-pub fn has_api_key() -> bool {
-    security::has_api_key()
+pub async fn has_api_key() -> AppResult<bool> {
+    run_blocking(|| Ok(security::has_api_key())).await
 }
 
 #[tauri::command]
-pub fn has_translation_api_key(provider: TranslationProvider) -> bool {
-    security::has_translation_api_key(provider)
+pub async fn has_translation_api_key(provider: TranslationProvider) -> AppResult<bool> {
+    run_blocking(move || Ok(security::has_translation_api_key(provider))).await
 }
 
 #[tauri::command]
-pub fn translation_credential_status(provider: TranslationProvider) -> TranslationCredentialStatus {
-    security::translation_credential_status(provider)
+pub async fn translation_credential_status(
+    provider: TranslationProvider,
+) -> AppResult<TranslationCredentialStatus> {
+    run_blocking(move || Ok(security::translation_credential_status(provider))).await
 }
 
 #[tauri::command]
@@ -132,27 +154,28 @@ pub async fn test_translation_api_key(
 }
 
 #[tauri::command]
-pub fn get_local_translation_config() -> AppResult<LocalTranslationConfig> {
-    local_translation::get_config()
+pub async fn get_local_translation_config() -> AppResult<LocalTranslationConfig> {
+    run_blocking(local_translation::get_config).await
 }
 
 #[tauri::command]
-pub fn save_local_translation_config(
+pub async fn save_local_translation_config(
     draft: LocalTranslationConfigDraft,
 ) -> AppResult<LocalTranslationConfig> {
-    local_translation::save_config(draft)
+    run_blocking(move || local_translation::save_config(draft)).await
 }
 
 #[tauri::command]
 pub async fn test_local_translation_config(
+    app: AppHandle,
     draft: LocalTranslationConfigDraft,
 ) -> AppResult<LocalTranslationTestResult> {
-    local_translation::test_config(draft).await
+    local_translation::test_config(Some(&app), draft).await
 }
 
 #[tauri::command]
-pub fn list_whisper_models() -> Vec<WhisperModelOption> {
-    local_translation::whisper_models()
+pub async fn list_whisper_models() -> AppResult<Vec<WhisperModelOption>> {
+    run_blocking(|| Ok(local_translation::whisper_models())).await
 }
 
 #[tauri::command]
@@ -161,11 +184,40 @@ pub async fn download_whisper_model(app: AppHandle, model_id: String) -> AppResu
 }
 
 #[tauri::command]
+pub async fn get_vieneu_runtime_status(
+    app: AppHandle,
+    manager: State<'_, vieneu::VieNeuManager>,
+) -> AppResult<VieNeuRuntimeStatus> {
+    manager.status(&app).await
+}
+
+#[tauri::command]
+pub async fn install_vieneu_runtime(
+    app: AppHandle,
+    manager: State<'_, vieneu::VieNeuManager>,
+) -> AppResult<VieNeuRuntimeStatus> {
+    manager.install(app).await
+}
+
+#[tauri::command]
+pub fn cancel_vieneu_runtime_install(manager: State<'_, vieneu::VieNeuManager>) {
+    manager.cancel_install();
+}
+
+#[tauri::command]
+pub async fn restart_vieneu_runtime(
+    app: AppHandle,
+    manager: State<'_, vieneu::VieNeuManager>,
+) -> AppResult<VieNeuRuntimeStatus> {
+    manager.restart(&app).await
+}
+
+#[tauri::command]
 pub async fn list_local_tts_voices(
+    app: AppHandle,
     provider: LocalTtsProvider,
-    vieneu_base_url: String,
 ) -> AppResult<Vec<LocalVoice>> {
-    tts::list_voices(provider, &vieneu_base_url).await
+    tts::list_voices(Some(&app), provider).await
 }
 
 #[tauri::command]
@@ -190,6 +242,7 @@ pub async fn preview_local_tts(
     }
     let config = local_translation::normalize_and_validate(draft, true)?;
     let audio = tts::synthesize(
+        Some(&app),
         "Xin chào. Đây là giọng dịch cục bộ.",
         &config,
         Arc::new(AtomicBool::new(false)),
@@ -219,18 +272,18 @@ pub async fn preview_local_tts(
 }
 
 #[tauri::command]
-pub fn list_llm_profiles() -> AppResult<Vec<LlmProviderProfile>> {
-    llm::list_profiles()
+pub async fn list_llm_profiles() -> AppResult<Vec<LlmProviderProfile>> {
+    run_blocking(llm::list_profiles).await
 }
 
 #[tauri::command]
-pub fn save_llm_profile(draft: LlmProviderProfileDraft) -> AppResult<LlmProviderProfile> {
-    llm::save_profile(draft)
+pub async fn save_llm_profile(draft: LlmProviderProfileDraft) -> AppResult<LlmProviderProfile> {
+    run_blocking(move || llm::save_profile(draft)).await
 }
 
 #[tauri::command]
-pub fn delete_llm_profile(profile_id: String) -> AppResult<()> {
-    llm::delete_profile(&profile_id)
+pub async fn delete_llm_profile(profile_id: String) -> AppResult<()> {
+    run_blocking(move || llm::delete_profile(&profile_id)).await
 }
 
 #[tauri::command]
@@ -282,33 +335,45 @@ pub fn export_transcript(
 }
 
 #[tauri::command]
-pub fn play_test_tone(
-    state: State<'_, AppState>,
+pub async fn play_test_tone(
+    app: AppHandle,
     output_device_id: String,
     output_channel: AudioOutputChannel,
 ) -> AppResult<()> {
-    state.start_test_tone(&output_device_id, output_channel)
+    run_blocking(move || {
+        app.state::<AppState>()
+            .start_test_tone(&output_device_id, output_channel)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn stop_test_tone(state: State<'_, AppState>) -> AppResult<()> {
-    state.stop_test_tone()
+pub async fn stop_test_tone(app: AppHandle) -> AppResult<()> {
+    run_blocking(move || app.state::<AppState>().stop_test_tone()).await
 }
 
 #[tauri::command]
-pub fn start_local_monitor(
+pub async fn start_local_monitor(
     app: AppHandle,
-    state: State<'_, AppState>,
     input_device_id: String,
     output_device_id: String,
     output_channel: AudioOutputChannel,
 ) -> AppResult<()> {
-    state.start_local_monitor(app, &input_device_id, &output_device_id, output_channel)
+    run_blocking(move || {
+        let state = app.state::<AppState>();
+        state.start_local_monitor(
+            app.clone(),
+            &input_device_id,
+            &output_device_id,
+            output_channel,
+        )
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn stop_local_monitor(state: State<'_, AppState>) -> AppResult<()> {
-    state.stop_local_monitor()
+pub async fn stop_local_monitor(app: AppHandle) -> AppResult<()> {
+    run_blocking(move || app.state::<AppState>().stop_local_monitor()).await
 }
 
 #[tauri::command]

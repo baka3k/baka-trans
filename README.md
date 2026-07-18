@@ -37,7 +37,7 @@ It does not require a Google/OpenAI translation key. The translated voice uses t
 1. Install and start [Ollama](https://docs.ollama.com/quickstart).
 2. Pull Gemma with `ollama pull gemma3:4b`, or configure another installed Gemma variant. Ollama also documents its [model pull API](https://docs.ollama.com/api/pull).
 3. Open **Local LLM**, choose a multilingual Whisper model, and select **Download model**. The app stores it in its private data folder and fills the GGML path automatically. You can still use an existing absolute model path. The [whisper.cpp model guide](https://github.com/ggml-org/whisper.cpp/blob/master/models/README.md) lists the official model files.
-4. Choose a speech engine. For System TTS, install a Vietnamese voice in Windows Speech settings or macOS system voice settings. For VieNeu-TTS, start the [local VieNeu bridge](sidecars/vieneu-tts/README.md).
+4. Choose a speech engine. For System TTS, install a Vietnamese voice in Windows Speech settings or macOS system voice settings. For VieNeu-TTS, select **Install VieNeu-TTS**. The app downloads and verifies the pinned ONNX/int8 model (about 244 MiB), resumes interrupted downloads, and manages the private runtime automatically.
 5. Choose **Local Whisper**, then open **Local LLM**. Set the Gemma model, download or select a Whisper model, select the speech engine, refresh and choose a Vietnamese voice, rate, and volume. Save, then select **Test local pipeline**.
 6. Under **Audio**, choose the meeting source, translated output, and channel. Use **Test selected voice** to verify the routed output, then start. The language pair is fixed to Japanese (`ja`) -> Vietnamese (`vi`) for this version.
 
@@ -65,15 +65,17 @@ Common local errors:
 | `local_ollama_request_error` | Start Ollama and verify the configured origin, normally `http://localhost:11434`. |
 | `local_ollama_provider_error` | Pull the configured model and retry the Local LLM test. |
 | `local_translation_backlog_full` | Use shorter utterances, a smaller/faster model, or more capable hardware. |
-| `local_vieneu_unreachable` | Start `sidecars/vieneu-tts/server.py` and verify the loopback bridge URL. |
-| `local_vieneu_provider_error` | Check the VieNeu bridge terminal, model download, selected preset voice, and reading style. |
+| `vieneu_model_not_installed` | Open Local LLM and select **Install VieNeu-TTS**. |
+| `vieneu_install_failed` | Select **Resume setup**; existing verified download data is reused. |
+| `vieneu_start_failed` | Select **Repair** or **Restart VieNeu-TTS** in Local LLM. |
+| `local_vieneu_provider_error` | Restart VieNeu-TTS, then verify the selected preset voice and reading style. |
 | `local_tts_voice_missing` | Refresh and reselect the configured system or VieNeu voice, then save and retest. |
 | `local_tts_backlog_full` | Reduce local-model latency or pause until speech catches up. |
 | `local_tts_playback_error` | Reconnect and reselect the translated output device. |
 
 ## Build Installer
 
-The current Tauri bundle config is set up for macOS only:
+Tauri produces target-native installers. Build on the operating system you intend to ship.
 
 - `.dmg` installer
 - `.app` application bundle
@@ -110,7 +112,7 @@ The generated macOS `.dmg` and `.app` files do not run on Windows.
 
 Windows uses its built-in WASAPI loopback capture so users can leave Teams on their normal speaker or headset. No virtual audio driver is required for the default workflow. VB-CABLE is only a troubleshooting fallback.
 
-To create a Windows build, use a Windows machine or Windows CI with Node.js, Rust, CMake, and Microsoft Visual Studio Build Tools (including C++) installed. Then build with Windows bundle targets:
+To create a Windows build, use a Windows machine or Windows CI with Node.js, Rust, CMake, `uv`, and Microsoft Visual Studio Build Tools (including C++) installed. The release script first creates the standalone VieNeu bridge and then builds the NSIS installer:
 
 ```powershell
 npm ci

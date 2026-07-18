@@ -2,6 +2,8 @@ import type {
   LocalTranslationConfigDraft,
   LocalTranslationTestResult,
   LocalVoice,
+  VieNeuRuntimeProgress,
+  VieNeuRuntimeStatus,
   WhisperModelDownloadProgress,
   WhisperModelOption,
 } from "../../types";
@@ -46,6 +48,9 @@ interface LocalLlmSettingsProps {
   selectedWhisperModelId: string;
   whisperDownload: WhisperModelDownloadProgress | null;
   whisperDownloading: boolean;
+  vieneuRuntime?: VieNeuRuntimeStatus | null;
+  vieneuProgress?: VieNeuRuntimeProgress | null;
+  vieneuBusy?: boolean;
   onChange: (draft: LocalTranslationConfigDraft) => void;
   onSave: () => void;
   onTest: () => void;
@@ -53,9 +58,15 @@ interface LocalLlmSettingsProps {
   onRefreshVoices?: () => void;
   onWhisperModelSelect: (modelId: string) => void;
   onWhisperDownload: () => void;
+  onVieNeuInstall?: () => void;
+  onVieNeuCancel?: () => void;
+  onVieNeuRestart?: () => void;
 }
 
-export function validateLocalTranslationDraft(draft: LocalTranslationConfigDraft): string[] {
+export function validateLocalTranslationDraft(
+  draft: LocalTranslationConfigDraft,
+  vieneuRuntime?: VieNeuRuntimeStatus | null,
+): string[] {
   const errors: string[] = [];
   if (!/^https?:\/\//i.test(draft.baseUrl.trim())) {
     errors.push("Enter an http or https Ollama server URL.");
@@ -63,11 +74,10 @@ export function validateLocalTranslationDraft(draft: LocalTranslationConfigDraft
   if (!draft.model.trim()) {
     errors.push("Choose an installed Ollama model.");
   }
-  if (!draft.voiceId.trim()) {
+  if (draft.ttsProvider === "vieneu" && vieneuRuntime && !vieneuRuntime.modelInstalled) {
+    errors.push("Install VieNeu-TTS before choosing a neural voice.");
+  } else if (!draft.voiceId.trim()) {
     errors.push("Choose an available local voice.");
-  }
-  if (draft.ttsProvider === "vieneu" && !/^http:\/\/(localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::\d+)?\/?$/i.test(draft.vieneuBaseUrl.trim())) {
-    errors.push("Enter a loopback VieNeu-TTS bridge URL.");
   }
   if (!draft.modelPath.trim()) {
     errors.push("Choose a Whisper GGML model file.");
@@ -113,6 +123,9 @@ export function LocalLlmSettings({
   selectedWhisperModelId,
   whisperDownload,
   whisperDownloading,
+  vieneuRuntime = null,
+  vieneuProgress = null,
+  vieneuBusy = false,
   onChange,
   onSave,
   onTest,
@@ -120,8 +133,11 @@ export function LocalLlmSettings({
   onRefreshVoices = () => undefined,
   onWhisperModelSelect,
   onWhisperDownload,
+  onVieNeuInstall = () => undefined,
+  onVieNeuCancel = () => undefined,
+  onVieNeuRestart = () => undefined,
 }: LocalLlmSettingsProps) {
-  const errors = validateLocalTranslationDraft(draft);
+  const errors = validateLocalTranslationDraft(draft, vieneuRuntime);
   const update = (patch: Partial<LocalTranslationConfigDraft>) =>
     onChange({ ...draft, ...patch });
   const number = (value: string, fallback: number) => {
@@ -214,16 +230,15 @@ export function LocalLlmSettings({
           </select>
         </label>
         {draft.ttsProvider === "vieneu" ? (
-          <div className="field-grid two">
-            <label className="field">
-              <span>VieNeu bridge URL</span>
-              <input
-                value={draft.vieneuBaseUrl}
-                placeholder="http://127.0.0.1:23334"
-                onChange={(event) => update({ vieneuBaseUrl: event.currentTarget.value })}
-              />
-              <small>Start the loopback bridge in sidecars/vieneu-tts before refreshing voices.</small>
-            </label>
+          <>
+            <VieNeuRuntimeCard
+              status={vieneuRuntime}
+              progress={vieneuProgress}
+              busy={vieneuBusy}
+              onInstall={onVieNeuInstall}
+              onCancel={onVieNeuCancel}
+              onRestart={onVieNeuRestart}
+            />
             <label className="field">
               <span>Reading style</span>
               <select
@@ -239,30 +254,34 @@ export function LocalLlmSettings({
                 <option value="doc_truyen">Storytelling</option>
               </select>
             </label>
-          </div>
+          </>
         ) : null}
-        <label className="field">
-          <span>{draft.ttsProvider === "vieneu" ? "VieNeu preset voice" : "Installed system voice"}</span>
-          <select
-            value={draft.voiceId}
-            onChange={(event) => update({ voiceId: event.currentTarget.value })}
-          >
-            <option value="">Choose a voice</option>
-            {voices.map((voice) => (
-              <option value={voice.id} key={voice.id}>
-                {voice.name} · {voice.language}
-              </option>
-            ))}
-          </select>
-          <small>
-            {draft.ttsProvider === "vieneu"
-              ? "Preset voices are loaded from the local VieNeu bridge."
-              : "Vietnamese voices are shown first. Install one in system speech settings if empty."}
-          </small>
-        </label>
-        <button type="button" onClick={onRefreshVoices} disabled={voicesLoading || saving || testing}>
-          {voicesLoading ? "Refreshing voices" : "Refresh voice list"}
-        </button>
+        {draft.ttsProvider === "system" || vieneuRuntime?.modelInstalled ? (
+          <>
+            <label className="field">
+              <span>{draft.ttsProvider === "vieneu" ? "VieNeu preset voice" : "Installed system voice"}</span>
+              <select
+                value={draft.voiceId}
+                onChange={(event) => update({ voiceId: event.currentTarget.value })}
+              >
+                <option value="">Choose a voice</option>
+                {voices.map((voice) => (
+                  <option value={voice.id} key={voice.id}>
+                    {voice.name} · {voice.language}
+                  </option>
+                ))}
+              </select>
+              <small>
+                {draft.ttsProvider === "vieneu"
+                  ? "Preset voices are loaded from the private app-managed runtime."
+                  : "Vietnamese voices are shown first. Install one in system speech settings if empty."}
+              </small>
+            </label>
+            <button type="button" onClick={onRefreshVoices} disabled={voicesLoading || saving || testing || vieneuBusy}>
+              {voicesLoading ? "Refreshing voices" : "Refresh voice list"}
+            </button>
+          </>
+        ) : null}
         <div className="field-grid two">
           <NumberField
             label="Speaking rate"
@@ -467,6 +486,71 @@ export function LocalLlmSettings({
       </p>
     </div>
   );
+}
+
+function VieNeuRuntimeCard({
+  status,
+  progress,
+  busy,
+  onInstall,
+  onCancel,
+  onRestart,
+}: {
+  status: VieNeuRuntimeStatus | null;
+  progress: VieNeuRuntimeProgress | null;
+  busy: boolean;
+  onInstall: () => void;
+  onCancel: () => void;
+  onRestart: () => void;
+}) {
+  const phase = progress?.phase ?? status?.phase ?? "not_installed";
+  const active = phase === "downloading" || phase === "verifying";
+  const installed = Boolean(status?.modelInstalled);
+  const completedBytes = progress?.downloadedBytes ?? status?.installedBytes ?? 0;
+  const totalBytes = progress?.totalBytes ?? status?.totalBytes ?? 0;
+  const percent = progress?.percent ??
+    (status?.totalBytes ? Math.round((status.installedBytes / status.totalBytes) * 100) : 0);
+  const message = progress?.message ?? status?.message ?? "Checking the managed VieNeu runtime…";
+  const actionLabel = phase === "paused" ? "Resume setup" : phase === "repair_needed" || phase === "error" ? "Repair" : "Install VieNeu-TTS";
+
+  return (
+    <div className={`vieneu-runtime-card ${installed ? "installed" : ""}`} aria-live="polite">
+      <div className="vieneu-runtime-heading">
+        <div>
+          <strong>Managed VieNeu-TTS</strong>
+          <span>Runs privately on this computer; no Python or terminal setup required.</span>
+        </div>
+        <span className="vieneu-runtime-badge">{phase.replace(/_/g, " ")}</span>
+      </div>
+      <p>{message}</p>
+      {totalBytes ? (
+        <p>Model download: {formatMib(totalBytes)} · pinned ONNX/int8 CPU runtime</p>
+      ) : null}
+      {(active || phase === "paused") && totalBytes ? (
+        <div className="vieneu-runtime-progress">
+          <progress max={100} value={percent} aria-label="VieNeu-TTS setup progress" />
+          <span>{percent}% · {formatMib(completedBytes)} / {formatMib(totalBytes)}</span>
+        </div>
+      ) : null}
+      <div className="button-row vieneu-runtime-actions">
+        {active ? (
+          <button type="button" onClick={onCancel}>Pause download</button>
+        ) : installed && phase !== "repair_needed" && phase !== "error" ? (
+          <button type="button" onClick={onRestart} disabled={busy || phase === "starting"}>
+            {phase === "starting" ? "Starting VieNeu-TTS" : status?.running ? "Restart VieNeu-TTS" : "Start VieNeu-TTS"}
+          </button>
+        ) : (
+          <button type="button" className="primary" onClick={onInstall} disabled={busy || phase === "unsupported"}>
+            {busy ? "Preparing setup" : actionLabel}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function formatMib(bytes: number) {
+  return `${(bytes / 1024 / 1024).toFixed(bytes > 0 ? 1 : 0)} MiB`;
 }
 
 function NumberField({

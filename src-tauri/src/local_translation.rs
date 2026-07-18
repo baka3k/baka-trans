@@ -410,6 +410,7 @@ pub fn validated_runtime_config() -> AppResult<LocalTranslationConfig> {
 }
 
 pub async fn test_config(
+    app: Option<&tauri::AppHandle>,
     draft: LocalTranslationConfigDraft,
 ) -> AppResult<LocalTranslationTestResult> {
     let fallback_model = draft.model.trim().to_string();
@@ -429,7 +430,7 @@ pub async fn test_config(
             ));
         }
     };
-    let tts_voice_available = crate::tts::voice_is_available(&config).await?;
+    let tts_voice_available = crate::tts::voice_is_available(app, &config).await?;
     if !tts_voice_available {
         let provider_name = match config.tts_provider {
             LocalTtsProvider::System => "system",
@@ -600,17 +601,9 @@ pub fn normalize_and_validate(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned);
-    let vieneu_base_url = match draft.tts_provider {
-        LocalTtsProvider::System => {
-            let value = draft.vieneu_base_url.trim();
-            if value.is_empty() {
-                "http://127.0.0.1:23334".to_string()
-            } else {
-                value.to_string()
-            }
-        }
-        LocalTtsProvider::Vieneu => crate::tts::normalize_vieneu_base_url(&draft.vieneu_base_url)?,
-    };
+    // Retained in the persisted schema for backward compatibility. VieNeu is now
+    // reached exclusively through the app-managed, authenticated runtime.
+    let vieneu_base_url = "managed://vieneu".to_string();
     let vieneu_style = draft.vieneu_style.trim();
     if !matches!(vieneu_style, "tu_nhien" | "tin_tuc" | "doc_truyen") {
         return Err(AppError::new(
@@ -1080,11 +1073,14 @@ mod tests {
     async fn test_config_reports_partial_whisper_health() {
         let model_path = std::env::temp_dir().join(format!("baka-trans-{}.bin", Uuid::new_v4()));
         std::fs::write(&model_path, b"not-a-whisper-model").unwrap();
-        let result = test_config(LocalTranslationConfigDraft {
-            model: "qwen".to_string(),
-            model_path: model_path.to_string_lossy().into_owned(),
-            ..LocalTranslationConfigDraft::default()
-        })
+        let result = test_config(
+            None,
+            LocalTranslationConfigDraft {
+                model: "qwen".to_string(),
+                model_path: model_path.to_string_lossy().into_owned(),
+                ..LocalTranslationConfigDraft::default()
+            },
+        )
         .await
         .unwrap();
 

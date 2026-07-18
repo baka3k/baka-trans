@@ -445,8 +445,13 @@ fn spawn_tts_worker(
                 .speech_stage
                 .store(SPEECH_SYNTHESIZING, Ordering::SeqCst);
             settle_pipeline_activity(&app, generation, &activity)?;
-            let synthesis =
-                tts::synthesize(&request.translated_text, &config, cancellation.clone()).await;
+            let synthesis = tts::synthesize(
+                Some(&app),
+                &request.translated_text,
+                &config,
+                cancellation.clone(),
+            )
+            .await;
             if !is_worker_active(generation, &active_generation, &cancellation) {
                 break;
             }

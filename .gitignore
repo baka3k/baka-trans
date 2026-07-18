@@ -7,3 +7,7 @@ src-tauri/target/
 .cache/**
 sidecars/vieneu-tts/.venv/
 sidecars/vieneu-tts/__pycache__/
+sidecars/vieneu-tts/build/
+sidecars/vieneu-tts/dist/
+sidecars/vieneu-tts/bundle/*
+!sidecars/vieneu-tts/bundle/.gitkeep

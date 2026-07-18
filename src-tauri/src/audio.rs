@@ -8,13 +8,14 @@ use std::collections::VecDeque;
 use std::f32::consts::PI;
 use std::sync::mpsc as std_mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
 
 pub const OPENAI_REALTIME_SAMPLE_RATE: u32 = 24_000;
 pub const GOOGLE_LIVE_INPUT_SAMPLE_RATE: u32 = 16_000;
 pub const GOOGLE_LIVE_OUTPUT_SAMPLE_RATE: u32 = 24_000;
+const AUDIO_LEVEL_EVENT_INTERVAL: Duration = Duration::from_millis(50);
 
 #[cfg(target_os = "windows")]
 const LOOPBACK_DEVICE_PREFIX: &str = "loopback";
@@ -33,6 +34,35 @@ pub struct PlaybackRuntime {
 pub struct TestToneRuntime {
     stop_tx: std_mpsc::Sender<()>,
     join_handle: Option<thread::JoinHandle<()>>,
+}
+
+struct AudioLevelEventThrottle {
+    interval: Duration,
+    last_emitted_at: Option<Instant>,
+}
+
+impl AudioLevelEventThrottle {
+    fn new(interval: Duration) -> Self {
+        Self {
+            interval,
+            last_emitted_at: None,
+        }
+    }
+
+    fn should_emit(&mut self) -> bool {
+        self.should_emit_at(Instant::now())
+    }
+
+    fn should_emit_at(&mut self, now: Instant) -> bool {
+        if self
+            .last_emitted_at
+            .is_some_and(|last| now.saturating_duration_since(last) < self.interval)
+        {
+            return false;
+        }
+        self.last_emitted_at = Some(now);
+        true
+    }
 }
 
 impl PlaybackRuntime {
@@ -369,6 +399,7 @@ fn handle_input(
     sample_rate: u32,
     tx: &mpsc::Sender<Vec<i16>>,
     monitor_tx: Option<&std_mpsc::SyncSender<Vec<i16>>>,
+    level_event_throttle: &mut AudioLevelEventThrottle,
     app: &AppHandle,
     input_device_id: &str,
     target_sample_rate: u32,
@@ -387,14 +418,16 @@ fn handle_input(
     } else {
         let _ = tx.try_send(pcm);
     }
-    let _ = app.emit(
-        "audio-level",
-        AudioLevelEvent {
-            input_device_id: input_device_id.to_string(),
-            rms,
-            peak,
-        },
-    );
+    if level_event_throttle.should_emit() {
+        let _ = app.emit(
+            "audio-level",
+            AudioLevelEvent {
+                input_device_id: input_device_id.to_string(),
+                rms,
+                peak,
+            },
+        );
+    }
 }
 
 fn run_capture_thread(
@@ -450,6 +483,7 @@ fn run_capture_thread(
             let app = app.clone();
             let tx = tx.clone();
             let device_id = device_id.clone();
+            let mut level_event_throttle = AudioLevelEventThrottle::new(AUDIO_LEVEL_EVENT_INTERVAL);
             device.build_input_stream(
                 &config,
                 move |data: &[f32], _| {
@@ -459,6 +493,7 @@ fn run_capture_thread(
                         sample_rate,
                         &tx,
                         monitor_tx.as_ref(),
+                        &mut level_event_throttle,
                         &app,
                         &device_id,
                         target_sample_rate,
@@ -472,6 +507,7 @@ fn run_capture_thread(
             let app = app.clone();
             let tx = tx.clone();
             let device_id = device_id.clone();
+            let mut level_event_throttle = AudioLevelEventThrottle::new(AUDIO_LEVEL_EVENT_INTERVAL);
             device.build_input_stream(
                 &config,
                 move |data: &[i16], _| {
@@ -485,6 +521,7 @@ fn run_capture_thread(
                         sample_rate,
                         &tx,
                         monitor_tx.as_ref(),
+                        &mut level_event_throttle,
                         &app,
                         &device_id,
                         target_sample_rate,
@@ -498,6 +535,7 @@ fn run_capture_thread(
             let app = app.clone();
             let tx = tx.clone();
             let device_id = device_id.clone();
+            let mut level_event_throttle = AudioLevelEventThrottle::new(AUDIO_LEVEL_EVENT_INTERVAL);
             device.build_input_stream(
                 &config,
                 move |data: &[u16], _| {
@@ -511,6 +549,7 @@ fn run_capture_thread(
                         sample_rate,
                         &tx,
                         monitor_tx.as_ref(),
+                        &mut level_event_throttle,
                         &app,
                         &device_id,
                         target_sample_rate,
@@ -1017,6 +1056,20 @@ fn find_device(device_id: &str, kind: DeviceKind) -> AppResult<Device> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
+
+    #[test]
+    fn audio_level_events_are_rate_limited() {
+        let started = Instant::now();
+        let mut throttle = AudioLevelEventThrottle::new(Duration::from_millis(50));
+
+        assert!(throttle.should_emit_at(started));
+        assert!(!throttle.should_emit_at(started + Duration::from_millis(10)));
+        assert!(!throttle.should_emit_at(started + Duration::from_millis(49)));
+        assert!(throttle.should_emit_at(started + Duration::from_millis(50)));
+        assert!(!throttle.should_emit_at(started + Duration::from_millis(75)));
+        assert!(throttle.should_emit_at(started + Duration::from_millis(100)));
+    }
 
     #[test]
     fn resamples_to_expected_length() {

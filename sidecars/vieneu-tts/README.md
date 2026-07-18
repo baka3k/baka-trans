@@ -1,30 +1,28 @@
-# VieNeu-TTS bridge
+# VieNeu-TTS managed bridge
 
-This loopback-only service keeps VieNeu-TTS v3 Turbo loaded while baka-trans is running.
-It exposes health, preset voice discovery, and PCM16 WAV synthesis to the Rust desktop backend.
+This private loopback bridge is bundled with Baka Trans. The desktop app owns its
+installation, authenticated process, model download, health checks, and shutdown.
+End users do not need Python, `uv`, a terminal, or a bridge URL.
 
-## Run
+The pinned ONNX/int8 model is downloaded only after the user chooses **Install
+VieNeu-TTS**. It is verified by exact file size and SHA-256, then stored under the
+application's local data directory. Interrupted downloads remain resumable.
+
+## Developer checks
 
 ```powershell
 cd sidecars/vieneu-tts
 uv sync
-uv run python server.py
+uv run python -m py_compile server.py
+uv run python server.py --help
 ```
 
-The first start downloads the VieNeu model. The default endpoint is
-`http://127.0.0.1:23334`, using the ONNX int8 CPU backend. Optional flags:
+Build the Windows one-folder runtime (PyInstaller must run on the target OS):
 
 ```powershell
-uv run python server.py --precision fp32 --threads 8
+./scripts/build-vieneu-sidecar.ps1
 ```
 
-Keep the terminal running, select **VieNeu-TTS** in Local LLM settings, refresh the
-voice list, then save and test the local pipeline.
-
-## API
-
-- `GET /health`
-- `GET /voices`
-- `POST /synthesize` with `text`, `voice`, `style`, `rate`, and `volume`
-
-The server only accepts loopback bind addresses. Do not expose it through a public proxy.
+The release script runs this automatically before the Tauri installer build.
+The bridge binds to `127.0.0.1` on an ephemeral port, requires a per-process bearer
+token, and exits when its inherited parent-lifetime pipe closes.
