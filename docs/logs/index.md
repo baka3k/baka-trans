@@ -1,5 +1,6 @@
 # Engineering Logs
 
+- [2026-07-18 — App-managed VieNeu runtime](2026-07-18-managed-vieneu-runtime.md)
 - [2026-07-18 — VieNeu-TTS provider](2026-07-18-vieneu-tts-provider.md)
 - [2026-07-18 — Responsive UI redesign](2026-07-18-responsive-ui-redesign.md)
 - [2026-07-18 — Local spoken translation](2026-07-18-local-spoken-translation.md)
