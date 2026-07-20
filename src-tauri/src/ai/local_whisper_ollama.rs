@@ -1,7 +1,7 @@
 use crate::error::{AppError, AppResult};
 use crate::local_translation::OllamaClient;
 use crate::models::{
-    LocalTranslationConfig, ManualBoundaryEvent, ManualBoundaryStatus, SessionStatus,
+    Language, LocalTranslationConfig, ManualBoundaryEvent, ManualBoundaryStatus, SessionStatus,
     TranscriptItem, TranscriptStatus, TranscriptUpdateMode, TranslatedAudioLevelEvent,
 };
 use crate::session::AppState;
@@ -42,6 +42,7 @@ struct TranslationWorker {
     cancellation: Arc<AtomicBool>,
     activity: Arc<PipelineActivity>,
     tts_tx: mpsc::Sender<TtsRequest>,
+    whisper_language: Option<String>,
 }
 
 #[derive(Default)]
@@ -75,6 +76,8 @@ pub struct LocalTranslationRuntime {
     config: LocalTranslationConfig,
     context: Arc<WhisperContext>,
     playback_tx: std_mpsc::SyncSender<Vec<i16>>,
+    source_language: Language,
+    target_language: Language,
 }
 
 impl LocalTranslationRuntime {
@@ -82,11 +85,15 @@ impl LocalTranslationRuntime {
         config: LocalTranslationConfig,
         context: Arc<WhisperContext>,
         playback_tx: std_mpsc::SyncSender<Vec<i16>>,
+        source_language: Language,
+        target_language: Language,
     ) -> Self {
         Self {
             config,
             context,
             playback_tx,
+            source_language,
+            target_language,
         }
     }
 }
@@ -110,8 +117,12 @@ pub async fn run_local_translation(
         config,
         context,
         playback_tx,
+        source_language,
+        target_language,
     } = runtime;
-    let ollama = OllamaClient::new(&config)?;
+    let whisper_language =
+        crate::local_translation::whisper_language_code(source_language)?.map(str::to_string);
+    let ollama = OllamaClient::new(&config, source_language, target_language)?;
     let (utterance_tx, utterance_rx) = mpsc::channel(UTTERANCE_QUEUE_CAPACITY);
     let cancellation = Arc::new(AtomicBool::new(false));
     let activity = Arc::new(PipelineActivity::default());
@@ -141,6 +152,7 @@ pub async fn run_local_translation(
             cancellation: cancellation.clone(),
             activity,
             tts_tx,
+            whisper_language,
         },
         utterance_rx,
     );
@@ -260,6 +272,7 @@ fn spawn_translation_worker(
             cancellation,
             activity,
             tts_tx,
+            whisper_language,
         } = worker;
         while let Some(utterance) = utterance_rx.recv().await {
             if !is_worker_active(generation, &active_generation, &cancellation) {
@@ -273,7 +286,7 @@ fn spawn_translation_worker(
             let utterance_id = utterance.id.clone();
             let timestamp_ms = utterance.timestamp_ms;
             let threads = config.threads;
-            let language = config.language.clone();
+            let language = whisper_language.clone();
             let whisper_context = context.clone();
             let inference_cancellation = cancellation.clone();
             let transcription = tauri::async_runtime::spawn_blocking(move || {
@@ -281,7 +294,7 @@ fn spawn_translation_worker(
                     &whisper_context,
                     utterance.samples,
                     threads,
-                    &language,
+                    language.as_deref(),
                     inference_cancellation,
                 )
             })
@@ -673,7 +686,7 @@ fn transcribe(
     context: &WhisperContext,
     samples: Vec<i16>,
     threads: u32,
-    language: &str,
+    language: Option<&str>,
     cancellation: Arc<AtomicBool>,
 ) -> AppResult<String> {
     if samples.is_empty() {
@@ -696,7 +709,7 @@ fn transcribe(
         )
     })?;
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-    params.set_language(Some(language));
+    params.set_language(language);
     params.set_translate(false);
     params.set_no_context(true);
     params.set_no_timestamps(true);
@@ -737,7 +750,7 @@ fn transcribe(
     if text.is_empty() {
         return Err(AppError::new(
             "local_whisper_no_speech",
-            "Whisper did not detect Japanese speech in this utterance.",
+            "Whisper did not detect speech in this utterance.",
         ));
     }
     Ok(text)
@@ -777,7 +790,7 @@ impl PcmSegmenter {
         if samples.is_empty() {
             return None;
         }
-        let speech = rms(&samples) >= self.speech_threshold;
+        let speech = chunk_has_speech(&samples, self.speech_threshold);
         if !self.active {
             if !speech {
                 self.push_pre_roll(&samples);
@@ -866,6 +879,17 @@ fn rms(samples: &[i16]) -> f32 {
         .sum::<f64>()
         / samples.len() as f64;
     energy.sqrt() as f32
+}
+
+fn peak(samples: &[i16]) -> f32 {
+    samples
+        .iter()
+        .map(|sample| f32::from(sample.unsigned_abs()) / f32::from(i16::MAX as u16))
+        .fold(0.0_f32, f32::max)
+}
+
+fn chunk_has_speech(samples: &[i16], speech_threshold: f32) -> bool {
+    rms(samples) >= speech_threshold || peak(samples) >= speech_threshold * 2.0
 }
 
 async fn drain_worker(
@@ -972,6 +996,21 @@ mod tests {
         assert!(segmenter.push(samples(50, 2_000)).is_none());
         assert!(segmenter.push(samples(200, 0)).is_none());
         assert!(segmenter.flush().is_none());
+    }
+
+    #[test]
+    fn commits_peak_led_speech_that_is_visible_on_the_input_meter() {
+        let mut segmenter = PcmSegmenter::new(&config());
+        let mut speech = samples(100, 0);
+        for index in (0..speech.len()).step_by(160) {
+            speech[index] = 800;
+        }
+        assert!(rms(&speech) < 0.01);
+        assert!(peak(&speech) > 0.02);
+
+        assert!(segmenter.push(speech.clone()).is_none());
+        assert!(segmenter.push(speech).is_none());
+        assert!(segmenter.push(samples(200, 0)).is_some());
     }
 
     #[test]
@@ -1142,14 +1181,21 @@ mod tests {
             .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]))
             .collect::<Vec<_>>();
         let context = crate::local_translation::load_whisper_context(&model_path, false).unwrap();
-        let source = transcribe(&context, pcm, 4, "ja", Arc::new(AtomicBool::new(false))).unwrap();
+        let source = transcribe(
+            &context,
+            pcm,
+            4,
+            Some("ja"),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
         assert!(!source.is_empty());
         let local_config = LocalTranslationConfig {
             model: ollama_model,
             model_path,
             ..LocalTranslationConfig::default()
         };
-        let (translated, _) = OllamaClient::new(&local_config)
+        let (translated, _) = OllamaClient::new(&local_config, Language::Ja, Language::Vi)
             .unwrap()
             .translate(&source)
             .await

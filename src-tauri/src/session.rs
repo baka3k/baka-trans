@@ -385,7 +385,13 @@ impl AppState {
         let generation = self.next_session_generation();
         let provider = config.translation_provider;
         let local_config = if provider == TranslationProvider::LocalWhisperOllama {
-            Some(local_translation::validated_runtime_config()?)
+            let local_config = local_translation::validated_runtime_config()?;
+            local_translation::validate_local_session_languages(
+                config.source_language,
+                config.target_language,
+                local_config.tts_provider,
+            )?;
+            Some(local_config)
         } else {
             None
         };
@@ -492,6 +498,8 @@ impl AppState {
                             local_config.expect("local config was validated"),
                             local_context.expect("local Whisper context was loaded"),
                             playback_tx.expect("local provider playback was created"),
+                            config.source_language,
+                            config.target_language,
                         ),
                         audio_rx,
                         control_rx,

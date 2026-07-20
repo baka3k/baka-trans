@@ -24,6 +24,84 @@ const openaiTargetLanguageCodes = [
   "en",
 ] as const;
 const openaiTargetLanguageCodeSet = new Set<string>(openaiTargetLanguageCodes);
+const localWhisperSourceLanguageCodes = new Set([
+  "auto",
+  "af",
+  "ar",
+  "az",
+  "be",
+  "bg",
+  "bn",
+  "bs",
+  "ca",
+  "cs",
+  "cy",
+  "da",
+  "de",
+  "el",
+  "en",
+  "es",
+  "et",
+  "eu",
+  "fa",
+  "fi",
+  "fil",
+  "fr",
+  "gl",
+  "gu",
+  "haw",
+  "he",
+  "hi",
+  "hr",
+  "ht",
+  "hu",
+  "hy",
+  "id",
+  "it",
+  "ja",
+  "jv",
+  "ka",
+  "kk",
+  "ko",
+  "la",
+  "lt",
+  "lv",
+  "mi",
+  "mk",
+  "ml",
+  "mn",
+  "ms",
+  "my",
+  "ne",
+  "nl",
+  "nn",
+  "no",
+  "pa",
+  "pl",
+  "pt",
+  "pt-BR",
+  "pt-PT",
+  "ro",
+  "ru",
+  "sk",
+  "sl",
+  "sn",
+  "sq",
+  "sr",
+  "sv",
+  "sw",
+  "te",
+  "th",
+  "tl",
+  "tr",
+  "uk",
+  "uz",
+  "vi",
+  "yo",
+  "zh",
+  "zh-Hans",
+  "zh-Hant",
+]);
 
 export const languageMetadata = [
   { code: "auto", label: "Auto", supportsSource: true, supportsTarget: false, isAuto: true },
@@ -129,6 +207,18 @@ export const sourceLanguageOptions = languageMetadata
   .filter((language) => language.supportsSource)
   .map(toLanguageOption);
 
+export function sourceLanguageOptionsForProvider(provider: TranslationProvider) {
+  if (provider !== "local_whisper_ollama") {
+    return sourceLanguageOptions;
+  }
+  return languageMetadata
+    .filter(
+      (language) =>
+        language.supportsSource && localWhisperSourceLanguageCodes.has(language.code),
+    )
+    .map(toLanguageOption);
+}
+
 function supportsTargetByProvider(
   language: (typeof languageMetadata)[number],
   provider: TranslationProvider,
@@ -137,7 +227,7 @@ function supportsTargetByProvider(
     return openaiTargetLanguageCodeSet.has(language.code) && language.supportsTarget;
   }
   if (provider === "local_whisper_ollama") {
-    return language.code === "vi";
+    return !language.isAuto;
   }
   return !language.isAuto;
 }

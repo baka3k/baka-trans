@@ -10,7 +10,7 @@ import type {
 
 export const defaultLocalTranslationConfig: LocalTranslationConfigDraft = {
   baseUrl: "http://localhost:11434",
-  model: "gemma3:4b",
+  model: "translategemma:4b",
   timeoutSeconds: 30,
   temperature: 0,
   maxOutputTokens: 256,
@@ -150,7 +150,7 @@ export function LocalLlmSettings({
       <div className="panel-header">
         <div>
           <h2>Local LLM translation</h2>
-          <p>Japanese speech → Whisper → Gemma → Vietnamese voice</p>
+          <p>Selected source → Whisper → TranslateGemma → selected local voice</p>
         </div>
         <span className={`panel-state ${testResult?.ok && !dirty ? "ok" : ""}`}>
           {testResult?.ok && !dirty ? "Ready" : dirty ? "Unsaved" : "Test required"}
@@ -169,10 +169,10 @@ export function LocalLlmSettings({
           <small>The native client always sends POST /api/chat, never /v1/chat/completions.</small>
         </label>
         <label className="field">
-          <span>Installed Gemma model</span>
+          <span>Installed TranslateGemma model</span>
           <input
             value={draft.model}
-            placeholder="gemma3:4b"
+            placeholder="translategemma:4b"
             onChange={(event) => update({ model: event.currentTarget.value })}
           />
         </label>
@@ -213,7 +213,7 @@ export function LocalLlmSettings({
       </fieldset>
 
       <fieldset className="local-config-group">
-        <legend>Vietnamese voice</legend>
+        <legend>Translated voice</legend>
         <label className="field">
           <span>Speech engine</span>
           <select
@@ -274,7 +274,7 @@ export function LocalLlmSettings({
               <small>
                 {draft.ttsProvider === "vieneu"
                   ? "Preset voices are loaded from the private app-managed runtime."
-                  : "Vietnamese voices are shown first. Install one in system speech settings if empty."}
+                  : "Choose a system voice that matches the target language selected in the live controls."}
               </small>
             </label>
             <button type="button" onClick={onRefreshVoices} disabled={voicesLoading || saving || testing || vieneuBusy}>
@@ -372,7 +372,7 @@ export function LocalLlmSettings({
         <div className="field-grid two">
           <label className="field">
             <span>Language</span>
-            <input value="Japanese (ja)" readOnly aria-readonly="true" />
+            <input value="Selected in live controls" readOnly aria-readonly="true" />
           </label>
           <NumberField
             label="CPU threads"

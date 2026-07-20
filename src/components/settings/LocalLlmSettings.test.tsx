@@ -144,7 +144,7 @@ describe("LocalLlmSettings", () => {
 
     const { container } = render(<Harness />);
     expect(screen.getByText("Ready", { selector: ".panel-state" })).toBeInTheDocument();
-    await user.type(screen.getByLabelText("Installed Gemma model"), "-fast");
+    await user.type(screen.getByLabelText("Installed TranslateGemma model"), "-fast");
     expect(screen.getByText("Unsaved")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Test local pipeline" })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Save local settings" }));

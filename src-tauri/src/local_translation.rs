@@ -1,6 +1,6 @@
 use crate::error::{AppError, AppResult};
 use crate::models::{
-    LocalTranslationConfig, LocalTranslationConfigDraft, LocalTranslationTestResult,
+    Language, LocalTranslationConfig, LocalTranslationConfigDraft, LocalTranslationTestResult,
     LocalTtsProvider, WhisperModelDownloadProgress, WhisperModelOption,
 };
 use futures_util::StreamExt;
@@ -12,14 +12,15 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 use tokio::io::AsyncWriteExt;
 use url::Url;
-use whisper_rs::{WhisperContext, WhisperContextParameters};
+use whisper_rs::{get_lang_id, WhisperContext, WhisperContextParameters};
 
 const CONFIG_SCHEMA_VERSION: u32 = 1;
 const CONFIG_DIR_NAME: &str = "dev.baka3k.baka-trans";
 const CONFIG_FILE_NAME: &str = "local-translation-config.json";
 const WHISPER_MODEL_DIR_NAME: &str = "whisper-models";
 const WHISPER_MODEL_SOURCE: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
-const TRANSLATION_SYSTEM_PROMPT: &str = "Translate Japanese to Vietnamese. Return only the translation. Preserve names, numbers, and technical terms. Do not explain.";
+const DEFAULT_OLLAMA_MODEL: &str = "translategemma:4b";
+const LEGACY_DEFAULT_OLLAMA_MODEL: &str = "gemma3:4b";
 static WHISPER_DOWNLOAD_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy, Debug)]
@@ -297,7 +298,7 @@ impl Default for LocalTranslationConfig {
         Self {
             schema_version: CONFIG_SCHEMA_VERSION,
             base_url: "http://localhost:11434".to_string(),
-            model: "gemma3:4b".to_string(),
+            model: DEFAULT_OLLAMA_MODEL.to_string(),
             timeout_seconds: 30,
             temperature: 0.0,
             max_output_tokens: 256,
@@ -337,11 +338,22 @@ pub struct OllamaClient {
     temperature: f32,
     max_output_tokens: u32,
     keep_alive: Option<String>,
+    system_prompt: String,
 }
 
 impl OllamaClient {
-    pub fn new(config: &LocalTranslationConfig) -> AppResult<Self> {
+    pub fn new(
+        config: &LocalTranslationConfig,
+        source_language: Language,
+        target_language: Language,
+    ) -> AppResult<Self> {
         let endpoint = normalize_ollama_chat_url(&config.base_url)?;
+        if target_language == Language::Auto {
+            return Err(AppError::new(
+                "unsupported_target_language",
+                "Choose an explicit target language for local translation.",
+            ));
+        }
         let client = Client::builder()
             .timeout(Duration::from_secs(config.timeout_seconds))
             .build()
@@ -353,6 +365,7 @@ impl OllamaClient {
             temperature: config.temperature,
             max_output_tokens: config.max_output_tokens,
             keep_alive: config.keep_alive.clone(),
+            system_prompt: translation_system_prompt(source_language, target_language),
         })
     }
 
@@ -365,12 +378,13 @@ impl OllamaClient {
         if source_text.is_empty() {
             return Err(AppError::new(
                 "local_translation_empty_source",
-                "Whisper returned no Japanese text to translate.",
+                "Whisper returned no text to translate.",
             ));
         }
         let payload = build_ollama_payload(
             &self.model,
             source_text,
+            &self.system_prompt,
             self.temperature,
             self.max_output_tokens,
             self.keep_alive.as_deref(),
@@ -468,7 +482,7 @@ pub async fn test_config(
         ));
     }
 
-    let ollama = OllamaClient::new(&config)?;
+    let ollama = OllamaClient::new(&config, Language::Ja, Language::Vi)?;
     let endpoint = ollama.endpoint().to_string();
     let (probe, _) = match ollama.translate("こんにちは").await {
         Ok(response) => response,
@@ -684,6 +698,7 @@ pub fn normalize_ollama_chat_url(base_url: &str) -> AppResult<String> {
 pub fn build_ollama_payload(
     model: &str,
     source_text: &str,
+    system_prompt: &str,
     temperature: f32,
     max_output_tokens: u32,
     keep_alive: Option<&str>,
@@ -692,7 +707,7 @@ pub fn build_ollama_payload(
         "model": model,
         "stream": false,
         "messages": [
-            { "role": "system", "content": TRANSLATION_SYSTEM_PROMPT },
+            { "role": "system", "content": system_prompt },
             { "role": "user", "content": source_text }
         ],
         "options": {
@@ -704,6 +719,60 @@ pub fn build_ollama_payload(
         payload["keep_alive"] = json!(keep_alive);
     }
     payload
+}
+
+pub fn validate_local_session_languages(
+    source_language: Language,
+    target_language: Language,
+    tts_provider: LocalTtsProvider,
+) -> AppResult<()> {
+    let _ = whisper_language_code(source_language)?;
+    if target_language == Language::Auto {
+        return Err(AppError::new(
+            "unsupported_target_language",
+            "Choose an explicit target language for local translation.",
+        ));
+    }
+    if tts_provider == LocalTtsProvider::Vieneu && target_language != Language::Vi {
+        return Err(AppError::new(
+            "local_tts_target_language_unsupported",
+            "VieNeu-TTS supports Vietnamese output only. Choose Vietnamese or switch to a matching system voice.",
+        ));
+    }
+    Ok(())
+}
+
+pub fn whisper_language_code(language: Language) -> AppResult<Option<&'static str>> {
+    let code = match language {
+        Language::Auto => return Ok(None),
+        Language::Fil | Language::Tl => "tl",
+        Language::Jv => "jw",
+        Language::Pt | Language::PtBr | Language::PtPt => "pt",
+        Language::Zh | Language::ZhHans | Language::ZhHant => "zh",
+        _ => language.realtime_code(),
+    };
+    if get_lang_id(code).is_none() {
+        return Err(AppError::new(
+            "unsupported_source_language",
+            format!(
+                "The selected source language '{}' is not supported by Whisper.",
+                language.realtime_code()
+            ),
+        ));
+    }
+    Ok(Some(code))
+}
+
+fn translation_system_prompt(source_language: Language, target_language: Language) -> String {
+    let source = if source_language == Language::Auto {
+        "the automatically detected source language".to_string()
+    } else {
+        format!("language code '{}'", source_language.realtime_code())
+    };
+    format!(
+        "Translate from {source} to language code '{}'. Return only the translation. Preserve names, numbers, and technical terms. Do not explain.",
+        target_language.realtime_code()
+    )
 }
 
 pub fn parse_ollama_response(status: StatusCode, body: &str) -> AppResult<String> {
@@ -755,7 +824,7 @@ fn read_config_from_path(path: &Path) -> AppResult<LocalTranslationConfig> {
     }
     let raw = std::fs::read_to_string(path)
         .map_err(|err| AppError::new("local_config_read_error", err.to_string()))?;
-    let config: LocalTranslationConfig = serde_json::from_str(&raw).map_err(|err| {
+    let mut config: LocalTranslationConfig = serde_json::from_str(&raw).map_err(|err| {
         AppError::new(
             "local_config_parse_error",
             format!("Could not parse {}: {err}", path.display()),
@@ -769,6 +838,10 @@ fn read_config_from_path(path: &Path) -> AppResult<LocalTranslationConfig> {
                 config.schema_version
             ),
         ));
+    }
+    if config.model.trim() == LEGACY_DEFAULT_OLLAMA_MODEL {
+        config.model = DEFAULT_OLLAMA_MODEL.to_string();
+        write_config_to_path(path, &config)?;
     }
     Ok(config)
 }
@@ -907,7 +980,7 @@ mod tests {
         assert_eq!(config.language, "ja");
         assert_eq!(config.sample_rate_hz, 16_000);
         assert_eq!(config.temperature, 0.0);
-        assert_eq!(config.model, "gemma3:4b");
+        assert_eq!(config.model, DEFAULT_OLLAMA_MODEL);
         assert_eq!(config.tts_rate, 1.0);
         assert_eq!(config.tts_volume, 1.0);
         assert_eq!(config.tts_output_sample_rate_hz, 24_000);
@@ -986,14 +1059,34 @@ mod tests {
 
     #[test]
     fn builds_exact_native_ollama_payload() {
-        let payload = build_ollama_payload("qwen", "こんにちは", 0.0, 128, Some("10m"));
+        let payload = build_ollama_payload(
+            "qwen",
+            "こんにちは",
+            &translation_system_prompt(Language::Ja, Language::Vi),
+            0.0,
+            128,
+            Some("10m"),
+        );
         assert_eq!(payload["model"], "qwen");
         assert_eq!(payload["stream"], false);
         assert_eq!(payload["messages"][1]["content"], "こんにちは");
+        assert!(payload["messages"][0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("language code 'ja' to language code 'vi'"));
         assert_eq!(payload["options"]["temperature"], 0.0);
         assert_eq!(payload["options"]["num_predict"], 128);
         assert_eq!(payload["keep_alive"], "10m");
         assert!(payload.get("max_tokens").is_none());
+    }
+
+    #[test]
+    fn normalizes_whisper_language_aliases_and_auto_detection() {
+        assert_eq!(whisper_language_code(Language::Auto).unwrap(), None);
+        assert_eq!(whisper_language_code(Language::PtBr).unwrap(), Some("pt"));
+        assert_eq!(whisper_language_code(Language::ZhHant).unwrap(), Some("zh"));
+        assert_eq!(whisper_language_code(Language::Jv).unwrap(), Some("jw"));
+        assert!(whisper_language_code(Language::Dz).is_err());
     }
 
     #[test]
@@ -1036,6 +1129,25 @@ mod tests {
         let config = LocalTranslationConfig::default();
         write_config_to_path(&path, &config).unwrap();
         assert_eq!(read_config_from_path(&path).unwrap(), config);
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn migrates_the_legacy_default_ollama_model() {
+        let directory = std::env::temp_dir().join(format!("baka-trans-{}", Uuid::new_v4()));
+        let path = directory.join(CONFIG_FILE_NAME);
+        let legacy = LocalTranslationConfig {
+            model: "gemma3:4b".to_string(),
+            ..LocalTranslationConfig::default()
+        };
+        write_config_to_path(&path, &legacy).unwrap();
+
+        let migrated = read_config_from_path(&path).unwrap();
+
+        assert_eq!(migrated.model, "translategemma:4b");
+        let persisted: LocalTranslationConfig =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(persisted.model, "translategemma:4b");
         let _ = std::fs::remove_dir_all(directory);
     }
 
@@ -1117,7 +1229,7 @@ mod tests {
             model: "qwen".to_string(),
             ..LocalTranslationConfig::default()
         };
-        let client = OllamaClient::new(&config).unwrap();
+        let client = OllamaClient::new(&config, Language::Ja, Language::Vi).unwrap();
         let (content, _) = client.translate("こんにちは").await.unwrap();
         assert_eq!(content, "Xin chào");
         server.join().unwrap();

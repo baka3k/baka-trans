@@ -35,7 +35,7 @@ PCM16 mono, 16000 Hz -> local Whisper (Japanese) -> Gemma via Ollama /api/chat -
 It does not require a Google/OpenAI translation key. The translated voice uses the same output-device and all/left/right routing controls as cloud playback. Google and OpenAI modes keep their existing credential and audio behavior.
 
 1. Install and start [Ollama](https://docs.ollama.com/quickstart).
-2. Pull Gemma with `ollama pull gemma3:4b`, or configure another installed Gemma variant. Ollama also documents its [model pull API](https://docs.ollama.com/api/pull).
+2. Pull TranslateGemma with `ollama pull translategemma:4b`, or configure another installed translation model. Ollama also documents its [model pull API](https://docs.ollama.com/api/pull).
 3. Open **Local LLM**, choose a multilingual Whisper model, and select **Download model**. The app stores it in its private data folder and fills the GGML path automatically. You can still use an existing absolute model path. The [whisper.cpp model guide](https://github.com/ggml-org/whisper.cpp/blob/master/models/README.md) lists the official model files.
 4. Choose a speech engine. For System TTS, install a Vietnamese voice in Windows Speech settings or macOS system voice settings. For VieNeu-TTS, select **Install VieNeu-TTS**. The app downloads and verifies the pinned ONNX/int8 model (about 244 MiB), resumes interrupted downloads, and manages the private runtime automatically.
 5. Choose **Local Whisper**, then open **Local LLM**. Set the Gemma model, download or select a Whisper model, select the speech engine, refresh and choose a Vietnamese voice, rate, and volume. Save, then select **Test local pipeline**.

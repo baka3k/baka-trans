@@ -266,7 +266,7 @@ impl Language {
         match provider {
             TranslationProvider::OpenaiRealtime => self.is_openai_realtime_target_supported(),
             TranslationProvider::GoogleLiveTranslate => self.is_google_live_target_supported(),
-            TranslationProvider::LocalWhisperOllama => self == Language::Vi,
+            TranslationProvider::LocalWhisperOllama => self != Language::Auto,
         }
     }
 }
@@ -468,14 +468,6 @@ pub struct LookHelpUpdate {
 
 impl SessionConfig {
     pub fn validate_translation_target_language(&self) -> AppResult<()> {
-        if self.translation_provider == TranslationProvider::LocalWhisperOllama
-            && self.source_language != Language::Ja
-        {
-            return Err(AppError::new(
-                "unsupported_source_language",
-                "Local Whisper + Ollama currently requires Japanese as the source language.",
-            ));
-        }
         if self
             .target_language
             .is_target_supported_by(self.translation_provider)
@@ -1031,5 +1023,28 @@ mod tests {
 
         assert_eq!(error.code, "unsupported_target_language");
         assert!(error.message.contains("Google Live Translation"));
+    }
+
+    #[test]
+    fn local_translation_accepts_any_explicit_target_language() {
+        let mut config = session_config(Language::Th);
+        config.translation_provider = TranslationProvider::LocalWhisperOllama;
+        config.source_language = Language::En;
+
+        assert!(config.validate_translation_target_language().is_ok());
+    }
+
+    #[test]
+    fn local_translation_rejects_auto_as_target_language() {
+        let mut config = session_config(Language::Auto);
+        config.translation_provider = TranslationProvider::LocalWhisperOllama;
+
+        assert_eq!(
+            config
+                .validate_translation_target_language()
+                .expect_err("Auto cannot be a translation target")
+                .code,
+            "unsupported_target_language"
+        );
     }
 }

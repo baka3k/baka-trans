@@ -36,6 +36,7 @@ import { SessionCommandBar } from "../components/session/SessionCommandBar";
 import {
   LocalLlmSettings,
   defaultLocalTranslationConfig,
+  validateLocalTranslationDraft,
 } from "../components/settings/LocalLlmSettings";
 import {
   captureLookHelp,
@@ -99,7 +100,10 @@ import {
   validateMeetingSummaryCustomPrompt,
   validateLlmProfileDraft,
 } from "../transcript";
-import { sourceLanguageOptions, targetLanguageOptionsForProvider } from "../languages";
+import {
+  sourceLanguageOptionsForProvider,
+  targetLanguageOptionsForProvider,
+} from "../languages";
 import type {
   AppErrorPayload,
   ApiKeySource,
@@ -404,10 +408,7 @@ export default function MainApp({
     [translationProvider],
   );
   const sourceOptions = useMemo(
-    () =>
-      translationProvider === "local_whisper_ollama"
-        ? sourceLanguageOptions.filter((option) => option.value === "ja")
-        : sourceLanguageOptions,
+    () => sourceLanguageOptionsForProvider(translationProvider),
     [translationProvider],
   );
   const signalSessionStatus: SessionStatus = localMonitorActive ? "listening" : status;
@@ -430,10 +431,12 @@ export default function MainApp({
     translatedLevel.peak,
   );
 
-  const localProviderReady = Boolean(localConfigTest?.ok && !localConfigDirty);
+  const localProviderConfigured =
+    !localConfigDirty && validateLocalTranslationDraft(localConfigDraft, vieneuRuntime).length === 0;
+  const localProviderHealthy = Boolean(localConfigTest?.ok && localProviderConfigured);
   const providerReady =
     translationProvider === "local_whisper_ollama"
-      ? localProviderReady && outputDeviceId.length > 0
+      ? localProviderConfigured && outputDeviceId.length > 0
       : apiKeyStored && outputDeviceId.length > 0;
   const canStart =
     (status === "idle" || status === "error") &&
@@ -471,7 +474,7 @@ export default function MainApp({
           : localMonitorActive
             ? "Monitoring"
             : status === "idle"
-              ? "Idle"
+              ? "Start to listen"
               : "Waiting";
   const translationOutLevel = localMonitorActive
     ? inputSignalPercent
@@ -1392,9 +1395,13 @@ export default function MainApp({
               <span className={`status-dot status-${status}`} />
               <span>{labelStatus(status)}</span>
               {translationProvider === "local_whisper_ollama" ? (
-                <span className={`status-chip ${localProviderReady ? "ok" : "warn"}`}>
-                  {localProviderReady ? <Check size={14} /> : <Settings2 size={14} />}
-                  {localProviderReady ? "Local ready" : "Local setup needed"}
+                <span className={`status-chip ${localProviderConfigured ? "ok" : "warn"}`}>
+                  {localProviderConfigured ? <Check size={14} /> : <Settings2 size={14} />}
+                  {localProviderHealthy
+                    ? "Local ready"
+                    : localProviderConfigured
+                      ? "Local configured"
+                      : "Local setup needed"}
                 </span>
               ) : apiKeyStored ? (
                 <span className="status-chip ok">
@@ -1501,11 +1508,7 @@ export default function MainApp({
         targetLanguage={targetLanguage}
         sourceOptions={sourceOptions}
         targetOptions={targetLanguageOptions}
-        onSourceChange={(value) =>
-          setSourceLanguage(
-            translationProvider === "local_whisper_ollama" ? "ja" : (value as Language),
-          )
-        }
+        onSourceChange={(value) => setSourceLanguage(value as Language)}
         onTargetChange={(value) => setTargetLanguage(value as Language)}
         fallbackEnabled={fallbackEnabled}
         onFallbackChange={setFallbackEnabled}
@@ -1792,8 +1795,8 @@ export default function MainApp({
                 <div className="local-provider-callout">
                   <strong>No cloud key required</strong>
                   <span>
-                    Local mode transcribes Japanese with Whisper, translates with Gemma, and plays
-                    Vietnamese speech through your selected translated-audio output.
+                    Local mode transcribes the selected source with Whisper, translates with
+                    TranslateGemma, and plays the selected target through your local voice output.
                   </span>
                   <button
                     className="small-button"
@@ -3442,7 +3445,7 @@ function emptyConversationCopy(
   }
   return {
     title: "Listening for speech",
-    body: "Source audio is being monitored. Transcript cards will stay grouped by utterance.",
+    body: "Source audio is being monitored. Pause briefly after speaking or press Translate now to commit the utterance.",
   };
 }
 

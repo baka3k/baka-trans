@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   sourceLanguageOptions,
+  sourceLanguageOptionsForProvider,
   targetLanguageOptions,
   targetLanguageOptionsForProvider,
 } from "./languages";
@@ -30,6 +31,24 @@ describe("language options", () => {
 
   it("includes auto in source languages", () => {
     expect(sourceLanguageOptions[0]).toEqual({ value: "auto", label: "Auto" });
+  });
+
+  it("offers Whisper-supported local source languages and auto detection", () => {
+    const localSources = sourceLanguageOptionsForProvider("local_whisper_ollama").map(
+      (language) => language.value,
+    );
+
+    expect(localSources).toEqual(expect.arrayContaining(["auto", "en", "ja", "vi", "th"]));
+    expect(localSources).not.toContain("dz");
+  });
+
+  it("offers all non-auto languages as local Ollama targets", () => {
+    const localTargets = targetLanguageOptionsForProvider("local_whisper_ollama").map(
+      (language) => language.value,
+    );
+
+    expect(localTargets).toEqual(expect.arrayContaining(["en", "ja", "vi", "th", "pt-BR"]));
+    expect(localTargets).not.toContain("auto");
   });
 
   it("includes regional Google Live Translation target codes", () => {
