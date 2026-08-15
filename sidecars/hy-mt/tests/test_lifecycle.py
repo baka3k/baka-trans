@@ -17,10 +17,10 @@ def test_validate_model_rejects_symlink_and_bad_hash(tmp_path: Path, monkeypatch
     model.mkdir()
     (model / "config.json").write_bytes(content)
     (model / lifecycle.MANIFEST_NAME).write_text(
-        json.dumps({"modelId": "tencent/HY-MT1.5-1.8B", "revision": "172d98efc7f534e05c86d3d49ed9d12d9c2a733b"}),
+        json.dumps({"modelId": "tencent/Hy-MT2-1.8B", "revision": "9a341cd1b679d3efd23b46e847b01745a71ed792"}),
         encoding="utf-8",
     )
-    assert lifecycle.validate_model(model)["modelId"] == "tencent/HY-MT1.5-1.8B"
+    assert lifecycle.validate_model(model)["modelId"] == "tencent/Hy-MT2-1.8B"
     (model / "config.json").write_bytes(b"tamperd model input")
     with pytest.raises(lifecycle.LifecycleError, match="failed verification"):
         lifecycle.validate_model(model)

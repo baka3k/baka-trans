@@ -1,6 +1,6 @@
 use crate::error::{AppError, AppResult};
 use crate::models::{
-    Language, LocalTranslationConfig, LocalTranslationConfigDraft, LocalTranslationTestResult,
+    Language, LocalTranslationConfig, LocalTranslationConfigDraft, LocalTranslationEngine, LocalTranslationTestResult,
     LocalTtsProvider, WhisperModelDownloadProgress, WhisperModelOption,
 };
 use futures_util::StreamExt;
@@ -14,7 +14,7 @@ use tokio::io::AsyncWriteExt;
 use url::Url;
 use whisper_rs::{get_lang_id, WhisperContext, WhisperContextParameters};
 
-const CONFIG_SCHEMA_VERSION: u32 = 1;
+const CONFIG_SCHEMA_VERSION: u32 = 3;
 const CONFIG_DIR_NAME: &str = "dev.baka3k.baka-trans";
 const CONFIG_FILE_NAME: &str = "local-translation-config.json";
 const WHISPER_MODEL_DIR_NAME: &str = "whisper-models";
@@ -297,6 +297,7 @@ impl Default for LocalTranslationConfig {
     fn default() -> Self {
         Self {
             schema_version: CONFIG_SCHEMA_VERSION,
+            translation_engine: LocalTranslationEngine::HuggingfaceOffline,
             base_url: "http://localhost:11434".to_string(),
             model: DEFAULT_OLLAMA_MODEL.to_string(),
             timeout_seconds: 30,
@@ -628,6 +629,7 @@ pub fn normalize_and_validate(
 
     Ok(LocalTranslationConfig {
         schema_version: CONFIG_SCHEMA_VERSION,
+        translation_engine: draft.translation_engine,
         base_url: endpoint
             .strip_suffix("/api/chat")
             .unwrap_or(&endpoint)

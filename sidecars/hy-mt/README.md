@@ -1,7 +1,7 @@
 # HY-MT sidecar
 
 This project contains the isolated Phase 09 POC and the Phase 10 managed
-sidecar for `tencent/HY-MT1.5-1.8B`. The desktop application owns the managed
+sidecar for `tencent/Hy-MT2-1.8B`. The desktop application owns the managed
 model root, child process, installation, and shutdown. Users need no Python,
 terminal, Ollama, or global Hugging Face cache for the HY-MT path.
 

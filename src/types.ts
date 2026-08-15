@@ -189,6 +189,7 @@ export interface TranslationCredentialStatus {
 
 export interface LocalTranslationConfig {
   schemaVersion: number;
+  translationEngine: LocalTranslationEngine;
   baseUrl: string;
   model: string;
   timeoutSeconds: number;
@@ -213,6 +214,8 @@ export interface LocalTranslationConfig {
   ttsVolume: number;
   ttsOutputSampleRateHz: 24000;
 }
+
+export type LocalTranslationEngine = "huggingface_offline" | "openai_compatible";
 
 export type LocalTtsProvider = "system" | "vieneu";
 export type VieNeuReadingStyle = "tu_nhien" | "tin_tuc" | "doc_truyen";

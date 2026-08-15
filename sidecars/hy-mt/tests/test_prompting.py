@@ -16,16 +16,16 @@ class RecordingTokenizer:
 
 def test_official_prompt_matches_model_card_shape() -> None:
     assert official_prompt("  おはよう。 ") == (
-        "Translate the following segment into Vietnamese, without additional explanation."
-        "\n\nおはよう。"
+        "Translate the following text into Vietnamese. Note that you should only output "
+        "the translated result without any additional explanation:\n\nおはよう。"
     )
     assert chat_messages("おはよう。") == [
         {
-            "role": "user",
-            "content": (
-                "Translate the following segment into Vietnamese, without additional explanation."
-                "\n\nおはよう。"
-            ),
+                "role": "user",
+                "content": (
+                    "Translate the following text into Vietnamese. Note that you should only output "
+                    "the translated result without any additional explanation:\n\nおはよう。"
+                ),
         }
     ]
 
@@ -37,7 +37,7 @@ def test_chat_template_has_no_system_or_generation_prompt() -> None:
     assert [message["role"] for message in messages] == ["user"]
     assert kwargs == {
         "tokenize": True,
-        "add_generation_prompt": False,
+        "add_generation_prompt": True,
         "return_tensors": "pt",
     }
 

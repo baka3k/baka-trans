@@ -1,11 +1,11 @@
-"""Immutable inputs for the Phase 09 candidate."""
+"""Immutable inputs for the Hy-MT2 feasibility gate and managed sidecar."""
 
-MODEL_ID = "tencent/HY-MT1.5-1.8B"
-MODEL_REVISION = "172d98efc7f534e05c86d3d49ed9d12d9c2a733b"
+MODEL_ID = "tencent/Hy-MT2-1.8B"
+MODEL_REVISION = "9a341cd1b679d3efd23b46e847b01745a71ed792"
 TARGET_LANGUAGE_NAME = "Vietnamese"
 PROMPT_TEMPLATE = (
-    "Translate the following segment into {target_language}, "
-    "without additional explanation.\n\n{source_text}"
+    "Translate the following text into {target_language}. Note that you should "
+    "only output the translated result without any additional explanation:\n\n{source_text}"
 )
 
 INFERENCE_FILES = (
@@ -20,7 +20,7 @@ INFERENCE_FILES = (
 
 REPOSITORY_FILES = (
     ".gitattributes",
-    "License.txt",
+    "LICENSE.txt",
     "README.md",
     *INFERENCE_FILES,
 )
@@ -37,13 +37,13 @@ DEFAULT_TRANSLATE_TIMEOUT_SECONDS = 20.0
 # It is not a Hugging Face cache manifest and never accepts arbitrary repository
 # files from a newer upstream revision.
 MODEL_ARTIFACTS = (
-    (".gitattributes", 1519, "11ad7efa24975ee4b0c3c3a38ed18737f0658a5f75a0a96787b576a78a023361"),
-    ("License.txt", 16270, "d7d9db858500ac9073f4b5decef8e208454357226f535f65079ce4376047569f"),
-    ("README.md", 8389, "302601d23ad541ef69827167e60d25c2c04265eff54fee690cb7c3c5638e7fcc"),
+    (".gitattributes", 1777, "561202ab7b2d5407a366be9410711a8243b1446b6af2d4318252f835c7eef79d"),
+    ("LICENSE.txt", 11629, "1af3c6dc0c697277cbb6b68720787c1caa43a79c5626bf9f19cd8c00de9c8cd4"),
+    ("README.md", 14763, "c81edecabcbf5c9f312680dd928485dd44830424986e42f450c52864babe5d81"),
     ("chat_template.jinja", 654, "b7491ec0e9c869dfce20f2176758099bf248d979dd05530ede99deb21698acee"),
-    ("config.json", 1342, "a1788df3224420f43ed1a424ad58bfacc34f689b0e477ce69d1298fa6d26292b"),
-    ("generation_config.json", 221, "3586ba4829d9769b89523523cb562f2e894c519274f8a0e9b970287a0b1388a9"),
-    ("model.safetensors", 4077072784, "07736f560253d8c991616060fb2d855420957c268fa7d32fa8593df2f83b21ab"),
+    ("config.json", 1348, "da40c514cc74a5748a2e591b1b95fca4b7e94de05349abe4ea4164a82641de1a"),
+    ("generation_config.json", 221, "0e28667f1cb4c7b880b9223b2d87978f88e79ed7ae037de1021f826c18d4ed6f"),
+    ("model.safetensors", 4077072784, "29e9117a44c79f81857613601968ff482d8a23c2d6736a1710bba9e5ca4762e5"),
     ("special_tokens_map.json", 488, "bb9f59990034dae326581b9c62471523975417869f78a244b7ae2ce8cbb085eb"),
     ("tokenizer.json", 9527287, "b475bbef1b0b2fd57dcb865332b546475bd1ede2deb3bb91bafd0c047a8a530a"),
     ("tokenizer_config.json", 165815, "53bd8581b601a8ee9caefeb988207de50b3fc0b733295bdf5ad68dec4cc0b07c"),

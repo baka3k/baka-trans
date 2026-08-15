@@ -9,6 +9,7 @@ import type {
 } from "../../types";
 
 export const defaultLocalTranslationConfig: LocalTranslationConfigDraft = {
+  translationEngine: "huggingface_offline",
   baseUrl: "http://localhost:11434",
   model: "translategemma:4b",
   timeoutSeconds: 30,
@@ -68,11 +69,11 @@ export function validateLocalTranslationDraft(
   vieneuRuntime?: VieNeuRuntimeStatus | null,
 ): string[] {
   const errors: string[] = [];
-  if (!/^https?:\/\//i.test(draft.baseUrl.trim())) {
-    errors.push("Enter an http or https Ollama server URL.");
+  if (draft.translationEngine === "openai_compatible" && !/^https?:\/\//i.test(draft.baseUrl.trim())) {
+    errors.push("Enter an http or https OpenAI-compatible server URL.");
   }
-  if (!draft.model.trim()) {
-    errors.push("Choose an installed Ollama model.");
+  if (draft.translationEngine === "openai_compatible" && !draft.model.trim()) {
+    errors.push("Enter an OpenAI-compatible model name.");
   }
   if (draft.ttsProvider === "vieneu" && vieneuRuntime && !vieneuRuntime.modelInstalled) {
     errors.push("Install VieNeu-TTS before choosing a neural voice.");
@@ -149,8 +150,8 @@ export function LocalLlmSettings({
     <div className="panel local-llm-panel">
       <div className="panel-header">
         <div>
-          <h2>Local LLM translation</h2>
-          <p>Selected source → Whisper → TranslateGemma → selected local voice</p>
+          <h2>Local translation</h2>
+          <p>Selected source → Whisper → selected translator → selected local voice</p>
         </div>
         <span className={`panel-state ${testResult?.ok && !dirty ? "ok" : ""}`}>
           {testResult?.ok && !dirty ? "Ready" : dirty ? "Unsaved" : "Test required"}
@@ -158,21 +159,34 @@ export function LocalLlmSettings({
       </div>
 
       <fieldset className="local-config-group">
-        <legend>Ollama</legend>
+        <legend>Translation engine</legend>
+        <label className="field">
+          <span>Engine</span>
+          <select
+            value={draft.translationEngine}
+            onChange={(event) => update({ translationEngine: event.currentTarget.value as LocalTranslationConfigDraft["translationEngine"] })}
+          >
+            <option value="huggingface_offline">Offline Hy-MT2 1.8B</option>
+            <option value="openai_compatible">OpenAI-compatible API</option>
+          </select>
+        </label>
+        {draft.translationEngine === "huggingface_offline" ? (
+          <p className="local-text-only-note">Managed Hy-MT2 runs from verified local files. The quality gate remains under CAUTION.</p>
+        ) : <>
         <label className="field">
           <span>Server URL</span>
           <input
             value={draft.baseUrl}
-            placeholder="http://localhost:11434"
+            placeholder="https://api.example.com/v1"
             onChange={(event) => update({ baseUrl: event.currentTarget.value })}
           />
-          <small>The native client always sends POST /api/chat, never /v1/chat/completions.</small>
+          <small>Meeting text is sent to this endpoint. Non-local endpoints should use HTTPS.</small>
         </label>
         <label className="field">
-          <span>Installed TranslateGemma model</span>
+          <span>Model</span>
           <input
             value={draft.model}
-            placeholder="translategemma:4b"
+            placeholder="gpt-4o-mini"
             onChange={(event) => update({ model: event.currentTarget.value })}
           />
         </label>
@@ -201,15 +215,8 @@ export function LocalLlmSettings({
             value={draft.temperature}
             onChange={(value) => update({ temperature: number(value, draft.temperature) })}
           />
-          <label className="field">
-            <span>Keep alive</span>
-            <input
-              value={draft.keepAlive ?? ""}
-              placeholder="10m"
-              onChange={(event) => update({ keepAlive: event.currentTarget.value || undefined })}
-            />
-          </label>
         </div>
+        </>}
       </fieldset>
 
       <fieldset className="local-config-group">

@@ -597,6 +597,7 @@ pub struct ApiKeyTestResult {
 #[serde(default, rename_all = "camelCase")]
 pub struct LocalTranslationConfig {
     pub schema_version: u32,
+    pub translation_engine: LocalTranslationEngine,
     pub base_url: String,
     pub model: String,
     pub timeout_seconds: u64,
@@ -625,6 +626,7 @@ pub struct LocalTranslationConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct LocalTranslationConfigDraft {
+    pub translation_engine: LocalTranslationEngine,
     pub base_url: String,
     pub model: String,
     pub timeout_seconds: u64,
@@ -653,6 +655,7 @@ pub struct LocalTranslationConfigDraft {
 impl From<LocalTranslationConfig> for LocalTranslationConfigDraft {
     fn from(value: LocalTranslationConfig) -> Self {
         Self {
+            translation_engine: value.translation_engine,
             base_url: value.base_url,
             model: value.model,
             timeout_seconds: value.timeout_seconds,
@@ -678,6 +681,14 @@ impl From<LocalTranslationConfig> for LocalTranslationConfigDraft {
             tts_output_sample_rate_hz: value.tts_output_sample_rate_hz,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalTranslationEngine {
+    #[default]
+    HuggingfaceOffline,
+    OpenaiCompatible,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]

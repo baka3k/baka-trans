@@ -37,9 +37,13 @@ def chat_messages(source_text: str) -> list[dict[str, str]]:
 
 
 def tokenize_chat(tokenizer: Any, source_text: str) -> Any:
-    return tokenizer.apply_chat_template(
+    tokenized = tokenizer.apply_chat_template(
         chat_messages(source_text),
         tokenize=True,
-        add_generation_prompt=False,
+        add_generation_prompt=True,
         return_tensors="pt",
     )
+    # Transformers 5 may return a BatchEncoding whereas the 4.x API returned
+    # the input-id tensor directly. The runner deliberately needs only input
+    # ids, so normalize both supported return shapes here.
+    return getattr(tokenized, "input_ids", tokenized)

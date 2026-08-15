@@ -20,8 +20,8 @@ Main application route
         -> existing CPAL capture and 16 kHz normalization
         -> existing whisper-rs transcription
         -> selected translation engine
-           -> existing native Ollama /api/chat client using TranslateGemma
-           -> managed HY-MT1.5 Transformers sidecar (new, opt-in until validated)
+           -> OpenAI-compatible Chat Completions API (user-selected), or
+           -> managed offline Hy-MT2 1.8B Transformers sidecar
         -> new local platform TTS adapter
         -> existing CPAL output-device and channel-routed playback
 ```
@@ -48,12 +48,17 @@ Three scope questions were resolved so the plan is directly implementable:
 2. **What does Cloud API contain?** It opens the current cloud workspace and preserves Google Live, OpenAI Realtime, summaries, overlays, exports, credential handling, audio routing, and current controls. The Google implementation and event contract are not rewritten.
 3. **What local TTS is used?** Use platform-native installed voices behind a Rust `LocalTtsEngine` boundary: Windows `Windows.Media.SpeechSynthesis` and macOS `AVSpeechSynthesizer` buffer output. Normalize generated audio to PCM16 mono at 24 kHz and feed the existing CPAL playback runtime. This preserves selected headset and channel routing without adding a second model server. A Piper-style engine can be added later behind the same boundary.
 
-### HY-MT extension decisions (2026-08-15)
+### Hy-MT2 and OpenAI-compatible migration decisions (2026-08-15)
+
+**Phase 16 is authoritative for local translation and supersedes every earlier
+Ollama/HY-MT1.5 reference in this plan and in Phases 11-13.** Those historical
+details describe the baseline only; no new implementation may preserve or
+reintroduce an Ollama runtime, endpoint, setting, or fallback.
 
 Three additional scope questions were resolved for the direct Hugging Face extension:
 
-1. **Does “direct Hugging Face” mean hosted inference?** No. `tencent/HY-MT1.5-1.8B` has no Hugging Face Inference Provider deployment. The app downloads pinned model files once, then runs them locally through a bundled Python/PyTorch/Transformers sidecar. End users do not install Python or send meeting text to Hugging Face.
-2. **Does HY-MT immediately replace Ollama?** No. Add `translationEngine: ollama | hy_mt`, migrate existing configs to `ollama`, and keep fallback explicit. HY-MT becomes eligible for the internal default only after the M5 quality, latency, memory, cancellation, and offline gates pass. Never silently retry an utterance through another engine.
+1. **Does “direct Hugging Face” mean hosted inference?** No. The app downloads the pinned `tencent/Hy-MT2-1.8B` files once, then runs them locally through a bundled Python/PyTorch/Transformers sidecar. End users do not install Python and inference does not send meeting text to Hugging Face.
+2. **Which local engines remain?** Ollama is removed. The explicit choices are `huggingface_offline` (managed Hy-MT2) and `openai_compatible` (user-supplied Chat Completions endpoint/model). There is no silent fallback between them.
 3. **What platforms are in scope?** Run the first gate on the current Apple M5/24 GB machine using explicit MPS selection. Package/sign macOS arm64 next, then build and validate the Windows sidecar on Windows. Windows CPU is the compatibility baseline; CUDA acceleration is capability-tested rather than assumed.
 
 ## Design Read
@@ -225,6 +230,7 @@ CPAL capture 16 kHz
 | 13 | [phase-13-hy-mt-pipeline-integration.md](phase-13-hy-mt-pipeline-integration.md) | blocked by 11-12 | Whisper → selected engine → transcript/TTS integration, cancellation, fallback, and regressions |
 | 14 | [phase-14-hy-mt-macos-packaging.md](phase-14-hy-mt-macos-packaging.md) | blocked by 13 | macOS arm64 sidecar build, nested signing/notarization, offline and hardware release evidence |
 | 15 | [phase-15-hy-mt-windows-packaging.md](phase-15-hy-mt-windows-packaging.md) | blocked by 13 | Windows same-platform build, CPU/CUDA capability matrix, installer/Defender and hardware evidence |
+| 16 | [phase-16-hy-mt2-openai-compatible-migration.md](phase-16-hy-mt2-openai-compatible-migration.md) | in progress | Remove Ollama, adopt pinned Hy-MT2 offline runtime, and add explicit OpenAI-compatible translation settings |
 
 ## Dependencies and Cross-Plan Coordination
 
@@ -238,7 +244,9 @@ CPAL capture 16 kHz
 Runtime prerequisites:
 
 - User-provided compatible multilingual Whisper GGML model.
-- One selected translation engine: running local Ollama with the configured TranslateGemma model, or an installed/verified managed HY-MT runtime.
+- One selected translation engine: an installed/verified managed offline Hy-MT2
+  runtime, or a configured OpenAI-compatible endpoint whose data-egress warning
+  has been acknowledged.
 - An installed Vietnamese-capable system voice.
 - A selected translated-audio output device.
 

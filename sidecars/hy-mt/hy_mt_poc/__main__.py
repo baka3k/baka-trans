@@ -24,7 +24,7 @@ def deny_network() -> None:
 
 
 def parser() -> argparse.ArgumentParser:
-    result = argparse.ArgumentParser(description="HY-MT M5 proof-of-concept")
+    result = argparse.ArgumentParser(description="Hy-MT2 M5 proof-of-concept")
     result.add_argument("--deny-network", action="store_true")
     subparsers = result.add_subparsers(dest="command", required=True)
 
