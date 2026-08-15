@@ -21,6 +21,12 @@ use whisper_rs::{convert_integer_to_float_audio, FullParams, SamplingStrategy, W
 use super::RealtimeControl;
 
 const UTTERANCE_QUEUE_CAPACITY: usize = 4;
+/// Bounded queue between the Whisper producer and the single-consumer translation worker.
+/// Translations are pulled one at a time so final snapshots stay strictly ordered.
+/// The bound provides natural back-pressure: if the translator ever lags behind, the
+/// Whisper worker awaits `send` instead of flooding memory, while still allowing the
+/// two streams to run independently.
+const TRANSLATION_QUEUE_CAPACITY: usize = 16;
 const TTS_QUEUE_CAPACITY: usize = 4;
 const STOP_DRAIN_TIMEOUT_SECONDS: u64 = 2;
 const CANCELLATION_GRACE_SECONDS: u64 = 2;
@@ -31,10 +37,38 @@ struct Utterance {
     samples: Vec<i16>,
 }
 
-struct TranslationWorker {
+/// One translation job pulled from the queue by the translation worker.
+/// Carries the already-finalized `pending` snapshot so the worker does not need
+/// to re-derive the partial transcript item.
+struct TranslationJob {
+    utterance_id: String,
+    pending_item: TranscriptItem,
+    started: Instant,
+}
+
+/// Produces pending transcript snapshots as Whisper finishes each sentence
+/// and pushes one translation job per sentence into the translation channel.
+/// This stream is intentionally decoupled from the translator so it can keep
+/// emitting source text while translation runs in parallel.
+struct WhisperWorker {
     app: AppHandle,
     config: LocalTranslationConfig,
     context: Arc<WhisperContext>,
+    transcript_store: Arc<Mutex<Vec<TranscriptItem>>>,
+    generation: u64,
+    active_generation: Arc<AtomicU64>,
+    cancellation: Arc<AtomicBool>,
+    activity: Arc<PipelineActivity>,
+    translation_tx: mpsc::Sender<TranslationJob>,
+    whisper_language: Option<String>,
+}
+
+/// Single-consumer translation worker. Pulls one job at a time so the final
+/// snapshots are emitted in the same order the pending snapshots appeared.
+/// Translation latency does not block Whisper because the bounded queue absorbs
+/// the difference between the two streams.
+struct SentenceTranslator {
+    app: AppHandle,
     client: TranslationClient,
     transcript_store: Arc<Mutex<Vec<TranscriptItem>>>,
     generation: u64,
@@ -42,7 +76,6 @@ struct TranslationWorker {
     cancellation: Arc<AtomicBool>,
     activity: Arc<PipelineActivity>,
     tts_tx: mpsc::Sender<TtsRequest>,
-    whisper_language: Option<String>,
 }
 
 #[derive(Default)]
@@ -124,6 +157,9 @@ pub async fn run_local_translation(
         crate::local_translation::whisper_language_code(source_language)?.map(str::to_string);
     let client = TranslationClient::new(&app, &config, source_language, target_language).await?;
     let (utterance_tx, utterance_rx) = mpsc::channel(UTTERANCE_QUEUE_CAPACITY);
+    // Translation queue decouples Whisper from translation: Whisper produces
+    // pending snapshots and enqueues jobs; the translator pulls one at a time.
+    let (translation_tx, translation_rx) = mpsc::channel(TRANSLATION_QUEUE_CAPACITY);
     let cancellation = Arc::new(AtomicBool::new(false));
     let activity = Arc::new(PipelineActivity::default());
     let (tts_tx, tts_rx) = mpsc::channel(TTS_QUEUE_CAPACITY);
@@ -140,18 +176,31 @@ pub async fn run_local_translation(
         tts_rx,
     );
     let mut tts_worker = Some(tts_worker);
-    let worker = spawn_translation_worker(
-        TranslationWorker {
+    let translator = spawn_translation_worker(
+        SentenceTranslator {
             app: app.clone(),
-            config: config.clone(),
-            context,
             client,
             transcript_store: transcript_store.clone(),
             generation,
             active_generation: active_generation.clone(),
             cancellation: cancellation.clone(),
-            activity,
+            activity: activity.clone(),
             tts_tx,
+        },
+        translation_rx,
+    );
+    let mut translator = Some(translator);
+    let worker = spawn_whisper_worker(
+        WhisperWorker {
+            app: app.clone(),
+            config: config.clone(),
+            context,
+            transcript_store: transcript_store.clone(),
+            generation,
+            active_generation: active_generation.clone(),
+            cancellation: cancellation.clone(),
+            activity,
+            translation_tx: translation_tx.clone(),
             whisper_language,
         },
         utterance_rx,
@@ -187,7 +236,9 @@ pub async fn run_local_translation(
                             )?;
                         }
                         drop(utterance_tx);
+                        drop(translation_tx);
                         drain_worker(&mut worker, &cancellation).await?;
+                        drain_worker(&mut translator, &cancellation).await?;
                         drain_worker(&mut tts_worker, &cancellation).await?;
                         return Ok(());
                     }
@@ -239,14 +290,18 @@ pub async fn run_local_translation(
                     Some(RealtimeControl::Stop) => {
                         cancellation.store(true, Ordering::SeqCst);
                         drop(utterance_tx);
+                        drop(translation_tx);
                         drain_worker(&mut worker, &cancellation).await?;
+                        drain_worker(&mut translator, &cancellation).await?;
                         drain_worker(&mut tts_worker, &cancellation).await?;
                         return Ok(());
                     }
                     None => {
                         cancellation.store(true, Ordering::SeqCst);
                         drop(utterance_tx);
+                        drop(translation_tx);
                         drain_worker(&mut worker, &cancellation).await?;
+                        drain_worker(&mut translator, &cancellation).await?;
                         drain_worker(&mut tts_worker, &cancellation).await?;
                         return Ok(());
                     }
@@ -256,22 +311,21 @@ pub async fn run_local_translation(
     }
 }
 
-fn spawn_translation_worker(
-    worker: TranslationWorker,
+fn spawn_whisper_worker(
+    worker: WhisperWorker,
     mut utterance_rx: mpsc::Receiver<Utterance>,
 ) -> JoinHandle<AppResult<()>> {
     tokio::spawn(async move {
-        let TranslationWorker {
+        let WhisperWorker {
             app,
             config,
             context,
-            client,
             transcript_store,
             generation,
             active_generation,
             cancellation,
             activity,
-            tts_tx,
+            translation_tx,
             whisper_language,
         } = worker;
         while let Some(utterance) = utterance_rx.recv().await {
@@ -355,7 +409,15 @@ fn spawn_translation_worker(
                     error_message: None,
                 })
                 .collect();
+            // Stream pending snapshots one at a time so the UI receives each
+            // sentence as soon as Whisper produces it instead of flashing the
+            // full batch on the next React render. After each emit we yield
+            // back to the runtime so the IPC bus gets a chance to flush before
+            // we enqueue the next snapshot.
             for pending in &pending_items {
+                if !is_worker_active(generation, &active_generation, &cancellation) {
+                    break;
+                }
                 emit_snapshot(
                     &app,
                     &transcript_store,
@@ -363,79 +425,123 @@ fn spawn_translation_worker(
                     &active_generation,
                     pending.clone(),
                 )?;
+                let job = TranslationJob {
+                    utterance_id: utterance_id.clone(),
+                    pending_item: pending.clone(),
+                    started,
+                };
+                // Bounded `send` — when the translator is briefly behind,
+                // this back-pressures Whisper instead of letting pending
+                // items pile up in memory.
+                if translation_tx.send(job).await.is_err() {
+                    // Translation worker dropped — session is shutting down.
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+            activity
+                .translation_stage
+                .store(ACTIVITY_INACTIVE, Ordering::SeqCst);
+            settle_pipeline_activity(&app, generation, &activity)?;
+        }
+        activity
+            .translation_stage
+            .store(ACTIVITY_INACTIVE, Ordering::SeqCst);
+        Ok(())
+    })
+}
+
+fn spawn_translation_worker(
+    translator: SentenceTranslator,
+    mut translation_rx: mpsc::Receiver<TranslationJob>,
+) -> JoinHandle<AppResult<()>> {
+    tokio::spawn(async move {
+        let SentenceTranslator {
+            app,
+            client,
+            transcript_store,
+            generation,
+            active_generation,
+            cancellation,
+            activity,
+            tts_tx,
+        } = translator;
+        while let Some(job) = translation_rx.recv().await {
+            if !is_worker_active(generation, &active_generation, &cancellation) {
+                break;
             }
             activity
                 .translation_stage
                 .store(TRANSLATION_TRANSLATING, Ordering::SeqCst);
             settle_pipeline_activity(&app, generation, &activity)?;
 
-            for pending in pending_items {
-                if !is_worker_active(generation, &active_generation, &cancellation) {
-                    break;
-                }
-                let sentence_text = pending.source_text.clone();
-                let translation = client.translate(&sentence_text).await;
-                if !is_worker_active(generation, &active_generation, &cancellation) {
-                    break;
-                }
-                match translation {
-                    Ok((translated_text, _translation_latency_ms)) => {
-                        let speech_text = translated_text.clone();
-                        emit_snapshot(
-                            &app,
-                            &transcript_store,
-                            generation,
-                            &active_generation,
-                            TranscriptItem {
-                                translated_text,
-                                status: TranscriptStatus::Final,
-                                latency_ms: Some(elapsed_ms(started)),
-                                revision: 2,
-                                ..pending
-                            },
-                        )?;
-                        match tts_tx.try_send(TtsRequest {
-                            utterance_id: utterance_id.clone(),
-                            translated_text: speech_text,
-                        }) {
-                            Ok(()) => {}
-                            Err(mpsc::error::TrySendError::Full(_)) => {
+            let TranslationJob {
+                utterance_id,
+                pending_item,
+                started,
+            } = job;
+            let sentence_text = pending_item.source_text.clone();
+            let translation = client.translate(&sentence_text).await;
+            if !is_worker_active(generation, &active_generation, &cancellation) {
+                break;
+            }
+            match translation {
+                Ok((translated_text, _translation_latency_ms)) => {
+                    let speech_text = translated_text.clone();
+                    emit_snapshot(
+                        &app,
+                        &transcript_store,
+                        generation,
+                        &active_generation,
+                        TranscriptItem {
+                            translated_text,
+                            status: TranscriptStatus::Final,
+                            latency_ms: Some(elapsed_ms(started)),
+                            revision: 2,
+                            ..pending_item
+                        },
+                    )?;
+                    match tts_tx.try_send(TtsRequest {
+                        utterance_id,
+                        translated_text: speech_text,
+                    }) {
+                        Ok(()) => {}
+                        Err(mpsc::error::TrySendError::Full(_)) => {
+                            let _ = app.emit(
+                                "app-error",
+                                AppError::new(
+                                    "local_tts_backlog_full",
+                                    "Local speech is falling behind. The translated text was kept, but this sentence will not be spoken.",
+                                ),
+                            );
+                        }
+                        Err(mpsc::error::TrySendError::Closed(_)) => {
+                            if is_worker_active(generation, &active_generation, &cancellation) {
                                 let _ = app.emit(
                                     "app-error",
                                     AppError::new(
-                                        "local_tts_backlog_full",
-                                        "Local speech is falling behind. The translated text was kept, but this sentence will not be spoken.",
+                                        "local_tts_worker_closed",
+                                        "The local speech worker stopped unexpectedly.",
                                     ),
                                 );
                             }
-                            Err(mpsc::error::TrySendError::Closed(_)) => {
-                                if is_worker_active(generation, &active_generation, &cancellation) {
-                                    let _ = app.emit(
-                                        "app-error",
-                                        AppError::new(
-                                            "local_tts_worker_closed",
-                                            "The local speech worker stopped unexpectedly.",
-                                        ),
-                                    );
-                                }
-                            }
                         }
                     }
-                    Err(error) => {
-                        emit_snapshot(
-                            &app,
-                            &transcript_store,
-                            generation,
-                            &active_generation,
-                            TranscriptItem {
-                                status: TranscriptStatus::Error,
-                                latency_ms: Some(elapsed_ms(started)),
-                                revision: 2,
-                                error_message: Some(error.message),
-                                ..pending
-                            },
-                        )?;
-                    }
+                }
+                Err(error) => {
+                    emit_snapshot(
+                        &app,
+                        &transcript_store,
+                        generation,
+                        &active_generation,
+                        TranscriptItem {
+                            status: TranscriptStatus::Error,
+                            latency_ms: Some(elapsed_ms(started)),
+                            revision: 2,
+                            error_message: Some(error.message),
+                            ..pending_item
+                        },
+                    )?;
                 }
             }
             activity
