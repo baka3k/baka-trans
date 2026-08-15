@@ -20,3 +20,5 @@ sidecars/hy-mt/bundle/*
 !sidecars/hy-mt/bundle/.gitkeep
 sidecars/hy-mt/__pycache__/
 sidecars/hy-mt/**/*.pyc
+.qwen/tmp
+.qwen/tmp/**

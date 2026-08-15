@@ -20,13 +20,12 @@
 #     value defaults to 10.13 and ggml fails to compile.
 #   - cargo's build-script hash does NOT include env vars, so changing
 #     `.cargo/config.toml` does not invalidate the cached whisper-rs-sys
-#     build (which holds `CMAKE_CXX_FLAGS` from the previous run). The
-#     `make build` target depends on `.cargo/.wrs-cleared`, which is
-#     regenerated whenever `.cargo/config.toml` is newer, and forces
-#     `cargo clean -p whisper-rs-sys` so the next compile picks up the
-#     new env. Override per-build with
-#     `make build MACOSX_DEPLOYMENT_TARGET=11.0` if your app needs a higher
-#     minimum.
+#     build (which holds `CMAKE_CXX_FLAGS` from the previous run). To
+#     pick up a new value, `make build` shell-checks mtimes and runs
+#     `cargo clean -p whisper-rs-sys` (one-time cost ~15 s) when the
+#     config is newer than the stamp at `.cargo/wrs-cleared`. Override
+#     per-build with `make build MACOSX_DEPLOYMENT_TARGET=11.0` if your
+#     app needs a higher minimum.
 #   - Code signing is currently disabled in `tauri.macos.conf.json`
 #     (`signingIdentity: null`) so `make build` produces an unsigned `.app`
 #     for local smoke-testing. Re-enable when the Apple Development cert is
@@ -43,7 +42,7 @@ endif
 
 .DEFAULT_GOAL := help
 
-WRS_CLEAR_STAMP := .cargo/.wrs-cleared
+WRS_CLEAR_STAMP := .cargo/wrs-cleared
 
 .PHONY: help doctor build
 
@@ -101,9 +100,16 @@ doctor:
 	printf '✓ environment looks good\n\n'
 
 build: doctor
-ifeq ($(shell uname -s),Darwin)
-build: $(WRS_CLEAR_STAMP)
-endif
+	@if [ "$$(uname -s)" = "Darwin" ]; then \
+		if [ ! -f $(WRS_CLEAR_STAMP) ] || [ .cargo/config.toml -nt $(WRS_CLEAR_STAMP) ]; then \
+			printf '[pre] clearing stale whisper-rs-sys build cache (env-driven, not tracked by cargo)\n'; \
+			cargo clean -p whisper-rs-sys --manifest-path src-tauri/Cargo.toml; \
+			mkdir -p $(@D); \
+			touch $(WRS_CLEAR_STAMP); \
+		else \
+			printf '[pre] whisper-rs-sys cache is fresh\n'; \
+		fi \
+	fi
 	@printf '\n=== Baka Trans — building desktop app ===\n\n'
 	@printf '[1/3] syncing JS deps via npm ci\n'
 	$(BUILD_ENV) npm ci
@@ -112,15 +118,3 @@ endif
 	@printf '\n[3/3] running tauri build\n'
 	$(BUILD_ENV) npm run tauri -- build
 	@printf '\n✓ build complete — see src-tauri/target/release/bundle/\n'
-
-# Force a fresh whisper-rs-sys build whenever `.cargo/config.toml` is
-# edited. cargo's build-script hash doesn't include env vars, so without
-# this the next build would reuse stale CMAKE_CXX_FLAGS from the previous
-# run and ggml would fail to compile.
-$(WRS_CLEAR_STAMP): .cargo/config.toml
-	@printf '[pre] clearing stale whisper-rs-sys build cache (env-driven, not tracked by cargo)\n'
-	cargo clean -p whisper-rs-sys --manifest-path src-tauri/Cargo.toml
-	@mkdir -p $(@D)
-	@touch $@
-
-.PHONY: $(WRS_CLEAR_STAMP)

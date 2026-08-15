@@ -598,11 +598,22 @@ pub struct ApiKeyTestResult {
 pub struct LocalTranslationConfig {
     pub schema_version: u32,
     pub translation_engine: LocalTranslationEngine,
+    pub openai_base_url: String,
+    pub openai_model: String,
+    pub openai_timeout_seconds: u64,
+    pub openai_temperature: f32,
+    pub openai_max_output_tokens: u32,
+    #[serde(skip_serializing, default)]
     pub base_url: String,
+    #[serde(skip_serializing, default)]
     pub model: String,
+    #[serde(skip_serializing, default)]
     pub timeout_seconds: u64,
+    #[serde(skip_serializing, default)]
     pub temperature: f32,
+    #[serde(skip_serializing, default)]
     pub max_output_tokens: u32,
+    #[serde(skip_serializing, default)]
     pub keep_alive: Option<String>,
     pub model_path: String,
     pub language: String,
@@ -627,6 +638,11 @@ pub struct LocalTranslationConfig {
 #[serde(default, rename_all = "camelCase")]
 pub struct LocalTranslationConfigDraft {
     pub translation_engine: LocalTranslationEngine,
+    pub openai_base_url: String,
+    pub openai_model: String,
+    pub openai_timeout_seconds: u64,
+    pub openai_temperature: f32,
+    pub openai_max_output_tokens: u32,
     pub base_url: String,
     pub model: String,
     pub timeout_seconds: u64,
@@ -656,6 +672,11 @@ impl From<LocalTranslationConfig> for LocalTranslationConfigDraft {
     fn from(value: LocalTranslationConfig) -> Self {
         Self {
             translation_engine: value.translation_engine,
+            openai_base_url: value.openai_base_url,
+            openai_model: value.openai_model,
+            openai_timeout_seconds: value.openai_timeout_seconds,
+            openai_temperature: value.openai_temperature,
+            openai_max_output_tokens: value.openai_max_output_tokens,
             base_url: value.base_url,
             model: value.model,
             timeout_seconds: value.timeout_seconds,
