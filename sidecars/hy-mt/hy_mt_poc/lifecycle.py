@@ -131,6 +131,11 @@ def _manifest() -> dict[str, Any]:
 
 def install(root: Path, progress: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
     """Download to a versioned staging directory, verify, then atomically activate."""
+    # The Hub client snapshots offline mode from the environment at import
+    # time; clear it before the lazy import below so the pinned download can
+    # reach the network no matter which process invoked the installer.
+    for name in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE"):
+        os.environ.pop(name, None)
     from huggingface_hub import snapshot_download
 
     managed = _managed_root(root)

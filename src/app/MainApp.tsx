@@ -1061,6 +1061,7 @@ export default function MainApp({
       setHyMtProgress(null);
     } catch (cause) {
       setError(normalizeError(cause));
+      setHyMtProgress(null);
       setHyMtModel(await getHyMtModelStatus().catch(() => hyMtModel));
     } finally {
       setHyMtBusy(false);

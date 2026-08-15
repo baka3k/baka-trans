@@ -14,7 +14,6 @@ from typing import Any, BinaryIO, TextIO
 from .constants import DEFAULT_TRANSLATE_TIMEOUT_SECONDS, MODEL_ID, MODEL_REVISION, PROTOCOL_VERSION, RUNTIME_IDENTITY, RUNTIME_VERSION, TRUST_REMOTE_CODE
 from .lifecycle import LifecycleError, active_path, install, status, validate_model
 from .protocol import ProtocolError, emit, parse_line, validate_cancel, validate_translate
-from .runner import HyMtRunner
 
 
 def hardened_environment() -> None:
@@ -139,6 +138,11 @@ class ServeLoop:
 
 def run_serve(model_root: Path, device: str, stdin: BinaryIO, stdout: TextIO) -> int:
     hardened_environment()
+    # Imported only after hardening: importing the runner pins offline mode in
+    # the environment before torch/transformers and the Hub client load, and
+    # the install command must never import it for exactly that reason.
+    from .runner import HyMtRunner
+
     model_dir = active_path(model_root)
     validate_model(model_dir)
     runner = HyMtRunner(model_dir, requested_device=device)
@@ -166,6 +170,11 @@ def main() -> None:
     args = parser().parse_args()
     try:
         if args.command == "install":
+            # Install is the only online lifecycle step. The Hub client freezes
+            # HF_HUB_OFFLINE at import time, so drop offline flags (including
+            # any inherited from the environment) before it is imported.
+            for name in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE"):
+                os.environ.pop(name, None)
             def progress(payload: dict[str, Any]) -> None:
                 emit(sys.stdout, payload)
             emit(sys.stdout, {"type": "status", "state": "downloading"})
