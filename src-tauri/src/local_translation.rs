@@ -4,8 +4,9 @@ pub mod openai_compatible;
 use crate::error::{AppError, AppResult};
 use crate::local_translation::openai_compatible::normalize_openai_chat_completions_url;
 use crate::models::{
-    Language, LocalTranslationConfig, LocalTranslationConfigDraft, LocalTranslationEngine, LocalTranslationTestResult,
-    LocalTtsProvider, WhisperModelDownloadProgress, WhisperModelOption,
+    Language, LocalTranslationConfig, LocalTranslationConfigDraft, LocalTranslationEngine,
+    LocalTranslationTestResult, LocalTtsProvider, TranslationEngineTestResult,
+    WhisperModelDownloadProgress, WhisperModelOption,
 };
 use futures_util::StreamExt;
 use reqwest::Client;
@@ -255,7 +256,7 @@ fn whisper_model_spec(model_id: &str) -> AppResult<&'static WhisperModelSpec> {
         })
 }
 
-fn whisper_model_dir() -> AppResult<PathBuf> {
+pub fn whisper_model_dir() -> AppResult<PathBuf> {
     Ok(model_cache_dir()?.join(WHISPER_CACHE_SUBDIR))
 }
 
@@ -466,7 +467,7 @@ pub async fn test_config(
         LocalTranslationEngine::HuggingfaceOffline => {
             Ok(LocalTranslationTestResult {
                 ok: true,
-                message: "Whisper and the selected voice are ready. The offline Hy-MT2 runtime will be tested when started.".to_string(),
+                message: "Whisper and the selected voice are ready. The offline Hy-MT2 engine is not bundled in this build yet; translation needs the OpenAI-compatible engine.".to_string(),
                 model: effective_model_from_config(&config),
                 endpoint: effective_endpoint_from_config(&config),
                 whisper_model_readable: true,
@@ -510,65 +511,152 @@ fn effective_endpoint_from_config(config: &LocalTranslationConfig) -> String {
 async fn test_openai_compatible_engine(
     config: &LocalTranslationConfig,
 ) -> AppResult<LocalTranslationTestResult> {
-    let api_key_info = api_key::load_local_translation_api_key()?;
-    let client = match openai_compatible::OpenAiCompatibleClient::new(
+    let probe = probe_openai_engine(
         &config.openai_base_url,
         &config.openai_model,
         config.openai_timeout_seconds,
         config.openai_temperature,
         config.openai_max_output_tokens,
-        api_key_info.map(|info| info.key),
-        Language::Ja,
-        Language::Vi,
-    ) {
-        Ok(client) => client,
-        Err(error) => {
-            return Ok(failed_test_result(
-                config.openai_model.clone(),
-                config.openai_base_url.clone(),
-                error,
-                LocalTestHealth {
-                    whisper_model_readable: true,
-                    whisper_model_loaded: true,
-                    tts_voice_available: true,
-                    ..LocalTestHealth::default()
-                },
-            ));
-        }
-    };
-    let endpoint = client.endpoint().to_string();
-    let (probe, _) = match client.translate("こんにちは").await {
-        Ok(response) => response,
-        Err(error) => {
-            let reachable = error.code != "local_openai_request_error";
-            return Ok(failed_test_result(
-                config.openai_model.clone(),
-                endpoint,
-                error,
-                LocalTestHealth {
-                    whisper_model_readable: true,
-                    whisper_model_loaded: true,
-                    engine_reachable: reachable,
-                    tts_voice_available: true,
-                    ..LocalTestHealth::default()
-                },
-            ));
-        }
-    };
+    )
+    .await;
+    if let Some(error) = probe.error {
+        return Ok(failed_test_result(
+            config.openai_model.clone(),
+            probe.endpoint,
+            error,
+            LocalTestHealth {
+                whisper_model_readable: true,
+                whisper_model_loaded: true,
+                engine_reachable: probe.reachable,
+                tts_voice_available: true,
+                ..LocalTestHealth::default()
+            },
+        ));
+    }
     Ok(LocalTranslationTestResult {
         ok: true,
         message: format!(
             "Whisper, the OpenAI-compatible endpoint, and the selected voice are ready. Probe translation: {} characters.",
-            probe.chars().count()
+            probe.probe_characters
         ),
         model: config.openai_model.clone(),
-        endpoint,
+        endpoint: probe.endpoint,
         whisper_model_readable: true,
         whisper_model_loaded: true,
         engine_reachable: true,
         engine_accepted: true,
         tts_voice_available: true,
     })
+}
+
+pub async fn test_engine(
+    draft: LocalTranslationConfigDraft,
+) -> AppResult<TranslationEngineTestResult> {
+    match draft.translation_engine {
+        LocalTranslationEngine::HuggingfaceOffline => Ok(TranslationEngineTestResult {
+            engine: "huggingface_offline".to_string(),
+            model: "tencent/Hy-MT2-1.8B".to_string(),
+            endpoint: "managed offline runtime".to_string(),
+            reachable: false,
+            accepted: false,
+            message: "The offline Hy-MT2 engine is not bundled in this build yet. Choose the OpenAI-compatible API engine for now.".to_string(),
+        }),
+        LocalTranslationEngine::OpenaiCompatible => {
+            let (endpoint, model) = validate_openai_compatible_fields(&draft)?;
+            let probe = probe_openai_engine(
+                &endpoint,
+                &model,
+                draft.openai_timeout_seconds.clamp(5, 300),
+                draft.openai_temperature.clamp(0.0, 2.0),
+                draft.openai_max_output_tokens.clamp(32, 16_384),
+            )
+            .await;
+            Ok(TranslationEngineTestResult {
+                engine: "openai_compatible".to_string(),
+                model,
+                endpoint: probe.endpoint,
+                reachable: probe.reachable,
+                accepted: probe.accepted,
+                message: match probe.error {
+                    Some(error) => error.message,
+                    None => format!(
+                        "The endpoint accepted a probe translation ({} characters).",
+                        probe.probe_characters
+                    ),
+                },
+            })
+        }
+    }
+}
+
+struct EngineProbe {
+    endpoint: String,
+    error: Option<AppError>,
+    reachable: bool,
+    accepted: bool,
+    probe_characters: usize,
+}
+
+async fn probe_openai_engine(
+    endpoint: &str,
+    model: &str,
+    timeout_seconds: u64,
+    temperature: f32,
+    max_output_tokens: u32,
+) -> EngineProbe {
+    let api_key_info = match api_key::load_local_translation_api_key() {
+        Ok(info) => info,
+        Err(error) => {
+            return EngineProbe {
+                endpoint: endpoint.to_string(),
+                error: Some(error),
+                reachable: false,
+                accepted: false,
+                probe_characters: 0,
+            };
+        }
+    };
+    let client = match openai_compatible::OpenAiCompatibleClient::new(
+        endpoint,
+        model,
+        timeout_seconds,
+        temperature,
+        max_output_tokens,
+        api_key_info.map(|info| info.key),
+        Language::Ja,
+        Language::Vi,
+    ) {
+        Ok(client) => client,
+        Err(error) => {
+            return EngineProbe {
+                endpoint: endpoint.to_string(),
+                error: Some(error),
+                reachable: false,
+                accepted: false,
+                probe_characters: 0,
+            };
+        }
+    };
+    let endpoint = client.endpoint().to_string();
+    match client.translate("こんにちは").await {
+        Ok((probe, _)) => EngineProbe {
+            endpoint,
+            error: None,
+            reachable: true,
+            accepted: true,
+            probe_characters: probe.chars().count(),
+        },
+        Err(error) => {
+            let reachable = error.code != "local_openai_request_error";
+            EngineProbe {
+                endpoint,
+                error: Some(error),
+                reachable,
+                accepted: false,
+                probe_characters: 0,
+            }
+        }
+    }
 }
 
 #[derive(Default)]
@@ -1280,6 +1368,31 @@ mod tests {
             ..LocalTranslationConfig::default()
         };
         let result = TranslationClient::new(&config, Language::Ja, Language::Vi);
+        assert_eq!(result.unwrap_err().code, "local_openai_base_url_missing");
+    }
+
+    #[tokio::test]
+    async fn test_engine_reports_offline_engine_as_not_bundled() {
+        let result = test_engine(LocalTranslationConfigDraft::default())
+            .await
+            .unwrap();
+
+        assert_eq!(result.engine, "huggingface_offline");
+        assert!(!result.reachable);
+        assert!(!result.accepted);
+        assert!(result.message.contains("not bundled in this build yet"));
+    }
+
+    #[tokio::test]
+    async fn test_engine_validates_openai_fields_before_probing() {
+        let result = test_engine(LocalTranslationConfigDraft {
+            translation_engine: LocalTranslationEngine::OpenaiCompatible,
+            openai_base_url: String::new(),
+            openai_model: String::new(),
+            ..LocalTranslationConfigDraft::default()
+        })
+        .await;
+
         assert_eq!(result.unwrap_err().code, "local_openai_base_url_missing");
     }
 }

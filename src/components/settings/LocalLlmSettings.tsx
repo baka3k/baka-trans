@@ -2,6 +2,7 @@ import type {
   LocalTranslationConfigDraft,
   LocalTranslationTestResult,
   LocalVoice,
+  TranslationEngineTestResult,
   VieNeuRuntimeProgress,
   VieNeuRuntimeStatus,
   WhisperModelDownloadProgress,
@@ -40,6 +41,8 @@ interface LocalLlmSettingsProps {
   saving: boolean;
   testing: boolean;
   testResult: LocalTranslationTestResult | null;
+  engineTesting?: boolean;
+  engineTest?: TranslationEngineTestResult | null;
   voices: LocalVoice[];
   voicesLoading?: boolean;
   previewing: boolean;
@@ -54,6 +57,7 @@ interface LocalLlmSettingsProps {
   onChange: (draft: LocalTranslationConfigDraft) => void;
   onSave: () => void;
   onTest: () => void;
+  onTestEngine?: () => void;
   onPreview: () => void;
   onRefreshVoices?: () => void;
   onWhisperModelSelect: (modelId: string) => void;
@@ -115,6 +119,8 @@ export function LocalLlmSettings({
   saving,
   testing,
   testResult,
+  engineTesting = false,
+  engineTest = null,
   voices,
   voicesLoading = false,
   previewing,
@@ -129,6 +135,7 @@ export function LocalLlmSettings({
   onChange,
   onSave,
   onTest,
+  onTestEngine = () => undefined,
   onPreview,
   onRefreshVoices = () => undefined,
   onWhisperModelSelect,
@@ -138,6 +145,14 @@ export function LocalLlmSettings({
   onVieNeuRestart = () => undefined,
 }: LocalLlmSettingsProps) {
   const errors = validateLocalTranslationDraft(draft, vieneuRuntime);
+  const engineFieldsInvalid =
+    draft.translationEngine === "openai_compatible" &&
+    (!/^https?:\/\//i.test((draft.openaiBaseUrl ?? "").trim()) || !draft.openaiModel.trim());
+  const engineHealthy = Boolean(
+    !dirty &&
+      ((testResult?.engineReachable && testResult.engineAccepted) ||
+        (engineTest?.reachable && engineTest.accepted)),
+  );
   const update = (patch: Partial<LocalTranslationConfigDraft>) =>
     onChange({ ...draft, ...patch });
   const number = (value: string, fallback: number) => {
@@ -216,6 +231,18 @@ export function LocalLlmSettings({
           />
         </div>
         </>}
+        <button
+          type="button"
+          onClick={onTestEngine}
+          disabled={saving || testing || engineTesting || dirty || engineFieldsInvalid}
+        >
+          {engineTesting ? "Testing engine" : "Test translation engine"}
+        </button>
+        {engineTest && !dirty ? (
+          <p className={`key-test-row ${engineTest.accepted ? "" : "engine-test-failed"}`}>
+            {engineTest.message}
+          </p>
+        ) : null}
       </fieldset>
 
       <fieldset className="local-config-group">
@@ -370,10 +397,10 @@ export function LocalLlmSettings({
           <span>GGML model path</span>
           <input
             value={draft.modelPath}
-            placeholder="C:\\models\\ggml-small.bin"
+            placeholder="~/.bakatrans/whisper/ggml-small-q5_1.bin"
             onChange={(event) => update({ modelPath: event.currentTarget.value })}
           />
-          <small>The download above fills this path. You can still enter another absolute GGML path.</small>
+          <small>Defaults to the per-OS Whisper cache folder. The download above fills it; you can still enter another absolute GGML path.</small>
         </label>
         <div className="field-grid two">
           <label className="field">
@@ -457,7 +484,7 @@ export function LocalLlmSettings({
         />
         <Health
           label="Translation engine reachable and accepted"
-          ok={Boolean(testResult?.engineReachable && testResult.engineAccepted && !dirty)}
+          ok={engineHealthy}
         />
         <Health
           label="Selected local voice is available"

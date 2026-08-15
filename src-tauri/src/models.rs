@@ -712,6 +712,17 @@ pub struct LocalTranslationTestResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct TranslationEngineTestResult {
+    pub engine: String,
+    pub model: String,
+    pub endpoint: String,
+    pub reachable: bool,
+    pub accepted: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct WhisperModelOption {
     pub id: String,
     pub label: String,

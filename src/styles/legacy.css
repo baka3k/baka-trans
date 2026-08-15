@@ -749,6 +749,10 @@ h2 {
   margin-top: 10px;
 }
 
+.key-test-row.engine-test-failed {
+  color: var(--warn, #b3261e);
+}
+
 .summary-config-panel {
   display: grid;
   gap: 14px;

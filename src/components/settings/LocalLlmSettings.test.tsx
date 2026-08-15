@@ -199,6 +199,65 @@ describe("LocalLlmSettings", () => {
     expect(screen.getByText("Could not connect to the translation engine.")).toBeInTheDocument();
   });
 
+  it("greens the engine health from a standalone engine test", async () => {
+    const user = userEvent.setup();
+    const onTestEngine = vi.fn();
+    const baseProps = {
+      draft: {
+        ...defaultLocalTranslationConfig,
+        translationEngine: "openai_compatible" as const,
+        openaiBaseUrl: "https://api.example.com/v1",
+        openaiModel: "gpt-4o-mini",
+        modelPath: "C:\\models\\ggml-small.bin",
+        voiceId: "vi-voice",
+      },
+      dirty: false,
+      saving: false,
+      testing: false,
+      testResult: null,
+      voices: [{ id: "vi-voice", name: "Vietnamese", language: "vi-VN" }],
+      previewing: false,
+      onPreview: () => undefined,
+      whisperModels,
+      selectedWhisperModelId: "small-q5_1",
+      whisperDownload: null,
+      whisperDownloading: false,
+      onChange: () => undefined,
+      onSave: () => undefined,
+      onTest: () => undefined,
+      onWhisperModelSelect: () => undefined,
+      onWhisperDownload: () => undefined,
+    };
+    const { rerender } = render(
+      <LocalLlmSettings {...baseProps} engineTesting={false} engineTest={null} onTestEngine={onTestEngine} />,
+    );
+
+    const healthRow = screen.getByText("Translation engine reachable and accepted").closest("div");
+    expect(healthRow).not.toHaveClass("ok");
+    await user.click(screen.getByRole("button", { name: "Test translation engine" }));
+    expect(onTestEngine).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <LocalLlmSettings
+        {...baseProps}
+        engineTesting={false}
+        engineTest={{
+          engine: "openai_compatible",
+          model: "gpt-4o-mini",
+          endpoint: "https://api.example.com/v1/chat/completions",
+          reachable: true,
+          accepted: true,
+          message: "The endpoint accepted a probe translation (9 characters).",
+        }}
+        onTestEngine={onTestEngine}
+      />,
+    );
+    expect(
+      screen.getByText("Translation engine reachable and accepted").closest("div"),
+    ).toHaveClass("ok");
+    expect(screen.getByText(/accepted a probe translation/)).toBeInTheDocument();
+  });
+
   it("offers a managed Whisper download and reports progress", async () => {
     const user = userEvent.setup();
     const onDownload = vi.fn();

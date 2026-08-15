@@ -135,6 +135,8 @@ describe("application routes", () => {
               modelPath: "C:\\models\\ggml-small.bin",
               voiceId: "vi-voice",
             };
+          case "get_whisper_model_dir":
+            return "/Users/test/.bakatrans/whisper";
           case "list_local_tts_voices":
             return [{ id: "vi-voice", name: "Vietnamese", language: "vi-VN" }];
           case "get_vieneu_runtime_status":
@@ -200,6 +202,8 @@ describe("application routes", () => {
             return [];
           case "list_whisper_models":
             return [];
+          case "get_whisper_model_dir":
+            return "/Users/test/.bakatrans/whisper";
           case "translation_credential_status":
             return {
               provider: "google_live_translate",

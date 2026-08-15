@@ -266,6 +266,15 @@ export interface LocalTranslationTestResult {
   ttsVoiceAvailable: boolean;
 }
 
+export interface TranslationEngineTestResult {
+  engine: LocalTranslationEngine;
+  model: string;
+  endpoint: string;
+  reachable: boolean;
+  accepted: boolean;
+  message: string;
+}
+
 export interface WhisperModelOption {
   id: string;
   label: string;

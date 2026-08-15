@@ -25,6 +25,7 @@ import type {
   OverlayStatus,
   SessionConfig,
   TranslationCredentialStatus,
+  TranslationEngineTestResult,
   TranslationProvider,
   TranscriptItem,
 } from "./types";
@@ -106,12 +107,20 @@ export function testLocalTranslationConfig(draft: LocalTranslationConfigDraft) {
   return invoke<LocalTranslationTestResult>("test_local_translation_config", { draft });
 }
 
+export function testTranslationEngine(draft: LocalTranslationConfigDraft) {
+  return invoke<TranslationEngineTestResult>("test_translation_engine", { draft });
+}
+
 export function listWhisperModels() {
   return invoke<WhisperModelOption[]>("list_whisper_models");
 }
 
 export function downloadWhisperModel(modelId: string) {
   return invoke<string>("download_whisper_model", { modelId });
+}
+
+export function getWhisperModelDir() {
+  return invoke<string>("get_whisper_model_dir");
 }
 
 export function listLocalTtsVoices(provider: LocalTtsProvider) {

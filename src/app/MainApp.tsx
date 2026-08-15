@@ -44,6 +44,7 @@ import {
   forceTranslateBoundary,
   getVieNeuRuntimeStatus,
   getLocalTranslationConfig,
+  getWhisperModelDir,
   getAppStatus,
   getTranscriptSnapshot,
   lookHelpStatus,
@@ -78,6 +79,7 @@ import {
   setOverlayPaused,
   testLlmProfile,
   testLocalTranslationConfig,
+  testTranslationEngine,
   testTranslationApiKey,
   translationCredentialStatus,
   updateLookHelpConfig,
@@ -122,6 +124,7 @@ import type {
   LocalTranslationConfigDraft,
   LocalPipelineStage,
   LocalTranslationTestResult,
+  TranslationEngineTestResult,
   LocalVoice,
   VieNeuRuntimeProgress,
   VieNeuRuntimeStatus,
@@ -353,6 +356,8 @@ export default function MainApp({
   const [localConfigSaving, setLocalConfigSaving] = useState(false);
   const [localConfigTesting, setLocalConfigTesting] = useState(false);
   const [localConfigTest, setLocalConfigTest] = useState<LocalTranslationTestResult | null>(null);
+  const [engineTesting, setEngineTesting] = useState(false);
+  const [engineTest, setEngineTest] = useState<TranslationEngineTestResult | null>(null);
   const [localVoices, setLocalVoices] = useState<LocalVoice[]>([]);
   const [localVoicesLoading, setLocalVoicesLoading] = useState(false);
   const [localVoicePreviewing, setLocalVoicePreviewing] = useState(false);
@@ -743,7 +748,7 @@ export default function MainApp({
   async function hydrate() {
     setBusy(true);
     try {
-      const [deviceList, appStatus, transcriptSnapshot, profiles, localConfig, models, runtime] =
+      const [deviceList, appStatus, transcriptSnapshot, profiles, localConfig, models, runtime, whisperModelDir] =
         await Promise.all([
         listAudioDevices(),
         getAppStatus(),
@@ -752,6 +757,7 @@ export default function MainApp({
         getLocalTranslationConfig(),
         experience === "local" ? listWhisperModels() : Promise.resolve([]),
         experience === "local" ? getVieNeuRuntimeStatus() : Promise.resolve(null),
+        experience === "local" ? safeGetWhisperModelDir() : Promise.resolve(""),
       ]);
       let voices: LocalVoice[] = [];
       let voiceLoadError: AppErrorPayload | null = null;
@@ -774,10 +780,17 @@ export default function MainApp({
       const { schemaVersion: _schemaVersion, ...localDraft } = localConfig;
       const preferredVoice =
         voices.find((voice) => voice.language.toLowerCase().startsWith("vi")) ?? voices[0];
-      const migratedLocalDraft =
-        localDraft.voiceId || !preferredVoice
-          ? localDraft
-          : { ...localDraft, voiceId: preferredVoice.id };
+      const needsModelPathFallback = !localDraft.modelPath.trim();
+      const voiceIdNeedsMigration =
+        !localDraft.voiceId && Boolean(preferredVoice);
+      const migratedLocalDraft: LocalTranslationConfigDraft =
+        needsModelPathFallback || voiceIdNeedsMigration
+          ? {
+              ...localDraft,
+              modelPath: localDraft.modelPath.trim() || whisperModelDir,
+              voiceId: voiceIdNeedsMigration ? preferredVoice.id : localDraft.voiceId,
+            }
+          : localDraft;
       setLocalVoices(voices);
       setVieNeuRuntime(runtime);
       setWhisperModels(models);
@@ -787,6 +800,7 @@ export default function MainApp({
       setLocalConfigDraft(migratedLocalDraft);
       setLocalConfigDirty(migratedLocalDraft !== localDraft);
       setLocalConfigTest(null);
+      setEngineTest(null);
       setKeyTestMessage("");
       const storedRouting = readRoutingProfile();
       applyRoutingProfile(resolveRoutingProfile(deviceList, storedRouting), true);
@@ -883,6 +897,16 @@ export default function MainApp({
     }
   }
 
+  // Resolves the per-OS Whisper cache directory without aborting hydration if
+  // the backend cannot (e.g. HOME / USERPROFILE unset on a stripped image).
+  async function safeGetWhisperModelDir(): Promise<string> {
+    try {
+      return await getWhisperModelDir();
+    } catch {
+      return "";
+    }
+  }
+
   function selectTranslationProvider(provider: TranslationProvider) {
     if (provider === translationProvider) {
       return;
@@ -909,6 +933,7 @@ export default function MainApp({
       setLocalConfigDraft(draft);
       setLocalConfigDirty(false);
       setLocalConfigTest(null);
+      setEngineTest(null);
     } catch (cause) {
       setError(normalizeError(cause));
     } finally {
@@ -926,6 +951,19 @@ export default function MainApp({
       setError(normalizeError(cause));
     } finally {
       setLocalConfigTesting(false);
+    }
+  }
+
+  async function testLocalEngine() {
+    setEngineTesting(true);
+    setError(null);
+    try {
+      setEngineTest(await testTranslationEngine(localConfigDraft));
+    } catch (cause) {
+      setEngineTest(null);
+      setError(normalizeError(cause));
+    } finally {
+      setEngineTesting(false);
     }
   }
 
@@ -956,6 +994,7 @@ export default function MainApp({
         }));
         setLocalConfigDirty(true);
         setLocalConfigTest(null);
+        setEngineTest(null);
       }
     } catch (cause) {
       setLocalVoices([]);
@@ -1027,6 +1066,7 @@ export default function MainApp({
       setLocalConfigDraft((current) => ({ ...current, modelPath }));
       setLocalConfigDirty(true);
       setLocalConfigTest(null);
+      setEngineTest(null);
     } catch (cause) {
       const normalized = normalizeError(cause);
       setWhisperDownload((current) => ({
@@ -1890,6 +1930,8 @@ export default function MainApp({
               saving={localConfigSaving}
               testing={localConfigTesting}
               testResult={localConfigTest}
+              engineTesting={engineTesting}
+              engineTest={engineTest}
               voices={localVoices}
               voicesLoading={localVoicesLoading}
               previewing={localVoicePreviewing}
@@ -1910,9 +1952,11 @@ export default function MainApp({
                 setLocalConfigDraft(draft);
                 setLocalConfigDirty(true);
                 setLocalConfigTest(null);
+                setEngineTest(null);
               }}
               onSave={() => void saveLocalConfig()}
               onTest={() => void testLocalConfig()}
+              onTestEngine={() => void testLocalEngine()}
               onPreview={() => void previewLocalVoice()}
               onRefreshVoices={() => void refreshLocalVoices()}
               onWhisperModelSelect={setSelectedWhisperModelId}
