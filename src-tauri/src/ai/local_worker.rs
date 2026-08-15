@@ -1164,47 +1164,4 @@ mod tests {
         assert!(cancellation.load(Ordering::SeqCst));
     }
 
-    #[tokio::test]
-    #[ignore = "requires BAKA_TRANS_WHISPER_MODEL, BAKA_TRANS_OLLAMA_MODEL, BAKA_TRANS_JAPANESE_PCM, and local Ollama"]
-    async fn local_whisper_ollama_end_to_end_smoke_test() {
-        let model_path = std::env::var("BAKA_TRANS_WHISPER_MODEL").unwrap();
-        let ollama_model = std::env::var("BAKA_TRANS_OLLAMA_MODEL").unwrap();
-        let pcm_path = std::env::var("BAKA_TRANS_JAPANESE_PCM").unwrap();
-        let bytes = std::fs::read(pcm_path).unwrap();
-        assert_eq!(
-            bytes.len() % 2,
-            0,
-            "PCM fixture must contain little-endian i16 samples"
-        );
-        let pcm = bytes
-            .chunks_exact(2)
-            .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]))
-            .collect::<Vec<_>>();
-        let context = crate::local_translation::load_whisper_context(&model_path, false).unwrap();
-        let source = transcribe(
-            &context,
-            pcm,
-            4,
-            Some("ja"),
-            Arc::new(AtomicBool::new(false)),
-        )
-        .unwrap();
-        assert!(!source.is_empty());
-        let local_config = LocalTranslationConfig {
-            model: ollama_model,
-            model_path,
-            ..LocalTranslationConfig::default()
-        };
-        let (translated, _) = crate::local_translation::OllamaClient::new(
-            &local_config,
-            Language::Ja,
-            Language::Vi,
-        )
-        .unwrap()
-        .translate(&source)
-        .await
-        .unwrap();
-        assert!(!translated.is_empty());
-        println!("Japanese: {source}\nVietnamese: {translated}");
-    }
 }

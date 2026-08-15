@@ -15,12 +15,6 @@ export const defaultLocalTranslationConfig: LocalTranslationConfigDraft = {
   openaiTimeoutSeconds: 30,
   openaiTemperature: 0,
   openaiMaxOutputTokens: 256,
-  baseUrl: "",
-  model: "",
-  timeoutSeconds: 30,
-  temperature: 0,
-  maxOutputTokens: 256,
-  keepAlive: undefined,
   modelPath: "",
   language: "ja",
   threads: 4,
@@ -181,18 +175,18 @@ export function LocalLlmSettings({
         <label className="field">
           <span>Server URL</span>
           <input
-            value={draft.baseUrl}
+            value={draft.openaiBaseUrl}
             placeholder="https://api.example.com/v1"
-            onChange={(event) => update({ baseUrl: event.currentTarget.value })}
+            onChange={(event) => update({ openaiBaseUrl: event.currentTarget.value })}
           />
           <small>Meeting text is sent to this endpoint. Non-local endpoints should use HTTPS.</small>
         </label>
         <label className="field">
           <span>Model</span>
           <input
-            value={draft.model}
+            value={draft.openaiModel}
             placeholder="gpt-4o-mini"
-            onChange={(event) => update({ model: event.currentTarget.value })}
+            onChange={(event) => update({ openaiModel: event.currentTarget.value })}
           />
         </label>
         <div className="field-grid two">
@@ -201,24 +195,24 @@ export function LocalLlmSettings({
             min={5}
             max={300}
             step={1}
-            value={draft.timeoutSeconds}
-            onChange={(value) => update({ timeoutSeconds: number(value, draft.timeoutSeconds) })}
+            value={draft.openaiTimeoutSeconds}
+            onChange={(value) => update({ openaiTimeoutSeconds: number(value, draft.openaiTimeoutSeconds) })}
           />
           <NumberField
             label="Maximum output tokens"
             min={32}
             max={2048}
             step={1}
-            value={draft.maxOutputTokens}
-            onChange={(value) => update({ maxOutputTokens: number(value, draft.maxOutputTokens) })}
+            value={draft.openaiMaxOutputTokens}
+            onChange={(value) => update({ openaiMaxOutputTokens: number(value, draft.openaiMaxOutputTokens) })}
           />
           <NumberField
             label="Temperature"
             min={0}
             max={1}
             step={0.1}
-            value={draft.temperature}
-            onChange={(value) => update({ temperature: number(value, draft.temperature) })}
+            value={draft.openaiTemperature}
+            onChange={(value) => update({ openaiTemperature: number(value, draft.openaiTemperature) })}
           />
         </div>
         </>}
@@ -462,8 +456,8 @@ export function LocalLlmSettings({
           ok={Boolean(testResult?.whisperModelReadable && testResult.whisperModelLoaded && !dirty)}
         />
         <Health
-          label="Ollama reachable and model accepted"
-          ok={Boolean(testResult?.ollamaReachable && testResult.ollamaModelAccepted && !dirty)}
+          label="Translation engine reachable and accepted"
+          ok={Boolean(testResult?.engineReachable && testResult.engineAccepted && !dirty)}
         />
         <Health
           label="Selected local voice is available"

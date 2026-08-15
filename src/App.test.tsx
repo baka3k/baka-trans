@@ -140,7 +140,7 @@ describe("application routes", () => {
           case "get_vieneu_runtime_status":
             return null;
           case "translation_credential_status":
-            return { provider: "local_whisper_ollama", hasApiKey: false };
+            return { provider: "local_whisper", hasApiKey: false };
           case "start_session":
             startedConfig = (args as unknown as { config: Record<string, unknown> }).config;
             return undefined;
@@ -163,7 +163,7 @@ describe("application routes", () => {
     await user.click(start);
     await waitFor(() => expect(startedConfig).not.toBeNull());
     expect(startedConfig).toMatchObject({
-      translationProvider: "local_whisper_ollama",
+      translationProvider: "local_whisper",
       inputDeviceId: "input:0:Microphone",
     });
     view.unmount();

@@ -41,7 +41,7 @@ pub enum TranslationProvider {
     OpenaiRealtime,
     #[default]
     GoogleLiveTranslate,
-    LocalWhisperOllama,
+    LocalWhisper,
 }
 
 impl TranslationProvider {
@@ -49,7 +49,7 @@ impl TranslationProvider {
         match self {
             TranslationProvider::OpenaiRealtime => "OpenAI Realtime Translation",
             TranslationProvider::GoogleLiveTranslate => "Google Live Translation",
-            TranslationProvider::LocalWhisperOllama => "Local Whisper + Ollama",
+            TranslationProvider::LocalWhisper => "Local Whisper",
         }
     }
 
@@ -57,12 +57,12 @@ impl TranslationProvider {
         match self {
             TranslationProvider::OpenaiRealtime => "OPENAI_API_KEY",
             TranslationProvider::GoogleLiveTranslate => "GEMINI_API_KEY",
-            TranslationProvider::LocalWhisperOllama => "",
+            TranslationProvider::LocalWhisper => "",
         }
     }
 
     pub fn requires_api_key(self) -> bool {
-        !matches!(self, TranslationProvider::LocalWhisperOllama)
+        !matches!(self, TranslationProvider::LocalWhisper)
     }
 }
 
@@ -266,7 +266,7 @@ impl Language {
         match provider {
             TranslationProvider::OpenaiRealtime => self.is_openai_realtime_target_supported(),
             TranslationProvider::GoogleLiveTranslate => self.is_google_live_target_supported(),
-            TranslationProvider::LocalWhisperOllama => self != Language::Auto,
+            TranslationProvider::LocalWhisper => self != Language::Auto,
         }
     }
 }
@@ -603,18 +603,6 @@ pub struct LocalTranslationConfig {
     pub openai_timeout_seconds: u64,
     pub openai_temperature: f32,
     pub openai_max_output_tokens: u32,
-    #[serde(skip_serializing, default)]
-    pub base_url: String,
-    #[serde(skip_serializing, default)]
-    pub model: String,
-    #[serde(skip_serializing, default)]
-    pub timeout_seconds: u64,
-    #[serde(skip_serializing, default)]
-    pub temperature: f32,
-    #[serde(skip_serializing, default)]
-    pub max_output_tokens: u32,
-    #[serde(skip_serializing, default)]
-    pub keep_alive: Option<String>,
     pub model_path: String,
     pub language: String,
     pub threads: u32,
@@ -643,12 +631,6 @@ pub struct LocalTranslationConfigDraft {
     pub openai_timeout_seconds: u64,
     pub openai_temperature: f32,
     pub openai_max_output_tokens: u32,
-    pub base_url: String,
-    pub model: String,
-    pub timeout_seconds: u64,
-    pub temperature: f32,
-    pub max_output_tokens: u32,
-    pub keep_alive: Option<String>,
     pub model_path: String,
     pub language: String,
     pub threads: u32,
@@ -677,12 +659,6 @@ impl From<LocalTranslationConfig> for LocalTranslationConfigDraft {
             openai_timeout_seconds: value.openai_timeout_seconds,
             openai_temperature: value.openai_temperature,
             openai_max_output_tokens: value.openai_max_output_tokens,
-            base_url: value.base_url,
-            model: value.model,
-            timeout_seconds: value.timeout_seconds,
-            temperature: value.temperature,
-            max_output_tokens: value.max_output_tokens,
-            keep_alive: value.keep_alive,
             model_path: value.model_path,
             language: value.language,
             threads: value.threads,
@@ -729,8 +705,8 @@ pub struct LocalTranslationTestResult {
     pub endpoint: String,
     pub whisper_model_readable: bool,
     pub whisper_model_loaded: bool,
-    pub ollama_reachable: bool,
-    pub ollama_model_accepted: bool,
+    pub engine_reachable: bool,
+    pub engine_accepted: bool,
     pub tts_voice_available: bool,
 }
 
@@ -1060,7 +1036,7 @@ mod tests {
     #[test]
     fn local_translation_accepts_any_explicit_target_language() {
         let mut config = session_config(Language::Th);
-        config.translation_provider = TranslationProvider::LocalWhisperOllama;
+        config.translation_provider = TranslationProvider::LocalWhisper;
         config.source_language = Language::En;
 
         assert!(config.validate_translation_target_language().is_ok());
@@ -1069,7 +1045,7 @@ mod tests {
     #[test]
     fn local_translation_rejects_auto_as_target_language() {
         let mut config = session_config(Language::Auto);
-        config.translation_provider = TranslationProvider::LocalWhisperOllama;
+        config.translation_provider = TranslationProvider::LocalWhisper;
 
         assert_eq!(
             config

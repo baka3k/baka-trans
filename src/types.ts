@@ -7,7 +7,7 @@ export type Language = LanguageCode;
 export type TranslationProvider =
   | "openai_realtime"
   | "google_live_translate"
-  | "local_whisper_ollama";
+  | "local_whisper";
 export type TranslationStyle = "literal" | "natural" | "technical_meeting_safe";
 export type ManualBoundaryReason = "user_button" | "keyboard_shortcut";
 export type ManualBoundaryStatus =
@@ -195,12 +195,6 @@ export interface LocalTranslationConfig {
   openaiTimeoutSeconds: number;
   openaiTemperature: number;
   openaiMaxOutputTokens: number;
-  baseUrl?: string;
-  model?: string;
-  timeoutSeconds?: number;
-  temperature?: number;
-  maxOutputTokens?: number;
-  keepAlive?: string;
   modelPath: string;
   language: "ja";
   threads: number;
@@ -267,8 +261,8 @@ export interface LocalTranslationTestResult {
   endpoint: string;
   whisperModelReadable: boolean;
   whisperModelLoaded: boolean;
-  ollamaReachable: boolean;
-  ollamaModelAccepted: boolean;
+  engineReachable: boolean;
+  engineAccepted: boolean;
   ttsVoiceAvailable: boolean;
 }
 

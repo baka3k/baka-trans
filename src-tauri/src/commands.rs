@@ -126,7 +126,7 @@ pub async fn test_translation_api_key(
         TranslationProvider::GoogleLiveTranslate => {
             ai::test_google_live_translation_connection(&info.key).await
         }
-        TranslationProvider::LocalWhisperOllama => {
+        TranslationProvider::LocalWhisper => {
             return Err(AppError::new(
                 "local_provider_has_no_api_key",
                 "Use Test local pipeline in Local LLM settings.",

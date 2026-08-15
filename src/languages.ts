@@ -208,7 +208,7 @@ export const sourceLanguageOptions = languageMetadata
   .map(toLanguageOption);
 
 export function sourceLanguageOptionsForProvider(provider: TranslationProvider) {
-  if (provider !== "local_whisper_ollama") {
+  if (provider !== "local_whisper") {
     return sourceLanguageOptions;
   }
   return languageMetadata
@@ -226,7 +226,7 @@ function supportsTargetByProvider(
   if (provider === "openai_realtime") {
     return openaiTargetLanguageCodeSet.has(language.code) && language.supportsTarget;
   }
-  if (provider === "local_whisper_ollama") {
+  if (provider === "local_whisper") {
     return !language.isAuto;
   }
   return !language.isAuto;

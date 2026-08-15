@@ -34,7 +34,7 @@ describe("language options", () => {
   });
 
   it("offers Whisper-supported local source languages and auto detection", () => {
-    const localSources = sourceLanguageOptionsForProvider("local_whisper_ollama").map(
+    const localSources = sourceLanguageOptionsForProvider("local_whisper").map(
       (language) => language.value,
     );
 
@@ -42,8 +42,8 @@ describe("language options", () => {
     expect(localSources).not.toContain("dz");
   });
 
-  it("offers all non-auto languages as local Ollama targets", () => {
-    const localTargets = targetLanguageOptionsForProvider("local_whisper_ollama").map(
+  it("offers all non-auto languages as local Whisper targets", () => {
+    const localTargets = targetLanguageOptionsForProvider("local_whisper").map(
       (language) => language.value,
     );
 

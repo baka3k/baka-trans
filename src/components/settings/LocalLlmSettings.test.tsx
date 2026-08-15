@@ -21,7 +21,7 @@ const whisperModels = [
 ];
 
 describe("LocalLlmSettings", () => {
-  it("requires Ollama and Whisper models before save or test", () => {
+  it("requires voice and Whisper models before save or test", () => {
     expect(validateLocalTranslationDraft(defaultLocalTranslationConfig)).toEqual([
       "Choose an available local voice.",
       "Choose a Whisper GGML model file.",
@@ -100,8 +100,6 @@ describe("LocalLlmSettings", () => {
         translationEngine: "openai_compatible",
         openaiBaseUrl: "https://api.example.com/v1",
         openaiModel: "gpt-4o-mini",
-        baseUrl: "https://api.example.com/v1",
-        model: "gpt-4o-mini",
         modelPath: "C:\\models\\ggml-small.bin",
         voiceId: "vi-voice",
       });
@@ -118,12 +116,12 @@ describe("LocalLlmSettings", () => {
               : {
                   ok: true,
                   message: "Ready",
-                  model: draft.model,
-                  endpoint: "http://localhost:11434/api/chat",
+                  model: draft.openaiModel,
+                  endpoint: "https://api.example.com/v1/chat/completions",
                   whisperModelReadable: true,
                   whisperModelLoaded: true,
-                  ollamaReachable: true,
-                  ollamaModelAccepted: true,
+                  engineReachable: true,
+                  engineAccepted: true,
                   ttsVoiceAvailable: true,
                 }
           }
@@ -156,12 +154,14 @@ describe("LocalLlmSettings", () => {
     expect((await axe(container)).violations).toEqual([]);
   });
 
-  it("shows partial health when Whisper passes but Ollama is offline", () => {
+  it("shows partial health when Whisper passes but translation engine is offline", () => {
     render(
       <LocalLlmSettings
         draft={{
           ...defaultLocalTranslationConfig,
-          model: "qwen2.5:7b",
+          translationEngine: "openai_compatible",
+          openaiModel: "qwen2.5:7b",
+          openaiBaseUrl: "https://api.example.com/v1",
           modelPath: "C:\\models\\ggml-small.bin",
           voiceId: "vi-voice",
         }}
@@ -170,13 +170,13 @@ describe("LocalLlmSettings", () => {
         testing={false}
         testResult={{
           ok: false,
-          message: "Could not connect to Ollama.",
+          message: "Could not connect to the translation engine.",
           model: "qwen2.5:7b",
-          endpoint: "http://localhost:11434/api/chat",
+          endpoint: "https://api.example.com/v1/chat/completions",
           whisperModelReadable: true,
           whisperModelLoaded: true,
-          ollamaReachable: false,
-          ollamaModelAccepted: false,
+          engineReachable: false,
+          engineAccepted: false,
           ttsVoiceAvailable: true,
         }}
         onChange={() => undefined}
@@ -195,8 +195,8 @@ describe("LocalLlmSettings", () => {
     );
 
     expect(screen.getByText("Whisper model readable and loaded").closest("div")).toHaveClass("ok");
-    expect(screen.getByText("Ollama reachable and model accepted").closest("div")).not.toHaveClass("ok");
-    expect(screen.getByText("Could not connect to Ollama.")).toBeInTheDocument();
+    expect(screen.getByText("Translation engine reachable and accepted").closest("div")).not.toHaveClass("ok");
+    expect(screen.getByText("Could not connect to the translation engine.")).toBeInTheDocument();
   });
 
   it("offers a managed Whisper download and reports progress", async () => {

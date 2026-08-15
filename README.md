@@ -29,32 +29,23 @@ npm run build
 The main window asks you to choose **Cloud API** or **Local Whisper** on every launch. Cloud API opens the existing Google/OpenAI workspace unchanged. Local Whisper runs this spoken pipeline:
 
 ```text
-PCM16 mono, 16000 Hz -> local Whisper (Japanese) -> Gemma via Ollama /api/chat -> Vietnamese text -> system TTS or VieNeu-TTS -> PCM16 mono, 24000 Hz -> selected audio output
+PCM16 mono, 16000 Hz -> local Whisper (Japanese) -> selected translation engine (Hy-MT2 offline or OpenAI-compatible API) -> Vietnamese text -> system TTS or VieNeu-TTS -> PCM16 mono, 24000 Hz -> selected audio output
 ```
 
 It does not require a Google/OpenAI translation key. The translated voice uses the same output-device and all/left/right routing controls as cloud playback. Google and OpenAI modes keep their existing credential and audio behavior.
 
-1. Install and start [Ollama](https://docs.ollama.com/quickstart).
-2. Pull TranslateGemma with `ollama pull translategemma:4b`, or configure another installed translation model. Ollama also documents its [model pull API](https://docs.ollama.com/api/pull).
-3. Open **Local LLM**, choose a multilingual Whisper model, and select **Download model**. The app stores it in its private data folder and fills the GGML path automatically. You can still use an existing absolute model path. The [whisper.cpp model guide](https://github.com/ggml-org/whisper.cpp/blob/master/models/README.md) lists the official model files.
-4. Choose a speech engine. For System TTS, install a Vietnamese voice in Windows Speech settings or macOS system voice settings. For VieNeu-TTS, select **Install VieNeu-TTS**. The app downloads and verifies the pinned ONNX/int8 model (about 244 MiB), resumes interrupted downloads, and manages the private runtime automatically.
-5. Choose **Local Whisper**, then open **Local LLM**. Set the Gemma model, download or select a Whisper model, select the speech engine, refresh and choose a Vietnamese voice, rate, and volume. Save, then select **Test local pipeline**.
-6. Under **Audio**, choose the meeting source, translated output, and channel. Use **Test selected voice** to verify the routed output, then start. The language pair is fixed to Japanese (`ja`) -> Vietnamese (`vi`) for this version.
+1. Open **Local LLM**, choose a translation engine (offline Hy-MT2 or an OpenAI-compatible API), and select a multilingual Whisper model. Select **Download model** to fetch it; the app stores it in its private data folder and fills the GGML path automatically. The [whisper.cpp model guide](https://github.com/ggml-org/whisper.cpp/blob/master/models/README.md) lists the official model files.
+2. Choose a speech engine. For System TTS, install a Vietnamese voice in Windows Speech settings or macOS system voice settings. For VieNeu-TTS, select **Install VieNeu-TTS**. The app downloads and verifies the pinned ONNX/int8 model (about 244 MiB), resumes interrupted downloads, and manages the private runtime automatically.
+3. Choose **Local Whisper**, then open **Local LLM**. Configure the translation engine, download or select a Whisper model, select the speech engine, refresh and choose a Vietnamese voice, rate, and volume. Save, then select **Test local pipeline**.
+4. Under **Audio**, choose the meeting source, translated output, and channel. Use **Test selected voice** to verify the routed output, then start. The language pair is fixed to Japanese (`ja`) -> Vietnamese (`vi`) for this version.
 
-The native client sends non-streaming requests to `POST /api/chat`; it never routes local translation through `/v1/chat/completions`. Default segmentation is 300 ms minimum speech, 700 ms trailing silence, 15 seconds maximum utterance, 250 ms pre-roll, and a 0.015 RMS speech threshold. Raise the threshold in noisy rooms; increase trailing silence if Japanese phrases are split too aggressively.
+The OpenAI-compatible engine sends non-streaming requests to `POST {baseUrl}/chat/completions`. Default segmentation is 300 ms minimum speech, 700 ms trailing silence, 15 seconds maximum utterance, 250 ms pre-roll, and a 0.015 RMS speech threshold. Raise the threshold in noisy rooms; increase trailing silence if Japanese phrases are split too aggressively.
 
 The distributed baseline is CPU-capable. More Whisper threads can reduce latency at the cost of CPU contention. The GPU toggle is capability-dependent and safely falls back when the build has no supported accelerator backend; GPU-enabled packaging requires compiling `whisper-rs` with the appropriate platform feature.
 
 ### Opt-in local smoke test
 
-Default tests do not require Ollama or a Whisper model. For a real end-to-end check, provide a raw little-endian PCM16 mono 16000 Hz Japanese fixture and run:
-
-```powershell
-$env:BAKA_TRANS_WHISPER_MODEL='C:\models\ggml-small.bin'
-$env:BAKA_TRANS_OLLAMA_MODEL='<model>'
-$env:BAKA_TRANS_JAPANESE_PCM='C:\fixtures\japanese-16k-mono.pcm'
-cargo test --manifest-path src-tauri/Cargo.toml local_whisper_ollama_end_to_end_smoke_test -- --ignored --nocapture
-```
+Default tests do not require a translation engine or a Whisper model.
 
 Common local errors:
 
@@ -62,8 +53,9 @@ Common local errors:
 | --- | --- |
 | `local_whisper_model_unreadable` | Select an existing, readable GGML model file. |
 | `local_whisper_model_load_error` | Verify the file is a compatible, non-empty whisper.cpp model. |
-| `local_ollama_request_error` | Start Ollama and verify the configured origin, normally `http://localhost:11434`. |
-| `local_ollama_provider_error` | Pull the configured model and retry the Local LLM test. |
+| `local_openai_request_error` | Verify the configured OpenAI-compatible endpoint URL and network connectivity. |
+| `local_openai_provider_error` | Check the configured model name and API key, then retry the Local LLM test. |
+| `local_hy_mt2_not_available` | The offline Hy-MT2 engine is not yet available; use the OpenAI-compatible engine instead. |
 | `local_translation_backlog_full` | Use shorter utterances, a smaller/faster model, or more capable hardware. |
 | `vieneu_model_not_installed` | Open Local LLM and select **Install VieNeu-TTS**. |
 | `vieneu_install_failed` | Select **Resume setup**; existing verified download data is reused. |

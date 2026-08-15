@@ -285,7 +285,7 @@ impl AppState {
             .map_err(lock_error)?
             .as_ref()
             .is_some_and(|config| {
-                config.translation_provider == TranslationProvider::LocalWhisperOllama
+                config.translation_provider == TranslationProvider::LocalWhisper
             });
         if local_session {
             *self.playback.lock().map_err(lock_error)? = None;
@@ -384,7 +384,7 @@ impl AppState {
     async fn start_pipeline(&self, app: AppHandle, config: SessionConfig) -> AppResult<()> {
         let generation = self.next_session_generation();
         let provider = config.translation_provider;
-        let local_config = if provider == TranslationProvider::LocalWhisperOllama {
+        let local_config = if provider == TranslationProvider::LocalWhisper {
             let local_config = local_translation::validated_runtime_config()?;
             local_translation::validate_local_session_languages(
                 config.source_language,
@@ -491,7 +491,7 @@ impl AppState {
                     )
                     .await
                 }
-                TranslationProvider::LocalWhisperOllama => {
+                TranslationProvider::LocalWhisper => {
                     ai::run_local_translation(
                         app.clone(),
                         ai::LocalTranslationRuntime::new(
@@ -722,7 +722,7 @@ fn capture_sample_rate(provider: TranslationProvider) -> u32 {
     match provider {
         TranslationProvider::OpenaiRealtime => audio::OPENAI_REALTIME_SAMPLE_RATE,
         TranslationProvider::GoogleLiveTranslate => audio::GOOGLE_LIVE_INPUT_SAMPLE_RATE,
-        TranslationProvider::LocalWhisperOllama => 16_000,
+        TranslationProvider::LocalWhisper => 16_000,
     }
 }
 
@@ -730,7 +730,7 @@ fn translated_output_sample_rate(provider: TranslationProvider) -> u32 {
     match provider {
         TranslationProvider::OpenaiRealtime => audio::OPENAI_REALTIME_SAMPLE_RATE,
         TranslationProvider::GoogleLiveTranslate => audio::GOOGLE_LIVE_OUTPUT_SAMPLE_RATE,
-        TranslationProvider::LocalWhisperOllama => crate::tts::LOCAL_TTS_SAMPLE_RATE,
+        TranslationProvider::LocalWhisper => crate::tts::LOCAL_TTS_SAMPLE_RATE,
     }
 }
 

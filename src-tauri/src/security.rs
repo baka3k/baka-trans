@@ -16,7 +16,7 @@ pub fn save_translation_api_key(provider: TranslationProvider, api_key: &str) ->
     if !provider.requires_api_key() {
         return Err(AppError::new(
             "local_provider_has_no_api_key",
-            "Local Whisper + Ollama does not use a cloud translation API key.",
+            "Local Whisper does not use a cloud translation API key.",
         ));
     }
     let trimmed = api_key.trim();
@@ -74,7 +74,7 @@ pub fn load_translation_api_key_info(provider: TranslationProvider) -> AppResult
     if !provider.requires_api_key() {
         return Err(AppError::new(
             "local_provider_has_no_api_key",
-            "Local Whisper + Ollama does not use a cloud translation API key.",
+            "Local Whisper does not use a cloud translation API key.",
         ));
     }
     if let Ok(value) = std::env::var(provider.env_var()) {
@@ -164,7 +164,7 @@ fn keychain_user(provider: TranslationProvider) -> &'static str {
     match provider {
         TranslationProvider::OpenaiRealtime => OPENAI_USER,
         TranslationProvider::GoogleLiveTranslate => GOOGLE_USER,
-        TranslationProvider::LocalWhisperOllama => "local-provider-no-api-key",
+        TranslationProvider::LocalWhisper => "local-provider-no-api-key",
     }
 }
 
@@ -176,7 +176,7 @@ fn api_key_cache(provider: TranslationProvider) -> &'static Mutex<Option<String>
         TranslationProvider::GoogleLiveTranslate => {
             GOOGLE_API_KEY_CACHE.get_or_init(|| Mutex::new(None))
         }
-        TranslationProvider::LocalWhisperOllama => {
+        TranslationProvider::LocalWhisper => {
             unreachable!("local provider does not use the API key cache")
         }
     }

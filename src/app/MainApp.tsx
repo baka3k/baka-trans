@@ -198,9 +198,9 @@ const translationProviders: Array<{ value: TranslationProvider; label: string; t
     title: "OpenAI Realtime Translation",
   },
   {
-    value: "local_whisper_ollama",
+    value: "local_whisper",
     label: "Local",
-    title: "Local Whisper + Ollama",
+    title: "Local Whisper",
   },
 ];
 const providerKinds: Array<{ value: LlmProviderKind; label: string; title: string }> = [
@@ -295,7 +295,7 @@ export default function MainApp({
   const [devices, setDevices] = useState<AudioDevices>({ inputs: [], outputs: [] });
   const [translationProvider, setTranslationProvider] =
     useState<TranslationProvider>(
-      experience === "local" ? "local_whisper_ollama" : "google_live_translate",
+      experience === "local" ? "local_whisper" : "google_live_translate",
     );
   const [sourceLanguage, setSourceLanguage] = useState<Language>(
     experience === "local" ? "ja" : "auto",
@@ -435,7 +435,7 @@ export default function MainApp({
     !localConfigDirty && validateLocalTranslationDraft(localConfigDraft, vieneuRuntime).length === 0;
   const localProviderHealthy = Boolean(localConfigTest?.ok && localProviderConfigured);
   const providerReady =
-    translationProvider === "local_whisper_ollama"
+    translationProvider === "local_whisper"
       ? localProviderConfigured && outputDeviceId.length > 0
       : apiKeyStored && outputDeviceId.length > 0;
   const canStart =
@@ -448,7 +448,7 @@ export default function MainApp({
   const sessionActive = activeSessionStatuses.includes(status);
   const canForceBoundary =
     (translationProvider === "openai_realtime" ||
-      translationProvider === "local_whisper_ollama") &&
+      translationProvider === "local_whisper") &&
     sessionActive;
   const canPause = canForceBoundary;
   const canResume = status === "paused";
@@ -679,7 +679,7 @@ export default function MainApp({
   }, [targetLanguage, targetLanguageOptions]);
 
   useEffect(() => {
-    if (translationProvider !== "local_whisper_ollama") {
+    if (translationProvider !== "local_whisper") {
       cloudLanguagesRef.current = { source: sourceLanguage, target: targetLanguage };
     }
   }, [sourceLanguage, targetLanguage, translationProvider]);
@@ -887,11 +887,11 @@ export default function MainApp({
     if (provider === translationProvider) {
       return;
     }
-    if (provider === "local_whisper_ollama") {
+    if (provider === "local_whisper") {
       cloudLanguagesRef.current = { source: sourceLanguage, target: targetLanguage };
       setSourceLanguage("ja");
       setTargetLanguage("vi");
-    } else if (translationProvider === "local_whisper_ollama") {
+    } else if (translationProvider === "local_whisper") {
       setSourceLanguage(cloudLanguagesRef.current.source);
       setTargetLanguage(cloudLanguagesRef.current.target);
     }
@@ -1394,7 +1394,7 @@ export default function MainApp({
             <div className="status-row">
               <span className={`status-dot status-${status}`} />
               <span>{labelStatus(status)}</span>
-              {translationProvider === "local_whisper_ollama" ? (
+              {translationProvider === "local_whisper" ? (
                 <span className={`status-chip ${localProviderConfigured ? "ok" : "warn"}`}>
                   {localProviderConfigured ? <Check size={14} /> : <Settings2 size={14} />}
                   {localProviderHealthy
@@ -1777,7 +1777,7 @@ export default function MainApp({
               {experience === "cloud" ? (
                 <div className="segmented-control" aria-label="Translation provider">
                   {translationProviders
-                    .filter((provider) => provider.value !== "local_whisper_ollama")
+                    .filter((provider) => provider.value !== "local_whisper")
                     .map((provider) => (
                   <button
                     type="button"
@@ -1791,7 +1791,7 @@ export default function MainApp({
                     ))}
                 </div>
               ) : null}
-              {translationProvider === "local_whisper_ollama" ? (
+              {translationProvider === "local_whisper" ? (
                 <div className="local-provider-callout">
                   <strong>No cloud key required</strong>
                   <span>
@@ -3459,8 +3459,8 @@ function labelTranslationProvider(provider: TranslationProvider) {
       return "Google Live Translation";
     case "openai_realtime":
       return "OpenAI Realtime Translation";
-    case "local_whisper_ollama":
-      return "Local Whisper + Ollama";
+    case "local_whisper":
+      return "Local Whisper";
   }
 }
 
