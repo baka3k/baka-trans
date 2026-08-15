@@ -1,0 +1,58 @@
+{
+  "modelId": "tencent/HY-MT1.5-1.8B",
+  "revision": "172d98efc7f534e05c86d3d49ed9d12d9c2a733b",
+  "directory": "$HOME/baka3k/baka-trans/sidecars/hy-mt/.artifacts/model",
+  "totalBytes": 4086794769,
+  "artifacts": [
+    {
+      "path": ".gitattributes",
+      "sizeBytes": 1519,
+      "sha256": "11ad7efa24975ee4b0c3c3a38ed18737f0658a5f75a0a96787b576a78a023361"
+    },
+    {
+      "path": "License.txt",
+      "sizeBytes": 16270,
+      "sha256": "d7d9db858500ac9073f4b5decef8e208454357226f535f65079ce4376047569f"
+    },
+    {
+      "path": "README.md",
+      "sizeBytes": 8389,
+      "sha256": "302601d23ad541ef69827167e60d25c2c04265eff54fee690cb7c3c5638e7fcc"
+    },
+    {
+      "path": "chat_template.jinja",
+      "sizeBytes": 654,
+      "sha256": "b7491ec0e9c869dfce20f2176758099bf248d979dd05530ede99deb21698acee"
+    },
+    {
+      "path": "config.json",
+      "sizeBytes": 1342,
+      "sha256": "a1788df3224420f43ed1a424ad58bfacc34f689b0e477ce69d1298fa6d26292b"
+    },
+    {
+      "path": "generation_config.json",
+      "sizeBytes": 221,
+      "sha256": "3586ba4829d9769b89523523cb562f2e894c519274f8a0e9b970287a0b1388a9"
+    },
+    {
+      "path": "model.safetensors",
+      "sizeBytes": 4077072784,
+      "sha256": "07736f560253d8c991616060fb2d855420957c268fa7d32fa8593df2f83b21ab"
+    },
+    {
+      "path": "special_tokens_map.json",
+      "sizeBytes": 488,
+      "sha256": "bb9f59990034dae326581b9c62471523975417869f78a244b7ae2ce8cbb085eb"
+    },
+    {
+      "path": "tokenizer.json",
+      "sizeBytes": 9527287,
+      "sha256": "b475bbef1b0b2fd57dcb865332b546475bd1ede2deb3bb91bafd0c047a8a530a"
+    },
+    {
+      "path": "tokenizer_config.json",
+      "sizeBytes": 165815,
+      "sha256": "53bd8581b601a8ee9caefeb988207de50b3fc0b733295bdf5ad68dec4cc0b07c"
+    }
+  ]
+}

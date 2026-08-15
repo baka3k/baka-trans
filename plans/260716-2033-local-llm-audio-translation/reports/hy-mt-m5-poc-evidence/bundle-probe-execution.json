@@ -1,0 +1,16 @@
+{
+  "label": "bundle-probe",
+  "workingDirectory": "$HOME/baka3k/baka-trans/sidecars/hy-mt",
+  "command": [
+    "dist/hy-mt-poc/hy-mt-poc",
+    "probe",
+    "--output",
+    ".artifacts/bundle-probe.json"
+  ],
+  "sandboxProfile": null,
+  "stateNote": "fresh rebuilt bundled process; filesystem cache not purged",
+  "wallSeconds": 8.138651,
+  "exitCode": 0,
+  "stdout": "{\n  \"runtime\": {\n    \"modelId\": \"tencent/HY-MT1.5-1.8B\",\n    \"modelRevision\": \"172d98efc7f534e05c86d3d49ed9d12d9c2a733b\",\n    \"python\": \"3.12.13 (main, Aug  7 2026, 02:15:23) [Clang 22.1.3 ]\",\n    \"pythonExecutable\": \"$HOME/baka3k/baka-trans/sidecars/hy-mt/dist/hy-mt-poc/hy-mt-poc\",\n    \"platform\": \"macOS-26.4-arm64-arm-64bit\",\n    \"machine\": \"arm64\",\n    \"packages\": {\n      \"huggingface-hub\": \"0.34.4\",\n      \"psutil\": \"7.0.0\",\n      \"safetensors\": \"0.6.2\",\n      \"torch\": \"2.12.0\",\n      \"transformers\": \"4.56.1\",\n      \"pyinstaller\": null\n    }\n  },\n  \"mps\": {\n    \"requested\": \"mps\",\n    \"selected\": \"mps\",\n    \"dtype\": \"bfloat16\",\n    \"mps_built\": true,\n    \"mps_available\": true,\n    \"fallback_used\": false\n  }\n}",
+  "stderr": ""
+}

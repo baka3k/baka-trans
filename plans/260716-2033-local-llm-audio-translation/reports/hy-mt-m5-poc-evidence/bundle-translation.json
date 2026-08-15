@@ -1,0 +1,42 @@
+{
+  "runner": {
+    "device": {
+      "requested": "mps",
+      "selected": "mps",
+      "dtype": "bfloat16",
+      "mps_built": true,
+      "mps_available": true,
+      "fallback_used": false
+    },
+    "actualDtype": "bfloat16",
+    "actualDevice": "mps:0",
+    "modelLoadMs": 1394.0866660050233,
+    "memoryAfterLoad": {
+      "rssBytes": 111820800,
+      "systemTotalBytes": 25769803776,
+      "systemAvailableBytes": 4683530240,
+      "systemUsedPercent": 81.8,
+      "mpsCurrentAllocatedBytes": 3582161152,
+      "mpsDriverAllocatedBytes": 4337369088,
+      "mpsRecommendedMaxBytes": 19069665280
+    }
+  },
+  "result": {
+    "text": "Ngay cả trong phiên bản gói phần mềm, việc dịch vẫn có thể được thực hiện.",
+    "input_tokens": 25,
+    "output_tokens": 26,
+    "latency_ms": 1535.817,
+    "tokens_per_second": 16.929,
+    "generation_mode": "greedy",
+    "cancelled": false,
+    "memory": {
+      "rssBytes": 300843008,
+      "systemTotalBytes": 25769803776,
+      "systemAvailableBytes": 7490387968,
+      "systemUsedPercent": 70.9,
+      "mpsCurrentAllocatedBytes": 3582174208,
+      "mpsDriverAllocatedBytes": 4356653056,
+      "mpsRecommendedMaxBytes": 19069665280
+    }
+  }
+}

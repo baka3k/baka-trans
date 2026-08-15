@@ -1,0 +1,134 @@
+{
+  "bundleDirectory": "$HOME/baka3k/baka-trans/sidecars/hy-mt/dist/hy-mt-poc",
+  "bundleBytes": 809037904,
+  "fileCount": 14731,
+  "nativeFileCount": 39,
+  "nativeSignatureFailures": [],
+  "allNativeFilesAdHocOrSigned": true,
+  "executableSha256": "47fedebc5d1b34ae80e3334ea434bddcc2114534246e227322dc6c4b36ab6fc3",
+  "executableFile": {
+    "command": [
+      "file",
+      "$HOME/baka3k/baka-trans/sidecars/hy-mt/dist/hy-mt-poc/hy-mt-poc"
+    ],
+    "exitCode": 0,
+    "stdout": "$HOME/baka3k/baka-trans/sidecars/hy-mt/dist/hy-mt-poc/hy-mt-poc: Mach-O 64-bit executable arm64",
+    "stderr": ""
+  },
+  "executableSignature": {
+    "command": [
+      "codesign",
+      "-dvvv",
+      "$HOME/baka3k/baka-trans/sidecars/hy-mt/dist/hy-mt-poc/hy-mt-poc"
+    ],
+    "exitCode": 0,
+    "stdout": "",
+    "stderr": "Executable=$HOME/baka3k/baka-trans/sidecars/hy-mt/dist/hy-mt-poc/hy-mt-poc\nIdentifier=hy-mt-poc-555549440ab36fd35ff0bc7d981eb3a394760219\nFormat=Mach-O thin (arm64)\nCodeDirectory v=20400 size=115115 flags=0x2(adhoc) hashes=3591+2 location=embedded\nHash type=sha256 size=32\nCandidateCDHash sha256=703efec30ca5807fa3049986d0c319435f93f267\nCandidateCDHashFull sha256=703efec30ca5807fa3049986d0c319435f93f26715099cefd70b9e6f5e74b66d\nHash choices=sha256\nCMSDigest=703efec30ca5807fa3049986d0c319435f93f26715099cefd70b9e6f5e74b66d\nCMSDigestType=2\nCDHash=703efec30ca5807fa3049986d0c319435f93f267\nSignature=adhoc\nInfo.plist=not bound\nTeamIdentifier=not set\nSealed Resources=none\nInternal requirements count=0 size=12"
+  },
+  "deepSignatureVerification": {
+    "command": [
+      "codesign",
+      "--verify",
+      "--deep",
+      "--strict",
+      "--verbose=2",
+      "$HOME/baka3k/baka-trans/sidecars/hy-mt/dist/hy-mt-poc/hy-mt-poc"
+    ],
+    "exitCode": 0,
+    "stdout": "",
+    "stderr": "$HOME/baka3k/baka-trans/sidecars/hy-mt/dist/hy-mt-poc/hy-mt-poc: valid on disk\n$HOME/baka3k/baka-trans/sidecars/hy-mt/dist/hy-mt-poc/hy-mt-poc: satisfies its Designated Requirement"
+  },
+  "linkedLibraries": {
+    "command": [
+      "otool",
+      "-L",
+      "$HOME/baka3k/baka-trans/sidecars/hy-mt/dist/hy-mt-poc/hy-mt-poc"
+    ],
+    "exitCode": 0,
+    "stdout": "$HOME/baka3k/baka-trans/sidecars/hy-mt/dist/hy-mt-poc/hy-mt-poc:\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1351.0.0)\n\t/usr/lib/libz.1.dylib (compatibility version 1.0.0, current version 1.2.12)",
+    "stderr": ""
+  },
+  "largestFiles": [
+    {
+      "path": "_internal/libtorch_cpu.dylib",
+      "sizeBytes": 247443536
+    },
+    {
+      "path": "_internal/torch/lib/libtorch_cpu.dylib",
+      "sizeBytes": 247443536
+    },
+    {
+      "path": "hy-mt-poc",
+      "sizeBytes": 58959728
+    },
+    {
+      "path": "_internal/libtorch_python.dylib",
+      "sizeBytes": 28796704
+    },
+    {
+      "path": "_internal/torch/lib/libtorch_python.dylib",
+      "sizeBytes": 28796704
+    },
+    {
+      "path": "_internal/libpython3.12.dylib",
+      "sizeBytes": 17986864
+    },
+    {
+      "path": "_internal/tokenizers/tokenizers.abi3.so",
+      "sizeBytes": 8231120
+    },
+    {
+      "path": "_internal/hf_xet/hf_xet.abi3.so",
+      "sizeBytes": 7818800
+    },
+    {
+      "path": "_internal/torch/bin/protoc-3.13.0.0",
+      "sizeBytes": 4003712
+    },
+    {
+      "path": "_internal/torch/bin/protoc",
+      "sizeBytes": 4003696
+    },
+    {
+      "path": "_internal/numpy/_core/_multiarray_umath.cpython-312-darwin.so",
+      "sizeBytes": 3991024
+    },
+    {
+      "path": "_internal/torch/include/ATen/RedispatchFunctions.h",
+      "sizeBytes": 2271610
+    },
+    {
+      "path": "_internal/torch/include/ATen/VmapGeneratedPlumbing.h",
+      "sizeBytes": 1784532
+    },
+    {
+      "path": "_internal/torch-2.12.0.dist-info/RECORD",
+      "sizeBytes": 1336647
+    },
+    {
+      "path": "_internal/base_library.zip",
+      "sizeBytes": 1331146
+    },
+    {
+      "path": "_internal/torch/testing/_internal/common_methods_invocations.py",
+      "sizeBytes": 1330190
+    },
+    {
+      "path": "_internal/torch/_VF.pyi",
+      "sizeBytes": 1209737
+    },
+    {
+      "path": "_internal/torch/_C/_VariableFunctions.pyi",
+      "sizeBytes": 1209737
+    },
+    {
+      "path": "_internal/libc10.dylib",
+      "sizeBytes": 1100656
+    },
+    {
+      "path": "_internal/torch/lib/libc10.dylib",
+      "sizeBytes": 1100656
+    }
+  ],
+  "codeSigningImplication": "PyInstaller applied ad-hoc signatures. Phase 14 must replace them with the application signing identity, preserve hardened-runtime entitlements, verify every nested Mach-O file, and notarize the containing application."
+}

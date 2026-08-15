@@ -1,0 +1,42 @@
+{
+  "runner": {
+    "device": {
+      "requested": "mps",
+      "selected": "mps",
+      "dtype": "bfloat16",
+      "mps_built": true,
+      "mps_available": true,
+      "fallback_used": false
+    },
+    "actualDtype": "bfloat16",
+    "actualDevice": "mps:0",
+    "modelLoadMs": 1338.3609579977929,
+    "memoryAfterLoad": {
+      "rssBytes": 393805824,
+      "systemTotalBytes": 25769803776,
+      "systemAvailableBytes": 4272373760,
+      "systemUsedPercent": 83.4,
+      "mpsCurrentAllocatedBytes": 3582161152,
+      "mpsDriverAllocatedBytes": 4337369088,
+      "mpsRecommendedMaxBytes": 19069665280
+    }
+  },
+  "result": {
+    "text": "Ng",
+    "input_tokens": 68,
+    "output_tokens": 1,
+    "latency_ms": 1201.362,
+    "tokens_per_second": 0.832,
+    "generation_mode": "greedy",
+    "cancelled": true,
+    "memory": {
+      "rssBytes": 497369088,
+      "systemTotalBytes": 25769803776,
+      "systemAvailableBytes": 7320518656,
+      "systemUsedPercent": 71.6,
+      "mpsCurrentAllocatedBytes": 3582179328,
+      "mpsDriverAllocatedBytes": 4373430272,
+      "mpsRecommendedMaxBytes": 19069665280
+    }
+  }
+}

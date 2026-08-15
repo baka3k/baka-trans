@@ -1,0 +1,5 @@
+id,status,error
+boundary-empty,rejected,source text must not be empty
+boundary-whitespace,rejected,source text must not be empty
+boundary-nul,rejected,source text must not contain NUL characters
+boundary-null,rejected,source text must be a string

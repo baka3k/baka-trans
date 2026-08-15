@@ -1,0 +1,42 @@
+{
+  "runner": {
+    "device": {
+      "requested": "mps",
+      "selected": "mps",
+      "dtype": "bfloat16",
+      "mps_built": true,
+      "mps_available": true,
+      "fallback_used": false
+    },
+    "actualDtype": "bfloat16",
+    "actualDevice": "mps:0",
+    "modelLoadMs": 1898.3586670001387,
+    "memoryAfterLoad": {
+      "rssBytes": 165543936,
+      "systemTotalBytes": 25769803776,
+      "systemAvailableBytes": 4686299136,
+      "systemUsedPercent": 81.8,
+      "mpsCurrentAllocatedBytes": 3582161152,
+      "mpsDriverAllocatedBytes": 4337369088,
+      "mpsRecommendedMaxBytes": 19069665280
+    }
+  },
+  "result": {
+    "text": "Ngay cả khi không có kết nối mạng, chúng tôi vẫn tiếp tục công việc dịch thuật của mình.",
+    "input_tokens": 26,
+    "output_tokens": 28,
+    "latency_ms": 1624.47,
+    "tokens_per_second": 17.236,
+    "generation_mode": "greedy",
+    "cancelled": false,
+    "memory": {
+      "rssBytes": 349667328,
+      "systemTotalBytes": 25769803776,
+      "systemAvailableBytes": 7281967104,
+      "systemUsedPercent": 71.7,
+      "mpsCurrentAllocatedBytes": 3582174720,
+      "mpsDriverAllocatedBytes": 4356653056,
+      "mpsRecommendedMaxBytes": 19069665280
+    }
+  }
+}

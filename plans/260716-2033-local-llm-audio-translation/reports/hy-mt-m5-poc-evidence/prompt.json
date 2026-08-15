@@ -1,0 +1,28 @@
+{
+  "runner": {
+    "device": {
+      "requested": "mps",
+      "selected": "mps",
+      "dtype": "bfloat16",
+      "mps_built": true,
+      "mps_available": true,
+      "fallback_used": false
+    },
+    "actualDtype": "bfloat16",
+    "actualDevice": "mps:0",
+    "modelLoadMs": 1600.909833003243,
+    "memoryAfterLoad": {
+      "rssBytes": 372834304,
+      "systemTotalBytes": 25769803776,
+      "systemAvailableBytes": 4715773952,
+      "systemUsedPercent": 81.7,
+      "mpsCurrentAllocatedBytes": 3582161152,
+      "mpsDriverAllocatedBytes": 4337369088,
+      "mpsRecommendedMaxBytes": 19069665280
+    }
+  },
+  "prompt": {
+    "rendered": "<｜hy_begin▁of▁sentence｜><｜hy_User｜>Translate the following segment into Vietnamese, without additional explanation.\n\n田中さん、会議は午前9時30分からです。<｜hy_place▁holder▁no▁8｜>",
+    "inputTokens": 30
+  }
+}

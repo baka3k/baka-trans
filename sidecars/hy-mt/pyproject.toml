@@ -1,0 +1,27 @@
+[project]
+name = "baka-trans-hy-mt-poc"
+version = "0.1.0"
+description = "Isolated HY-MT M5 feasibility and packaging POC"
+requires-python = "==3.12.*"
+dependencies = [
+  "huggingface-hub==0.34.4",
+  "psutil==7.0.0",
+  "safetensors==0.6.2",
+  "torch==2.12.0",
+  "transformers==4.56.1",
+]
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+build = [
+  "pyinstaller==6.18.0",
+]
+test = [
+  "pytest==8.4.1",
+]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]

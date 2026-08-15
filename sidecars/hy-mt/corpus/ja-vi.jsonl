@@ -1,0 +1,40 @@
+{"id":"greeting-01","category":"short","source":"おはようございます。","reference_vi":"Chào buổi sáng.","accepted":true}
+{"id":"greeting-02","category":"short","source":"本日はよろしくお願いします。","reference_vi":"Rất mong nhận được sự hợp tác của mọi người hôm nay.","accepted":true}
+{"id":"meeting-01","category":"technical-meeting","source":"それでは、定例会議を始めます。","reference_vi":"Bây giờ, chúng ta bắt đầu cuộc họp định kỳ.","accepted":true}
+{"id":"meeting-02","category":"technical-meeting","source":"前回の議事録を確認してください。","reference_vi":"Vui lòng kiểm tra biên bản cuộc họp trước.","accepted":true}
+{"id":"meeting-03","category":"technical-meeting","source":"この課題の担当者と期限を決めましょう。","reference_vi":"Hãy quyết định người phụ trách và thời hạn cho vấn đề này.","accepted":true}
+{"id":"meeting-04","category":"technical-meeting","source":"次のスプリントでは認証機能を優先します。","reference_vi":"Trong sprint tiếp theo, chúng ta sẽ ưu tiên chức năng xác thực.","accepted":true}
+{"id":"meeting-05","category":"technical-meeting","source":"デプロイ前に回帰テストを実行する必要があります。","reference_vi":"Cần chạy kiểm thử hồi quy trước khi triển khai.","accepted":true}
+{"id":"meeting-06","category":"technical-meeting","source":"障害の根本原因はまだ特定できていません。","reference_vi":"Nguyên nhân gốc rễ của sự cố vẫn chưa được xác định.","accepted":true}
+{"id":"names-01","category":"names","source":"田中さん、グエンさんに最新の設計書を送ってください。","reference_vi":"Anh/chị Tanaka, vui lòng gửi tài liệu thiết kế mới nhất cho anh/chị Nguyễn.","accepted":true}
+{"id":"names-02","category":"names","source":"佐藤部長とMinhさんは午後のレビューに参加します。","reference_vi":"Trưởng phòng Sato và anh Minh sẽ tham gia buổi rà soát chiều nay.","accepted":true}
+{"id":"numbers-01","category":"numbers","source":"会議は8月20日の午前9時30分からです。","reference_vi":"Cuộc họp bắt đầu lúc 9 giờ 30 sáng ngày 20 tháng 8.","accepted":true}
+{"id":"numbers-02","category":"numbers","source":"今月の売上は1億2,500万円で、前年比12.4％増加しました。","reference_vi":"Doanh thu tháng này là 125 triệu yên, tăng 12,4% so với cùng kỳ năm trước.","accepted":true}
+{"id":"numbers-03","category":"numbers","source":"応答時間の目標は200ミリ秒以下、可用性は99.95％です。","reference_vi":"Mục tiêu thời gian phản hồi là không quá 200 mili giây và độ sẵn sàng là 99,95%.","accepted":true}
+{"id":"mixed-01","category":"mixed-english","source":"API Gatewayのtimeoutを30 secondsに変更してください。","reference_vi":"Vui lòng đổi timeout của API Gateway thành 30 giây.","accepted":true}
+{"id":"mixed-02","category":"mixed-english","source":"Pull Request #482はCIがgreenになったらmergeできます。","reference_vi":"Pull Request #482 có thể merge khi CI chuyển sang trạng thái green.","accepted":true}
+{"id":"mixed-03","category":"mixed-english","source":"production環境のfeature flagはまだOFFのままです。","reference_vi":"Feature flag trong môi trường production vẫn đang OFF.","accepted":true}
+{"id":"punctuation-01","category":"punctuation","source":"結論は三つです：速度、品質、そして安全性。","reference_vi":"Có ba kết luận: tốc độ, chất lượng và độ an toàn.","accepted":true}
+{"id":"punctuation-02","category":"punctuation","source":"本当に大丈夫ですか？もう一度確認しましょう！","reference_vi":"Thực sự ổn chứ? Hãy kiểm tra lại một lần nữa!","accepted":true}
+{"id":"punctuation-03","category":"punctuation","source":"「変更しない」と仕様書に明記されています。","reference_vi":"Tài liệu đặc tả ghi rõ là “không thay đổi”.","accepted":true}
+{"id":"long-01","category":"long","source":"現在の実装では翻訳要求を一件ずつ処理しているため、発話が連続すると待ち行列が増え、古い結果が遅れて表示される可能性があります。","reference_vi":"Trong cách triển khai hiện tại, các yêu cầu dịch được xử lý lần lượt từng yêu cầu, nên khi lời nói liên tục, hàng đợi có thể tăng lên và kết quả cũ có thể hiển thị muộn.","accepted":true}
+{"id":"long-02","category":"long","source":"モデルを初めて起動するときは重みの読み込みに時間がかかりますが、一度メモリに常駐すれば、その後の短い文は比較的速く翻訳できます。","reference_vi":"Khi khởi động mô hình lần đầu, việc tải trọng số mất thời gian, nhưng sau khi mô hình nằm trong bộ nhớ, các câu ngắn tiếp theo có thể được dịch tương đối nhanh.","accepted":true}
+{"id":"long-03","category":"long","source":"ネットワークを完全に無効にした状態でも、必要なファイルがローカルに揃っていれば、会議の内容を外部へ送信せずに翻訳を続けられることを確認します。","reference_vi":"Ngay cả khi mạng bị vô hiệu hóa hoàn toàn, nếu các tệp cần thiết đã có đầy đủ ở máy cục bộ, chúng ta sẽ xác nhận rằng có thể tiếp tục dịch mà không gửi nội dung cuộc họp ra bên ngoài.","accepted":true}
+{"id":"ambiguity-01","category":"ambiguity","source":"それはちょっと難しいですね。","reference_vi":"Việc đó hơi khó nhỉ.","accepted":true}
+{"id":"ambiguity-02","category":"ambiguity","source":"検討しておきます。","reference_vi":"Tôi sẽ xem xét.","accepted":true}
+{"id":"politeness-01","category":"politeness","source":"恐れ入りますが、もう少しゆっくり話していただけますか。","reference_vi":"Xin lỗi đã làm phiền, anh/chị có thể nói chậm hơn một chút được không?","accepted":true}
+{"id":"politeness-02","category":"politeness","source":"ご不明な点がございましたら、遠慮なくお知らせください。","reference_vi":"Nếu có điểm nào chưa rõ, xin đừng ngần ngại cho chúng tôi biết.","accepted":true}
+{"id":"negation-01","category":"negation","source":"この変更は今日のリリースには含めません。","reference_vi":"Thay đổi này sẽ không được đưa vào bản phát hành hôm nay.","accepted":true}
+{"id":"negation-02","category":"negation","source":"承認されるまで本番データを削除しないでください。","reference_vi":"Vui lòng không xóa dữ liệu production cho đến khi được phê duyệt.","accepted":true}
+{"id":"units-01","category":"units","source":"ファイルサイズは4.09ギガバイトで、空き容量は最低10ギガバイト必要です。","reference_vi":"Kích thước tệp là 4,09 GB và cần ít nhất 10 GB dung lượng trống.","accepted":true}
+{"id":"units-02","category":"units","source":"メモリ使用量が24GBの80％を超えないように監視します。","reference_vi":"Chúng ta sẽ giám sát để mức sử dụng bộ nhớ không vượt quá 80% của 24 GB.","accepted":true}
+{"id":"code-01","category":"code","source":"設定ファイルのmodel_idを変更せず、revisionだけを固定してください。","reference_vi":"Không thay đổi model_id trong tệp cấu hình, chỉ cố định revision.","accepted":true}
+{"id":"code-02","category":"code","source":"エラーコードE_CONN_04が出た場合は、自動で再試行しないでください。","reference_vi":"Nếu xuất hiện mã lỗi E_CONN_04, vui lòng không tự động thử lại.","accepted":true}
+{"id":"audio-01","category":"audio-domain","source":"雑音が大きい区間は文字起こしの信頼度が低くなります。","reference_vi":"Độ tin cậy của bản chép lời sẽ giảm ở những đoạn có nhiều tiếng ồn.","accepted":true}
+{"id":"audio-02","category":"audio-domain","source":"話者が途中で言い直した場合は、最後の確定文だけを読み上げます。","reference_vi":"Nếu người nói sửa lời giữa chừng, chỉ đọc câu cuối cùng đã được xác nhận.","accepted":true}
+{"id":"fragment-01","category":"fragment","source":"ええと、その、次の件ですが……","reference_vi":"Ừm, à, về vấn đề tiếp theo...","accepted":true}
+{"id":"fragment-02","category":"fragment","source":"もし可能であれば、来週までに。","reference_vi":"Nếu có thể, trước tuần sau.","accepted":true}
+{"id":"boundary-empty","category":"boundary","source":"","reference_vi":"","accepted":false}
+{"id":"boundary-whitespace","category":"boundary","source":"   \n\t","reference_vi":"","accepted":false}
+{"id":"boundary-nul","category":"boundary","source":"テスト\u0000入力","reference_vi":"","accepted":false}
+{"id":"boundary-null","category":"boundary","source":null,"reference_vi":"","accepted":false}

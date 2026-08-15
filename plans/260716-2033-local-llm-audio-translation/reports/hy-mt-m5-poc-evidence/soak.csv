@@ -1,0 +1,361 @@
+sequence,id,status,latencyMs,outputTokens,candidate,rssBytes,systemUsedPercent,mpsDriverAllocatedBytes
+0,greeting-01,ok,533.262,7,Chào buổi sáng.,246300672,73.6,4356653056
+1,greeting-02,ok,845.611,15,Xin chúc mọi người có một ngày tốt lành.,286048256,74.3,4356734976
+2,meeting-01,ok,1246.673,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",311115776,75.3,4356816896
+3,meeting-02,ok,1014.168,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,313442304,75.4,4356816896
+4,meeting-03,ok,1951.993,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,364281856,75.7,4356898816
+5,meeting-04,ok,1079.423,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",375095296,75.9,4356980736
+6,greeting-01,ok,396.55,7,Chào buổi sáng.,375603200,76.1,4356980736
+7,greeting-02,ok,767.009,15,Xin chúc mọi người có một ngày tốt lành.,376848384,76.2,4356980736
+8,meeting-01,ok,1175.918,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",378601472,76.5,4356980736
+9,meeting-02,ok,1220.036,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,380239872,79.3,4356980736
+10,meeting-03,ok,1944.768,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,382992384,80.8,4356980736
+11,meeting-04,ok,1118.803,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",384548864,78.9,4356980736
+12,greeting-01,ok,337.513,7,Chào buổi sáng.,385056768,78.6,4356980736
+13,greeting-02,ok,826.838,15,Xin chúc mọi người có một ngày tốt lành.,386220032,78.6,4356980736
+14,meeting-01,ok,1140.832,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",387956736,78.8,4356980736
+15,meeting-02,ok,1052.646,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,389496832,81.6,4356980736
+16,meeting-03,ok,1725.544,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,392232960,80.0,4356980736
+17,meeting-04,ok,1065.879,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",393756672,79.6,4356980736
+18,greeting-01,ok,384.975,7,Chào buổi sáng.,394280960,79.2,4356980736
+19,greeting-02,ok,786.178,15,Xin chúc mọi người có một ngày tốt lành.,395444224,79.3,4356980736
+20,meeting-01,ok,1173.714,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",397246464,81.4,4356980736
+21,meeting-02,ok,995.328,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,398753792,80.0,4356980736
+22,meeting-03,ok,1674.451,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,401899520,79.4,4356980736
+23,meeting-04,ok,970.299,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",403456000,79.4,4356980736
+24,greeting-01,ok,373.123,7,Chào buổi sáng.,403980288,79.3,4356980736
+25,greeting-02,ok,684.531,15,Xin chúc mọi người có một ngày tốt lành.,405127168,79.3,4356980736
+26,meeting-01,ok,1068.846,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",406831104,79.5,4356980736
+27,meeting-02,ok,981.429,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,408387584,79.4,4356980736
+28,meeting-03,ok,1662.493,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,411090944,79.3,4356980736
+29,meeting-04,ok,954.058,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",412680192,79.4,4356980736
+30,greeting-01,ok,357.782,7,Chào buổi sáng.,413171712,79.3,4356980736
+31,greeting-02,ok,738.864,15,Xin chúc mọi người có một ngày tốt lành.,414384128,79.4,4356980736
+32,meeting-01,ok,1040.803,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",416038912,79.4,4356980736
+33,meeting-02,ok,975.53,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,417628160,79.5,4356980736
+34,meeting-03,ok,1640.102,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,420364288,79.5,4356980736
+35,meeting-04,ok,965.345,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",421888000,79.8,4356980736
+36,greeting-01,ok,388.215,7,Chào buổi sáng.,422445056,79.6,4356980736
+37,greeting-02,ok,744.013,15,Xin chúc mọi người có một ngày tốt lành.,423608320,79.5,4356980736
+38,meeting-01,ok,1040.545,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",425279488,79.6,4356980736
+39,meeting-02,ok,957.378,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,426835968,79.7,4356980736
+40,meeting-03,ok,1659.849,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,429555712,79.7,4356980736
+41,meeting-04,ok,960.585,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",431144960,79.7,4356980736
+42,greeting-01,ok,399.911,7,Chào buổi sáng.,431652864,79.9,4356980736
+43,greeting-02,ok,836.67,15,Xin chúc mọi người có một ngày tốt lành.,432848896,79.7,4356980736
+44,meeting-01,ok,1107.476,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",434552832,79.7,4356980736
+45,meeting-02,ok,1070.953,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,436076544,79.8,4356980736
+46,meeting-03,ok,1734.157,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,438779904,79.8,4356980736
+47,meeting-04,ok,1081.489,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",440369152,79.9,4356980736
+48,greeting-01,ok,394.403,7,Chào buổi sáng.,440860672,79.8,4356980736
+49,greeting-02,ok,823.617,15,Xin chúc mọi người có một ngày tốt lành.,442056704,79.8,4356980736
+50,meeting-01,ok,1049.055,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",443744256,79.8,4356980736
+51,meeting-02,ok,962.526,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,445317120,79.7,4356980736
+52,meeting-03,ok,1849.396,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,448036864,79.7,4356980736
+53,meeting-04,ok,1040.335,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",449626112,79.8,4356980736
+54,greeting-01,ok,400.929,7,Chào buổi sáng.,450134016,79.8,4356980736
+55,greeting-02,ok,762.15,15,Xin chúc mọi người có một ngày tốt lành.,451280896,79.8,4356980736
+56,meeting-01,ok,1174.59,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",452968448,80.1,4356980736
+57,meeting-02,ok,1099.435,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,454508544,80.0,4356980736
+58,meeting-03,ok,1877.338,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,457244672,79.8,4356980736
+59,meeting-04,ok,986.817,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",458801152,79.8,4356980736
+60,greeting-01,ok,350.849,7,Chào buổi sáng.,459341824,79.6,4356980736
+61,greeting-02,ok,741.073,15,Xin chúc mọi người có một ngày tốt lành.,460488704,79.9,4356980736
+62,meeting-01,ok,1090.635,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",462225408,79.8,4356980736
+63,meeting-02,ok,986.174,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,463749120,79.5,4356980736
+64,meeting-03,ok,1659.598,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,466485248,79.6,4356980736
+65,meeting-04,ok,952.472,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",468074496,79.3,4356980736
+66,greeting-01,ok,402.697,7,Chào buổi sáng.,468598784,79.4,4356980736
+67,greeting-02,ok,808.039,15,Xin chúc mọi người có một ngày tốt lành.,469745664,79.3,4356980736
+68,meeting-01,ok,1086.663,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",471449600,79.2,4356980736
+69,meeting-02,ok,985.948,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,473006080,79.2,4356980736
+70,meeting-03,ok,1824.269,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,475709440,79.3,4356980736
+71,meeting-04,ok,992.656,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",476839936,79.5,4356980736
+72,greeting-01,ok,467.294,7,Chào buổi sáng.,477577216,79.4,4356980736
+73,greeting-02,ok,812.403,15,Xin chúc mọi người có một ngày tốt lành.,478789632,79.3,4356980736
+74,meeting-01,ok,1055.593,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",480493568,79.5,4356980736
+75,meeting-02,ok,983.896,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,482033664,79.3,4356980736
+76,meeting-03,ok,1662.128,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,484851712,79.4,4356980736
+77,meeting-04,ok,985.827,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",486408192,79.4,4356980736
+78,greeting-01,ok,369.099,7,Chào buổi sáng.,486899712,79.3,4356980736
+79,greeting-02,ok,704.062,15,Xin chúc mọi người có một ngày tốt lành.,488046592,79.4,4356980736
+80,meeting-01,ok,1112.717,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",489766912,79.3,4356980736
+81,meeting-02,ok,970.139,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,491307008,79.5,4356980736
+82,meeting-03,ok,1821.734,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,493748224,79.5,4356980736
+83,meeting-04,ok,1097.79,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",495419392,79.5,4356980736
+84,greeting-01,ok,355.006,7,Chào buổi sáng.,496091136,79.6,4356980736
+85,greeting-02,ok,784.149,15,Xin chúc mọi người có một ngày tốt lành.,497303552,80.1,4356980736
+86,meeting-01,ok,1099.493,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",499023872,79.8,4356980736
+87,meeting-02,ok,955.281,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,500514816,79.6,4356980736
+88,meeting-03,ok,1672.351,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,503431168,79.4,4356980736
+89,meeting-04,ok,957.81,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",504938496,79.4,4356980736
+90,greeting-01,ok,391.328,7,Chào buổi sáng.,505511936,79.4,4356980736
+91,greeting-02,ok,762.748,15,Xin chúc mọi người có một ngày tốt lành.,506658816,79.4,4356980736
+92,meeting-01,ok,1026.126,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",508379136,79.3,4356980736
+93,meeting-02,ok,968.371,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,509952000,79.5,4356980736
+94,meeting-03,ok,1658.699,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,512606208,79.4,4356980736
+95,meeting-04,ok,1077.552,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",514179072,79.5,4356980736
+96,greeting-01,ok,352.02,7,Chào buổi sáng.,514686976,79.5,4356980736
+97,greeting-02,ok,751.793,15,Xin chúc mọi người có một ngày tốt lành.,515883008,79.5,4356980736
+98,meeting-01,ok,1009.457,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",517570560,79.8,4356980736
+99,meeting-02,ok,994.333,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,519110656,79.6,4356980736
+100,meeting-03,ok,1787.5,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,521863168,79.8,4356980736
+101,meeting-04,ok,999.21,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",523370496,79.7,4356980736
+102,greeting-01,ok,361.105,7,Chào buổi sáng.,523911168,79.6,4356980736
+103,greeting-02,ok,784.925,15,Xin chúc mọi người có một ngày tốt lành.,525074432,79.5,4356980736
+104,meeting-01,ok,1050.591,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",526761984,79.5,4356980736
+105,meeting-02,ok,1057.215,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,528367616,79.5,4356980736
+106,meeting-03,ok,1763.415,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,530513920,79.7,4356980736
+107,meeting-04,ok,926.92,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",532168704,79.7,4356980736
+108,greeting-01,ok,361.872,7,Chào buổi sáng.,532758528,79.7,4356980736
+109,greeting-02,ok,715.01,15,Xin chúc mọi người có một ngày tốt lành.,533954560,79.8,4356980736
+110,meeting-01,ok,1144.023,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",535576576,79.7,4356980736
+111,meeting-02,ok,1004.344,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,537149440,79.6,4356980736
+112,meeting-03,ok,1749.308,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,539951104,79.7,4356980736
+113,meeting-04,ok,1024.782,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",541655040,79.8,4356980736
+114,greeting-01,ok,361.546,7,Chào buổi sáng.,542277632,79.6,4356980736
+115,greeting-02,ok,742.265,15,Xin chúc mọi người có một ngày tốt lành.,543440896,79.5,4356980736
+116,meeting-01,ok,1089.55,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",545144832,79.5,4356980736
+117,meeting-02,ok,985.29,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,546717696,79.5,4356980736
+118,meeting-03,ok,1677.186,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,549437440,79.5,4356980736
+119,meeting-04,ok,1024.492,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",551026688,79.5,4356980736
+120,greeting-01,ok,322.969,7,Chào buổi sáng.,551550976,79.5,4356980736
+121,greeting-02,ok,789.098,15,Xin chúc mọi người có một ngày tốt lành.,552714240,79.5,4356980736
+122,meeting-01,ok,1035.366,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",554385408,79.6,4356980736
+123,meeting-02,ok,969.382,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,555532288,79.5,4356980736
+124,meeting-03,ok,1757.748,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,558170112,79.8,4356980736
+125,meeting-04,ok,1082.321,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",559775744,79.6,4356980736
+126,greeting-01,ok,354.536,7,Chào buổi sáng.,560463872,79.5,4356980736
+127,greeting-02,ok,731.453,15,Xin chúc mọi người có một ngày tốt lành.,561659904,79.5,4356980736
+128,meeting-01,ok,1205.378,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",563363840,79.5,4356980736
+129,meeting-02,ok,1022.811,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,564903936,79.5,4356980736
+130,meeting-03,ok,1757.394,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,567525376,79.6,4356980736
+131,meeting-04,ok,1068.343,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",569147392,79.6,4356980736
+132,greeting-01,ok,369.561,7,Chào buổi sáng.,569704448,79.6,4356980736
+133,greeting-02,ok,750.918,15,Xin chúc mọi người có một ngày tốt lành.,570884096,79.8,4356980736
+134,meeting-01,ok,1106.91,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",572522496,79.6,4356980736
+135,meeting-02,ok,1080.256,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,574013440,79.6,4356980736
+136,meeting-03,ok,1849.3,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,576798720,79.5,4356980736
+137,meeting-04,ok,1090.353,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",578387968,79.6,4356980736
+138,greeting-01,ok,339.882,7,Chào buổi sáng.,578895872,79.7,4356980736
+139,greeting-02,ok,695.308,15,Xin chúc mọi người có một ngày tốt lành.,580042752,79.5,4356980736
+140,meeting-01,ok,1051.994,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",581795840,79.6,4356980736
+141,meeting-02,ok,1072.604,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,583352320,79.4,4356980736
+142,meeting-03,ok,1888.01,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,586072064,79.5,4356980736
+143,meeting-04,ok,1085.773,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",587579392,79.9,4356980736
+144,greeting-01,ok,320.079,7,Chào buổi sáng.,588120064,78.9,4356980736
+145,greeting-02,ok,769.199,15,Xin chúc mọi người có một ngày tốt lành.,589299712,78.8,4356980736
+146,meeting-01,ok,2365.861,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",590970880,78.7,4356980736
+147,meeting-02,ok,1014.656,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,592150528,80.5,4356980736
+148,meeting-03,ok,1821.646,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,595001344,80.8,4356980736
+149,meeting-04,ok,989.25,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",596770816,78.7,4356980736
+150,greeting-01,ok,341.282,7,Chào buổi sáng.,597344256,78.6,4356980736
+151,greeting-02,ok,737.433,15,Xin chúc mọi người có một ngày tốt lành.,598491136,78.5,4356980736
+152,meeting-01,ok,1196.169,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",600195072,78.5,4356980736
+153,meeting-02,ok,994.582,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,601718784,78.5,4356980736
+154,meeting-03,ok,1834.367,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,604471296,78.8,4356980736
+155,meeting-04,ok,1006.232,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",605978624,78.7,4356980736
+156,greeting-01,ok,403.07,7,Chào buổi sáng.,606568448,79.7,4356980736
+157,greeting-02,ok,794.136,15,Xin chúc mọi người có một ngày tốt lành.,607633408,79.8,4356980736
+158,meeting-01,ok,1014.1,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",609320960,79.7,4356980736
+159,meeting-02,ok,1097.208,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,610795520,79.7,4356980736
+160,meeting-03,ok,1855.013,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,613515264,79.6,4356980736
+161,meeting-04,ok,993.269,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",615170048,79.6,4356980736
+162,greeting-01,ok,410.889,7,Chào buổi sáng.,616005632,79.5,4356980736
+163,greeting-02,ok,809.621,15,Xin chúc mọi người có một ngày tốt lành.,617136128,79.6,4356980736
+164,meeting-01,ok,1201.073,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",618807296,79.6,4356980736
+165,meeting-02,ok,1059.012,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,620396544,79.6,4356980736
+166,meeting-03,ok,1685.618,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,623165440,79.7,4356980736
+167,meeting-04,ok,1020.396,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",624181248,79.4,4356980736
+168,greeting-01,ok,370.252,7,Chào buổi sáng.,624820224,79.3,4356980736
+169,greeting-02,ok,703.53,15,Xin chúc mọi người có một ngày tốt lành.,626081792,79.5,4356980736
+170,meeting-01,ok,1180.768,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",627671040,79.4,4356980736
+171,meeting-02,ok,1091.751,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,629227520,79.4,4356980736
+172,meeting-03,ok,1818.698,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,632143872,79.3,4356980736
+173,meeting-04,ok,1106.243,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",633487360,79.4,4356980736
+174,greeting-01,ok,360.723,7,Chào buổi sáng.,634421248,79.3,4356980736
+175,greeting-02,ok,827.515,15,Xin chúc mọi người có một ngày tốt lành.,635617280,79.3,4356980736
+176,meeting-01,ok,1076.234,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",636731392,79.4,4356980736
+177,meeting-02,ok,1846.438,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,249266176,81.1,4356980736
+178,meeting-03,ok,1820.323,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,258752512,80.8,4356980736
+179,meeting-04,ok,1109.897,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",260882432,80.9,4356980736
+180,greeting-01,ok,373.774,7,Chào buổi sáng.,267419648,80.9,4356980736
+181,greeting-02,ok,774.385,15,Xin chúc mọi người có một ngày tốt lành.,271745024,80.9,4356980736
+182,meeting-01,ok,1573.228,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",255082496,81.7,4356980736
+183,meeting-02,ok,1033.345,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,256786432,81.8,4356980736
+184,meeting-03,ok,1879.728,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,259342336,82.0,4356980736
+185,meeting-04,ok,1048.268,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",260980736,81.9,4356980736
+186,greeting-01,ok,406.768,7,Chào buổi sáng.,261767168,81.9,4356980736
+187,greeting-02,ok,853.398,15,Xin chúc mọi người có một ngày tốt lành.,262897664,81.9,4356980736
+188,meeting-01,ok,1159.687,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",257245184,81.9,4356980736
+189,meeting-02,ok,1065.683,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,258621440,82.1,4356980736
+190,meeting-03,ok,1739.298,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,259817472,82.1,4356980736
+191,meeting-04,ok,1071.321,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",261341184,82.1,4356980736
+192,greeting-01,ok,382.003,7,Chào buổi sáng.,262062080,82.0,4356980736
+193,greeting-02,ok,780.714,15,Xin chúc mọi người có một ngày tốt lành.,263208960,82.0,4356980736
+194,meeting-01,ok,1160.111,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",264749056,82.0,4356980736
+195,meeting-02,ok,1085.726,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,266272768,82.0,4356980736
+196,meeting-03,ok,1893.431,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,268959744,82.0,4356980736
+197,meeting-04,ok,1115.229,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",270729216,82.0,4356980736
+198,greeting-01,ok,418.019,7,Chào buổi sáng.,271253504,82.0,4356980736
+199,greeting-02,ok,1036.68,15,Xin chúc mọi người có một ngày tốt lành.,261570560,82.3,4356980736
+200,meeting-01,ok,1675.654,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",211812352,84.1,4356980736
+201,meeting-02,ok,1597.235,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,195067904,85.6,4356980736
+202,meeting-03,ok,2497.685,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,184434688,88.6,4356980736
+203,meeting-04,ok,1491.39,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",167034880,88.3,4356980736
+204,greeting-01,ok,855.655,7,Chào buổi sáng.,146587648,86.5,4356980736
+205,greeting-02,ok,935.559,15,Xin chúc mọi người có một ngày tốt lành.,168345600,85.4,4356980736
+206,meeting-01,ok,1565.941,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",173572096,69.2,4356980736
+207,meeting-02,ok,1108.286,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,176177152,69.9,4356980736
+208,meeting-03,ok,1910.485,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,202539008,70.1,4356980736
+209,meeting-04,ok,1051.962,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",208306176,70.2,4356980736
+210,greeting-01,ok,409.241,7,Chào buổi sáng.,215252992,70.4,4356980736
+211,greeting-02,ok,764.146,15,Xin chúc mọi người có một ngày tốt lành.,216432640,70.4,4356980736
+212,meeting-01,ok,1205.413,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",218234880,70.4,4356980736
+213,meeting-02,ok,1075.882,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,219840512,70.4,4356980736
+214,meeting-03,ok,1842.721,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,222691328,70.7,4356980736
+215,meeting-04,ok,1092.729,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",224264192,71.1,4356980736
+216,greeting-01,ok,375.844,7,Chào buổi sáng.,225083392,72.5,4356980736
+217,greeting-02,ok,922.088,15,Xin chúc mọi người có một ngày tốt lành.,222543872,81.5,4356980736
+218,meeting-01,ok,1406.067,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",223985664,82.3,4356980736
+219,meeting-02,ok,1472.323,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,211075072,83.6,4356980736
+220,meeting-03,ok,2097.074,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,196116480,85.3,4356980736
+221,meeting-04,ok,1311.143,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",186155008,87.7,4356980736
+222,greeting-01,ok,935.028,7,Chào buổi sáng.,144277504,87.4,4356980736
+223,greeting-02,ok,1206.665,15,Xin chúc mọi người có một ngày tốt lành.,151584768,88.3,4356980736
+224,meeting-01,ok,1615.694,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",165838848,86.5,4356980736
+225,meeting-02,ok,1230.609,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,159825920,84.6,4356980736
+226,meeting-03,ok,2382.205,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,169066496,84.2,4356980736
+227,meeting-04,ok,1179.978,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",174243840,83.7,4356980736
+228,greeting-01,ok,1086.929,7,Chào buổi sáng.,165117952,83.5,4356980736
+229,greeting-02,ok,866.751,15,Xin chúc mọi người có một ngày tốt lành.,159629312,62.8,4356980736
+230,meeting-01,ok,1236.618,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",168558592,63.4,4356980736
+231,meeting-02,ok,1115.581,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,170672128,63.6,4356980736
+232,meeting-03,ok,1954.079,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,196509696,63.7,4356980736
+233,meeting-04,ok,1101.434,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",202178560,63.8,4356980736
+234,greeting-01,ok,427.917,7,Chào buổi sáng.,202702848,63.9,4356980736
+235,greeting-02,ok,770.408,15,Xin chúc mọi người có một ngày tốt lành.,203882496,64.1,4356980736
+236,meeting-01,ok,1210.891,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",205570048,64.0,4356980736
+237,meeting-02,ok,1021.242,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,207110144,64.0,4356980736
+238,meeting-03,ok,1942.118,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,209944576,64.1,4356980736
+239,meeting-04,ok,1087.018,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",211517440,64.1,4356980736
+240,greeting-01,ok,410.703,7,Chào buổi sáng.,212189184,64.0,4356980736
+241,greeting-02,ok,860.001,15,Xin chúc mọi người có một ngày tốt lành.,213401600,64.5,4356980736
+242,meeting-01,ok,1146.174,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",215121920,64.4,4356980736
+243,meeting-02,ok,984.14,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,216694784,64.3,4356980736
+244,meeting-03,ok,1859.453,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,219381760,64.2,4356980736
+245,meeting-04,ok,1124.323,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",220987392,64.3,4356980736
+246,greeting-01,ok,416.485,7,Chào buổi sáng.,221528064,64.3,4356980736
+247,greeting-02,ok,748.218,15,Xin chúc mọi người có một ngày tốt lành.,222674944,64.3,4356980736
+248,meeting-01,ok,1228.283,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",224378880,64.6,4356980736
+249,meeting-02,ok,994.176,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,225886208,64.4,4356980736
+250,meeting-03,ok,1910.217,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,228704256,64.4,4356980736
+251,meeting-04,ok,1020.992,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",230244352,64.7,4356980736
+252,greeting-01,ok,421.252,7,Chào buổi sáng.,230801408,64.6,4356980736
+253,greeting-02,ok,853.121,15,Xin chúc mọi người có một ngày tốt lành.,231931904,64.5,4356980736
+254,meeting-01,ok,1083.519,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",233619456,64.7,4356980736
+255,meeting-02,ok,1034.289,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,235208704,64.6,4356980736
+256,meeting-03,ok,1946.243,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,238239744,64.7,4356980736
+257,meeting-04,ok,1008.337,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",239779840,64.6,4356980736
+258,greeting-01,ok,339.398,7,Chào buổi sáng.,240320512,64.5,4356980736
+259,greeting-02,ok,767.569,15,Xin chúc mọi người có một ngày tốt lành.,241516544,64.6,4356980736
+260,meeting-01,ok,1131.094,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",243204096,64.6,4356980736
+261,meeting-02,ok,1035.336,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,244711424,64.7,4356980736
+262,meeting-03,ok,1757.801,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,247480320,65.0,4356980736
+263,meeting-04,ok,1118.815,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",249004032,64.7,4356980736
+264,greeting-01,ok,407.338,7,Chào buổi sáng.,249528320,64.6,4356980736
+265,greeting-02,ok,841.141,15,Xin chúc mọi người có một ngày tốt lành.,250691584,64.8,4356980736
+266,meeting-01,ok,1146.936,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",252395520,64.8,4356980736
+267,meeting-02,ok,992.271,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,253919232,65.2,4356980736
+268,meeting-03,ok,1905.877,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,256704512,65.3,4356980736
+269,meeting-04,ok,1099.396,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",258228224,65.6,4356980736
+270,greeting-01,ok,433.183,7,Chào buổi sáng.,258752512,65.6,4356980736
+271,greeting-02,ok,772.443,15,Xin chúc mọi người có một ngày tốt lành.,259932160,65.8,4356980736
+272,meeting-01,ok,1107.135,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",261718016,65.7,4356980736
+273,meeting-02,ok,1004.209,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,263667712,65.7,4356980736
+274,meeting-03,ok,1754.518,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,266387456,66.0,4356980736
+275,meeting-04,ok,1098.945,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",267960320,66.0,4356980736
+276,greeting-01,ok,345.457,7,Chào buổi sáng.,268517376,65.8,4356980736
+277,greeting-02,ok,759.623,15,Xin chúc mọi người có một ngày tốt lành.,269631488,65.9,4356980736
+278,meeting-01,ok,1248.945,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",271368192,65.8,4356980736
+279,meeting-02,ok,1112.493,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,272891904,66.1,4356980736
+280,meeting-03,ok,1953.813,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,275611648,66.2,4356980736
+281,meeting-04,ok,1014.906,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",277184512,66.1,4356980736
+282,greeting-01,ok,376.947,7,Chào buổi sáng.,277725184,65.9,4356980736
+283,greeting-02,ok,755.986,15,Xin chúc mọi người có một ngày tốt lành.,278872064,65.9,4356980736
+284,meeting-01,ok,1147.183,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",280576000,65.8,4356980736
+285,meeting-02,ok,1102.279,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,282148864,65.8,4356980736
+286,meeting-03,ok,1926.609,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,284852224,65.9,4356980736
+287,meeting-04,ok,1109.238,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",286408704,65.9,4356980736
+288,greeting-01,ok,414.656,7,Chào buổi sáng.,286932992,65.9,4356980736
+289,greeting-02,ok,826.032,15,Xin chúc mọi người có một ngày tốt lành.,288112640,65.9,4356980736
+290,meeting-01,ok,1205.512,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",289783808,66.2,4356980736
+291,meeting-02,ok,1082.536,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,291536896,66.8,4356980736
+292,meeting-03,ok,1785.78,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,294289408,67.0,4356980736
+293,meeting-04,ok,1691.052,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",295796736,67.2,4356980736
+294,greeting-01,ok,741.455,7,Chào buổi sáng.,296435712,67.6,4356980736
+295,greeting-02,ok,838.962,15,Xin chúc mọi người có một ngày tốt lành.,297500672,68.4,4356980736
+296,meeting-01,ok,1143.202,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",299253760,68.3,4356980736
+297,meeting-02,ok,1026.3,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,300810240,68.3,4356980736
+298,meeting-03,ok,1882.866,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,303513600,68.2,4356980736
+299,meeting-04,ok,1046.574,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",305053696,68.2,4356980736
+300,greeting-01,ok,370.82,7,Chào buổi sáng.,305594368,68.4,4356980736
+301,greeting-02,ok,795.866,15,Xin chúc mọi người có một ngày tốt lành.,306724864,68.3,4356980736
+302,meeting-01,ok,1167.798,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",308461568,68.3,4356980736
+303,meeting-02,ok,1100.629,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,310018048,68.3,4356980736
+304,meeting-03,ok,1671.509,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,312754176,68.3,4356980736
+305,meeting-04,ok,946.006,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",314294272,68.3,4356980736
+306,greeting-01,ok,402.799,7,Chào buổi sáng.,314834944,68.3,4356980736
+307,greeting-02,ok,740.76,15,Xin chúc mọi người có một ngày tốt lành.,315949056,68.2,4356980736
+308,meeting-01,ok,1231.794,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",317669376,68.3,4356980736
+309,meeting-02,ok,1049.832,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,319275008,68.2,4356980736
+310,meeting-03,ok,1946.32,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,322011136,68.4,4356980736
+311,meeting-04,ok,1146.511,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",323551232,68.6,4356980736
+312,greeting-01,ok,1016.891,7,Chào buổi sáng.,324059136,68.5,4356980736
+313,greeting-02,ok,2562.155,15,Xin chúc mọi người có một ngày tốt lành.,325206016,68.3,4356980736
+314,meeting-01,ok,3370.66,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",327024640,68.3,4356980736
+315,meeting-02,ok,2349.892,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,328613888,68.5,4356980736
+316,meeting-03,ok,5939.587,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,331759616,68.5,4356980736
+317,meeting-04,ok,3272.709,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",333316096,68.5,4356980736
+318,greeting-01,ok,1348.271,7,Chào buổi sáng.,333889536,68.5,4356980736
+319,greeting-02,ok,1908.775,15,Xin chúc mọi người có một ngày tốt lành.,334987264,68.5,4356980736
+320,meeting-01,ok,3502.518,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",336707584,68.5,4356980736
+321,meeting-02,ok,2933.497,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,338247680,68.6,4356980736
+322,meeting-03,ok,5774.179,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,341000192,68.8,4356980736
+323,meeting-04,ok,2697.423,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",342573056,68.7,4356980736
+324,greeting-01,ok,1310.421,7,Chào buổi sáng.,343113728,68.6,4356980736
+325,greeting-02,ok,2616.195,15,Xin chúc mọi người có một ngày tốt lành.,344260608,68.5,4356980736
+326,meeting-01,ok,2563.786,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",345931776,68.5,4356980736
+327,meeting-02,ok,3355.791,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,347521024,68.6,4356980736
+328,meeting-03,ok,2504.411,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,350404608,68.6,4356980736
+329,meeting-04,ok,1214.421,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",351928320,68.6,4356980736
+330,greeting-01,ok,467.503,7,Chào buổi sáng.,352485376,68.6,4356980736
+331,greeting-02,ok,913.53,15,Xin chúc mọi người có một ngày tốt lành.,353632256,68.5,4356980736
+332,meeting-01,ok,1279.64,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",355368960,68.5,4356980736
+333,meeting-02,ok,1027.508,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,356892672,68.6,4356980736
+334,meeting-03,ok,2138.338,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,359612416,68.6,4356980736
+335,meeting-04,ok,1315.195,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",361168896,69.0,4356980736
+336,greeting-01,ok,1202.798,7,Chào buổi sáng.,361676800,68.8,4356980736
+337,greeting-02,ok,2108.296,15,Xin chúc mọi người có một ngày tốt lành.,362856448,68.8,4356980736
+338,meeting-01,ok,2666.471,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",364576768,68.7,4356980736
+339,meeting-02,ok,2617.195,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,366100480,68.8,4356980736
+340,meeting-03,ok,5929.101,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,368852992,68.9,4356980736
+341,meeting-04,ok,2640.861,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",370376704,68.8,4356980736
+342,greeting-01,ok,1170.604,7,Chào buổi sáng.,370900992,68.8,4356980736
+343,greeting-02,ok,1507.764,15,Xin chúc mọi người có một ngày tốt lành.,372064256,68.8,4356980736
+344,meeting-01,ok,3547.612,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",373784576,68.8,4356980736
+345,meeting-02,ok,1967.973,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,375390208,68.8,4356980736
+346,meeting-03,ok,2948.713,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,378257408,69.9,4356980736
+347,meeting-04,ok,1045.077,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",379830272,69.8,4356980736
+348,greeting-01,ok,348.125,7,Chào buổi sáng.,380370944,69.6,4356980736
+349,greeting-02,ok,753.479,15,Xin chúc mọi người có một ngày tốt lành.,381501440,69.5,4356980736
+350,meeting-01,ok,1198.15,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",383205376,69.6,4356980736
+351,meeting-02,ok,1056.503,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,384761856,69.8,4356980736
+352,meeting-03,ok,1809.116,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,387514368,70.1,4356980736
+353,meeting-04,ok,1087.72,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",389038080,70.3,4356980736
+354,greeting-01,ok,416.029,7,Chào buổi sáng.,389578752,70.2,4356980736
+355,greeting-02,ok,781.694,15,Xin chúc mọi người có một ngày tốt lành.,390742016,69.8,4356980736
+356,meeting-01,ok,1069.056,22,"Vậy thì, chúng ta hãy bắt đầu cuộc họp định kỳ này thôi.",392445952,70.6,4356980736
+357,meeting-02,ok,1065.824,20,Xin vui lòng kiểm tra lại biên bản cuộc họp lần trước.,393986048,70.6,4356980736
+358,meeting-03,ok,1774.53,35,Hãy cùng nhau quyết định người chịu trách nhiệm thực hiện nhiệm vụ này và thời hạn hoàn thành nhiệm vụ đó.,396722176,70.4,4356980736
+359,meeting-04,ok,958.346,20,"Trong lần tiếp theo, chức năng xác thực sẽ được ưu tiên hàng đầu.",398311424,70.4,4356980736

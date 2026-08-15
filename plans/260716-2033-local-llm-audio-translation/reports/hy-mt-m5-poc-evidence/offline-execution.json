@@ -1,0 +1,29 @@
+{
+  "label": "offline-python",
+  "workingDirectory": "$HOME/baka3k/baka-trans/sidecars/hy-mt",
+  "command": [
+    "sandbox-exec",
+    "-p",
+    "(version 1)(allow default)(deny network*)",
+    ".venv/bin/python",
+    "-m",
+    "hy_mt_poc",
+    "--deny-network",
+    "translate",
+    "--model-dir",
+    ".artifacts/model",
+    "--device",
+    "mps",
+    "--mode",
+    "greedy",
+    "--output",
+    ".artifacts/offline.json",
+    "オフラインでも翻訳を続けます。"
+  ],
+  "sandboxProfile": "(version 1)(allow default)(deny network*)",
+  "stateNote": "fresh Python process; model cached locally; filesystem cache not purged",
+  "wallSeconds": 5.463673,
+  "exitCode": 0,
+  "stdout": "{\n  \"runner\": {\n    \"device\": {\n      \"requested\": \"mps\",\n      \"selected\": \"mps\",\n      \"dtype\": \"bfloat16\",\n      \"mps_built\": true,\n      \"mps_available\": true,\n      \"fallback_used\": false\n    },\n    \"actualDtype\": \"bfloat16\",\n    \"actualDevice\": \"mps:0\",\n    \"modelLoadMs\": 1898.3586670001387,\n    \"memoryAfterLoad\": {\n      \"rssBytes\": 165543936,\n      \"systemTotalBytes\": 25769803776,\n      \"systemAvailableBytes\": 4686299136,\n      \"systemUsedPercent\": 81.8,\n      \"mpsCurrentAllocatedBytes\": 3582161152,\n      \"mpsDriverAllocatedBytes\": 4337369088,\n      \"mpsRecommendedMaxBytes\": 19069665280\n    }\n  },\n  \"result\": {\n    \"text\": \"Ngay cả khi không có kết nối mạng, chúng tôi vẫn tiếp tục công việc dịch thuật của mình.\",\n    \"input_tokens\": 26,\n    \"output_tokens\": 28,\n    \"latency_ms\": 1624.47,\n    \"tokens_per_second\": 17.236,\n    \"generation_mode\": \"greedy\",\n    \"cancelled\": false,\n    \"memory\": {\n      \"rssBytes\": 349667328,\n      \"systemTotalBytes\": 25769803776,\n      \"systemAvailableBytes\": 7281967104,\n      \"systemUsedPercent\": 71.7,\n      \"mpsCurrentAllocatedBytes\": 3582174720,\n      \"mpsDriverAllocatedBytes\": 4356653056,\n      \"mpsRecommendedMaxBytes\": 19069665280\n    }\n  }\n}",
+  "stderr": ""
+}
