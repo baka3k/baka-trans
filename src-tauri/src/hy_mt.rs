@@ -1016,6 +1016,40 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires the packaged Hy-MT sidecar and an installed verified model"]
+    fn serve_probe_translates_through_real_runtime() {
+        let sidecar = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("sidecars")
+            .join("hy-mt")
+            .join("bundle")
+            .join("hy-mt-sidecar");
+        if !sidecar.is_file() {
+            eprintln!("packaged sidecar not found; nothing to probe");
+            return;
+        }
+        let paths = ManagedPaths::resolve().unwrap();
+        if !paths.manifest_path().is_file() {
+            eprintln!("verified model not installed; nothing to probe");
+            return;
+        }
+        let spec = CommandSpec {
+            working_dir: sidecar.parent().unwrap().to_path_buf(),
+            program: sidecar,
+            prefix_args: Vec::new(),
+        };
+        let probe = run_serve_probe(&spec, &paths.model_root, preferred_serve_device()).unwrap();
+        assert!(probe.reachable);
+        assert!(probe.accepted);
+        assert!(probe.error.is_none());
+        println!(
+            "device={} load_ms={} latency_ms={:?} text={:?}",
+            probe.device, probe.load_ms, probe.latency_ms, probe.translated_text
+        );
+    }
+
+    #[test]
     fn managed_paths_stay_inside_shared_cache() {
         let paths = ManagedPaths::resolve().unwrap();
         assert!(paths
