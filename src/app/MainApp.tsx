@@ -469,12 +469,13 @@ export default function MainApp({
   const testToneActive = testingTone !== null;
   const translationToneActive = testingTone === "translation";
   const monitorToneActive = testingTone === "monitor";
-  const canTestAudio = status === "idle" && !busy && !localMonitorActive && !testToneActive;
+  // Whether a NEW test tone can be started. Does NOT include !testToneActive —
+  // stop buttons rely on this so they remain enabled while a tone is playing.
+  const canStartTestAudio = status === "idle" && !busy && !localMonitorActive;
   const canToggleLocalMonitor =
     status === "idle" &&
     !busy &&
-    !testToneActive &&
-    (localMonitorActive || (inputDeviceId.length > 0 && outputDeviceId.length > 0));
+    (localMonitorActive || (!testToneActive && inputDeviceId.length > 0 && outputDeviceId.length > 0));
   const inputSignalPercent = Math.round(visibleSourceLevel.peak * 100);
   const inputSignalRmsPercent = Math.round(visibleSourceLevel.rms * 100);
   const inputSignalLabel =
@@ -1330,20 +1331,26 @@ export default function MainApp({
     deviceId: string,
     outputChannel: AudioOutputChannel,
   ) {
-    setTestingTone(kind);
     setError(null);
+    // Read state directly from the closure — do NOT call setTestingTone(kind)
+    // optimistically. Previously that eager setState flipped `canTestAudio`
+    // to false and disabled the stop button before playTestTone() returned,
+    // which the user experienced as "no way to stop the tone".
+    const current = testingTone;
     try {
-      if (testingTone === kind) {
+      if (current === kind) {
         await stopTestTone();
         setTestingTone(null);
         return;
       }
-      if (testingTone !== null) {
+      if (current !== null) {
         await stopTestTone();
       }
       setTestingTone(kind);
       await playTestTone(deviceId, outputChannel);
     } catch (cause) {
+      // Best-effort cleanup so backend and frontend state agree on failure.
+      try { await stopTestTone(); } catch { /* ignore */ }
       setTestingTone(null);
       setError(normalizeError(cause));
     }
@@ -1804,7 +1811,7 @@ export default function MainApp({
                   className={translationToneActive ? "small-button danger" : "small-button"}
                   onClick={() => testTone("translation", outputDeviceId, translationOutputChannel)}
                   disabled={
-                    !translationToneActive && (!outputDeviceId || !canTestAudio)
+                    !translationToneActive && (!outputDeviceId || !canStartTestAudio)
                   }
                 >
                   {translationToneActive ? "Stop translated" : "Test translated"}
@@ -1831,7 +1838,7 @@ export default function MainApp({
                   onClick={() => testTone("monitor", monitorOutputDeviceId, monitorOutputChannel)}
                   disabled={
                     !monitorToneActive &&
-                    (!effectiveMonitorOriginalAudio || !monitorOutputDeviceId || !canTestAudio)
+                    (!effectiveMonitorOriginalAudio || !monitorOutputDeviceId || !canStartTestAudio)
                   }
                 >
                   {monitorToneActive ? "Stop original" : "Test original"}
