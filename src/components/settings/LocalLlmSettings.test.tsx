@@ -97,7 +97,9 @@ describe("LocalLlmSettings", () => {
     function Harness() {
       const [draft, setDraft] = useState<LocalTranslationConfigDraft>({
         ...defaultLocalTranslationConfig,
-        model: "qwen2.5:7b",
+        translationEngine: "openai_compatible",
+        baseUrl: "https://api.example.com/v1",
+        model: "gpt-4o-mini",
         modelPath: "C:\\models\\ggml-small.bin",
         voiceId: "vi-voice",
       });
@@ -144,7 +146,7 @@ describe("LocalLlmSettings", () => {
 
     const { container } = render(<Harness />);
     expect(screen.getByText("Ready", { selector: ".panel-state" })).toBeInTheDocument();
-    await user.type(screen.getByLabelText("Installed TranslateGemma model"), "-fast");
+    await user.type(screen.getByDisplayValue("gpt-4o-mini"), "-fast");
     expect(screen.getByText("Unsaved")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Test local pipeline" })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Save local settings" }));

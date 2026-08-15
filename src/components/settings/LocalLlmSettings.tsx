@@ -10,12 +10,17 @@ import type {
 
 export const defaultLocalTranslationConfig: LocalTranslationConfigDraft = {
   translationEngine: "huggingface_offline",
-  baseUrl: "http://localhost:11434",
-  model: "translategemma:4b",
+  openaiBaseUrl: "",
+  openaiModel: "",
+  openaiTimeoutSeconds: 30,
+  openaiTemperature: 0,
+  openaiMaxOutputTokens: 256,
+  baseUrl: "",
+  model: "",
   timeoutSeconds: 30,
   temperature: 0,
   maxOutputTokens: 256,
-  keepAlive: "10m",
+  keepAlive: undefined,
   modelPath: "",
   language: "ja",
   threads: 4,
@@ -69,10 +74,10 @@ export function validateLocalTranslationDraft(
   vieneuRuntime?: VieNeuRuntimeStatus | null,
 ): string[] {
   const errors: string[] = [];
-  if (draft.translationEngine === "openai_compatible" && !/^https?:\/\//i.test(draft.baseUrl.trim())) {
+  if (draft.translationEngine === "openai_compatible" && !/^https?:\/\//i.test((draft.openaiBaseUrl ?? "").trim())) {
     errors.push("Enter an http or https OpenAI-compatible server URL.");
   }
-  if (draft.translationEngine === "openai_compatible" && !draft.model.trim()) {
+  if (draft.translationEngine === "openai_compatible" && !(draft.openaiModel ?? "").trim()) {
     errors.push("Enter an OpenAI-compatible model name.");
   }
   if (draft.ttsProvider === "vieneu" && vieneuRuntime && !vieneuRuntime.modelInstalled) {

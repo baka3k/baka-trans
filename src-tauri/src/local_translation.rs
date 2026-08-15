@@ -23,8 +23,6 @@ const CONFIG_DIR_NAME: &str = "dev.baka3k.baka-trans";
 const CONFIG_FILE_NAME: &str = "local-translation-config.json";
 const WHISPER_MODEL_DIR_NAME: &str = "whisper-models";
 const WHISPER_MODEL_SOURCE: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
-const DEFAULT_OLLAMA_MODEL: &str = "translategemma:4b";
-const LEGACY_DEFAULT_OLLAMA_MODEL: &str = "gemma3:4b";
 static WHISPER_DOWNLOAD_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy, Debug)]
@@ -309,9 +307,9 @@ impl Default for LocalTranslationConfig {
             openai_max_output_tokens: 256,
             base_url: String::new(),
             model: String::new(),
-            timeout_seconds: 0,
+            timeout_seconds: 30,
             temperature: 0.0,
-            max_output_tokens: 0,
+            max_output_tokens: 256,
             keep_alive: None,
             model_path: String::new(),
             language: "ja".to_string(),
@@ -1229,8 +1227,11 @@ mod tests {
         let config = LocalTranslationConfig::default();
         assert_eq!(config.language, "ja");
         assert_eq!(config.sample_rate_hz, 16_000);
-        assert_eq!(config.temperature, 0.0);
-        assert_eq!(config.model, DEFAULT_OLLAMA_MODEL);
+        assert_eq!(config.openai_temperature, 0.0);
+        assert!(config.model.is_empty());
+        assert!(config.base_url.is_empty());
+        assert!(config.keep_alive.is_none());
+        assert_eq!(config.translation_engine, LocalTranslationEngine::HuggingfaceOffline);
         assert_eq!(config.tts_rate, 1.0);
         assert_eq!(config.tts_volume, 1.0);
         assert_eq!(config.tts_output_sample_rate_hz, 24_000);
@@ -1378,26 +1379,108 @@ mod tests {
         let path = directory.join(CONFIG_FILE_NAME);
         let config = LocalTranslationConfig::default();
         write_config_to_path(&path, &config).unwrap();
-        assert_eq!(read_config_from_path(&path).unwrap(), config);
+        let loaded = read_config_from_path(&path).unwrap();
+
+        assert_eq!(loaded.schema_version, config.schema_version);
+        assert_eq!(loaded.translation_engine, config.translation_engine);
+        assert_eq!(loaded.openai_base_url, config.openai_base_url);
+        assert_eq!(loaded.openai_model, config.openai_model);
+        assert_eq!(loaded.openai_timeout_seconds, config.openai_timeout_seconds);
+        assert_eq!(loaded.model_path, config.model_path);
+        assert_eq!(loaded.voice_id, config.voice_id);
+        assert_eq!(loaded.tts_rate, config.tts_rate);
+        assert_eq!(loaded.tts_volume, config.tts_volume);
+
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert!(json.get("baseUrl").is_none(), "Ollama base_url must not be persisted");
+        assert!(json.get("model").is_none(), "Ollama model must not be persisted");
+        assert!(json.get("keepAlive").is_none(), "Ollama keep_alive must not be persisted");
+        assert!(json.get("timeoutSeconds").is_none(), "Legacy timeout must not be persisted");
+
         let _ = std::fs::remove_dir_all(directory);
     }
 
     #[test]
-    fn migrates_the_legacy_default_ollama_model() {
+    fn migrates_legacy_v2_config_with_atomic_backup() {
         let directory = std::env::temp_dir().join(format!("baka-trans-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
         let path = directory.join(CONFIG_FILE_NAME);
-        let legacy = LocalTranslationConfig {
-            model: "gemma3:4b".to_string(),
-            ..LocalTranslationConfig::default()
-        };
-        write_config_to_path(&path, &legacy).unwrap();
+        let backup = path.with_extension("json.legacy-backup");
+
+        let legacy_json = serde_json::json!({
+            "schemaVersion": 2,
+            "baseUrl": "http://localhost:11434",
+            "model": "gemma3:4b",
+            "timeoutSeconds": 30,
+            "temperature": 0.0,
+            "maxOutputTokens": 256,
+            "keepAlive": "10m",
+            "modelPath": "/some/whisper-model.bin",
+            "language": "ja",
+            "threads": 4,
+            "useGpu": false,
+            "sampleRateHz": 16000,
+            "minimumSpeechMs": 300,
+            "silenceToCommitMs": 700,
+            "maximumUtteranceMs": 15000,
+            "preRollMs": 250,
+            "speechThreshold": 0.015,
+            "voiceId": "test-voice",
+            "ttsRate": 1.0,
+            "ttsVolume": 1.0,
+            "ttsOutputSampleRateHz": 24000,
+            "vieneuStyle": "tu_nhien"
+        });
+        std::fs::write(&path, serde_json::to_string_pretty(&legacy_json).unwrap()).unwrap();
 
         let migrated = read_config_from_path(&path).unwrap();
 
+        assert_eq!(migrated.schema_version, CONFIG_SCHEMA_VERSION);
+        assert_eq!(migrated.translation_engine, LocalTranslationEngine::HuggingfaceOffline);
+        assert_eq!(migrated.base_url, "http://localhost:11434");
+        assert_eq!(migrated.model, "gemma3:4b");
+        assert_eq!(migrated.model_path, "/some/whisper-model.bin");
+        assert_eq!(migrated.voice_id, "test-voice");
+
+        assert!(backup.exists(), "Legacy backup should exist");
+        let backup_content = std::fs::read_to_string(&backup).unwrap();
+        assert!(backup_content.contains("\"schemaVersion\": 2"));
+        assert!(backup_content.contains("gemma3:4b"));
+
+        let persisted_raw = std::fs::read_to_string(&path).unwrap();
+        let persisted: serde_json::Value = serde_json::from_str(&persisted_raw).unwrap();
+        assert!(persisted.get("model").is_none(), "v3 JSON must not contain Ollama model field");
+        assert!(persisted.get("baseUrl").is_none(), "v3 JSON must not contain Ollama base_url field");
+        assert!(persisted.get("keepAlive").is_none(), "v3 JSON must not contain Ollama keep_alive field");
+        assert_eq!(persisted["schemaVersion"], CONFIG_SCHEMA_VERSION);
+
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn migrates_v1_config_to_huggingface_offline() {
+        let directory = std::env::temp_dir().join(format!("baka-trans-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join(CONFIG_FILE_NAME);
+
+        let v1_json = serde_json::json!({
+            "schemaVersion": 1,
+            "baseUrl": "http://localhost:11434",
+            "model": "translategemma:4b",
+            "modelPath": "/model.bin",
+            "language": "ja",
+            "voiceId": "v1-voice"
+        });
+        std::fs::write(&path, serde_json::to_string_pretty(&v1_json).unwrap()).unwrap();
+
+        let migrated = read_config_from_path(&path).unwrap();
+
+        assert_eq!(migrated.schema_version, CONFIG_SCHEMA_VERSION);
+        assert_eq!(migrated.translation_engine, LocalTranslationEngine::HuggingfaceOffline);
         assert_eq!(migrated.model, "translategemma:4b");
-        let persisted: LocalTranslationConfig =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(persisted.model, "translategemma:4b");
+        assert_eq!(migrated.voice_id, "v1-voice");
+
         let _ = std::fs::remove_dir_all(directory);
     }
 
@@ -1405,6 +1488,7 @@ mod tests {
     fn rejects_missing_models_and_invalid_audio_contracts() {
         let missing = normalize_and_validate(
             LocalTranslationConfigDraft {
+                base_url: "http://localhost:11434".to_string(),
                 model: String::new(),
                 ..LocalTranslationConfigDraft::default()
             },
@@ -1413,7 +1497,32 @@ mod tests {
         .unwrap_err();
         assert_eq!(missing.code, "local_ollama_model_missing");
 
+        let openai_missing_url = normalize_and_validate(
+            LocalTranslationConfigDraft {
+                translation_engine: LocalTranslationEngine::OpenaiCompatible,
+                openai_base_url: String::new(),
+                openai_model: "test-model".to_string(),
+                ..LocalTranslationConfigDraft::default()
+            },
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(openai_missing_url.code, "local_openai_base_url_missing");
+
+        let openai_missing_model = normalize_and_validate(
+            LocalTranslationConfigDraft {
+                translation_engine: LocalTranslationEngine::OpenaiCompatible,
+                openai_base_url: "https://api.example.com".to_string(),
+                openai_model: String::new(),
+                ..LocalTranslationConfigDraft::default()
+            },
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(openai_missing_model.code, "local_openai_model_missing");
+
         let mut draft = LocalTranslationConfigDraft {
+            base_url: "http://localhost:11434".to_string(),
             model: "qwen".to_string(),
             model_path: "definitely-not-a-real-whisper-model.bin".to_string(),
             ..LocalTranslationConfigDraft::default()

@@ -190,11 +190,16 @@ export interface TranslationCredentialStatus {
 export interface LocalTranslationConfig {
   schemaVersion: number;
   translationEngine: LocalTranslationEngine;
-  baseUrl: string;
-  model: string;
-  timeoutSeconds: number;
-  temperature: number;
-  maxOutputTokens: number;
+  openaiBaseUrl: string;
+  openaiModel: string;
+  openaiTimeoutSeconds: number;
+  openaiTemperature: number;
+  openaiMaxOutputTokens: number;
+  baseUrl?: string;
+  model?: string;
+  timeoutSeconds?: number;
+  temperature?: number;
+  maxOutputTokens?: number;
   keepAlive?: string;
   modelPath: string;
   language: "ja";
