@@ -9,9 +9,11 @@
 #     `/v1/chat/completions` endpoint. `make doctor` probes that endpoint
 #     when `LLM_BASE_URL` is set (e.g. `make doctor LLM_BASE_URL=http://localhost:11434/v1`
 #     or `export LLM_BASE_URL=...`). `make build` also builds the bundled
-#     VieNeu-TTS bridge (PyInstaller, via scripts/build-vieneu-sidecar.sh) so
-#     the packaged app ships the managed runtime. The VieNeu model itself is
-#     downloaded in-app on first run; it is not part of `make build`.
+#     VieNeu-TTS bridge (scripts/build-vieneu-sidecar.sh) and the managed
+#     Hy-MT runtime sidecar (scripts/build-hy-mt-sidecar.sh), both PyInstaller,
+#     so the packaged app ships the managed runtimes. The VieNeu and Hy-MT
+#     models themselves are downloaded in-app on first run; they are not part
+#     of `make build`.
 #   - On macOS, ggml (pulled in by whisper-rs) uses std::filesystem::path,
 #     which Apple's libc++ marks `@available(macOS 10.15, strict)`. The actual
 #     pin lives in `.cargo/config.toml` (`[env] MACOSX_DEPLOYMENT_TARGET = "10.15"`)
@@ -39,9 +41,11 @@ ifeq ($(shell uname -s),Darwin)
     MACOSX_DEPLOYMENT_TARGET ?= 10.15
     BUILD_ENV = MACOSX_DEPLOYMENT_TARGET=$(MACOSX_DEPLOYMENT_TARGET)
     VIENEU_SIDECAR = scripts/build-vieneu-sidecar.sh
+    HYMT_SIDECAR = scripts/build-hy-mt-sidecar.sh
 else
     BUILD_ENV =
     VIENEU_SIDECAR = @printf 'skipped (non-Darwin: build via scripts/build-vieneu-sidecar.ps1)\n'
+    HYMT_SIDECAR = @printf 'skipped (non-Darwin: build via scripts/build-hy-mt-sidecar.ps1)\n'
 endif
 
 .DEFAULT_GOAL := help
@@ -80,6 +84,12 @@ doctor:
 			printf '  ✗ %-14s missing — xcode-select --install\n' xcode-clt; \
 			FAIL=1; \
 		fi; \
+		if command -v uv >/dev/null 2>&1; then \
+			printf '  ✓ %-14s %s\n' uv "$$(uv --version 2>/dev/null)"; \
+		else \
+			printf '  ✗ %-14s missing — required by sidecar builds (https://docs.astral.sh/uv/)\n' uv; \
+			FAIL=1; \
+		fi; \
 	else \
 		printf '  · %-14s skipped (non-Darwin: %s)\n' xcode-clt "$$(uname -s)"; \
 	fi; \
@@ -115,12 +125,14 @@ build: doctor
 		fi \
 	fi
 	@printf '\n=== Baka Trans — building desktop app ===\n\n'
-	@printf '[1/4] syncing JS deps via npm ci\n'
+	@printf '[1/5] syncing JS deps via npm ci\n'
 	$(BUILD_ENV) npm ci
-	@printf '\n[2/4] prefetching Rust deps\n'
+	@printf '\n[2/5] prefetching Rust deps\n'
 	$(BUILD_ENV) cargo fetch --manifest-path src-tauri/Cargo.toml
-	@printf '\n[3/4] building the bundled VieNeu-TTS bridge\n'
+	@printf '\n[3/5] building the bundled VieNeu-TTS bridge\n'
 	$(BUILD_ENV) $(VIENEU_SIDECAR)
-	@printf '\n[4/4] running tauri build\n'
+	@printf '\n[4/5] building the managed Hy-MT runtime sidecar\n'
+	$(BUILD_ENV) $(HYMT_SIDECAR)
+	@printf '\n[5/5] running tauri build\n'
 	$(BUILD_ENV) npm run tauri -- build
 	@printf '\n✓ build complete — see src-tauri/target/release/bundle/\n'

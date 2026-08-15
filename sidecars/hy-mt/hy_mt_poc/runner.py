@@ -97,12 +97,14 @@ class HyMtRunner:
         source_text: str,
         *,
         source_language_code: str = "ja",
+        target_language_code: str = "vi",
         target_language: str = TARGET_LANGUAGE_NAME,
     ) -> dict[str, Any]:
         input_ids = tokenize_chat(
             self.tokenizer,
             source_text,
             source_language_code=source_language_code,
+            target_language_code=target_language_code,
             target_language=target_language,
         )
         return {
@@ -115,6 +117,7 @@ class HyMtRunner:
         source_text: str,
         *,
         source_language_code: str = "ja",
+        target_language_code: str = "vi",
         target_language: str = TARGET_LANGUAGE_NAME,
         generation_mode: str,
         max_new_tokens: int = MAX_NEW_TOKENS,
@@ -131,6 +134,7 @@ class HyMtRunner:
             self.tokenizer,
             source_text,
             source_language_code=source_language_code,
+            target_language_code=target_language_code,
             target_language=target_language,
         ).to(self.device.selected)
         input_tokens = int(input_ids.shape[1])

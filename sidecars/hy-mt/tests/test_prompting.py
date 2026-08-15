@@ -16,35 +16,38 @@ class RecordingTokenizer:
 
 def test_official_prompt_matches_model_card_shape() -> None:
     assert official_prompt("  おはよう。 ") == (
-        "Translate the following text from Japanese to Vietnamese. "
-        "Note that you should only output the translated result without any "
-        "additional explanation:\n\nおはよう。"
+        "Translate the following segment into Vietnamese, "
+        "without additional explanation.\n\nおはよう。"
     )
     assert chat_messages("おはよう。") == [
         {
                 "role": "user",
                 "content": (
-                    "Translate the following text from Japanese to Vietnamese. "
-                    "Note that you should only output the translated result without any "
-                    "additional explanation:\n\nおはよう。"
+                    "Translate the following segment into Vietnamese, "
+                    "without additional explanation.\n\nおはよう。"
                 ),
         }
     ]
 
 
-def test_official_prompt_includes_explicit_source_language() -> None:
+def test_official_prompt_english_source_uses_xx_template() -> None:
     assert official_prompt("Good morning.", source_language_code="en") == (
-        "Translate the following text from English to Vietnamese. "
-        "Note that you should only output the translated result without any "
-        "additional explanation:\n\nGood morning."
+        "Translate the following segment into Vietnamese, "
+        "without additional explanation.\n\nGood morning."
     )
 
 
-def test_official_prompt_falls_back_to_code_for_unknown_language() -> None:
-    assert official_prompt("test", source_language_code="xyz") == (
-        "Translate the following text from xyz to Vietnamese. "
-        "Note that you should only output the translated result without any "
-        "additional explanation:\n\ntest"
+def test_official_prompt_zh_source_uses_zh_template() -> None:
+    assert official_prompt("你好。", source_language_code="zh", target_language_code="vi") == (
+        "将以下文本翻译为越南语，注意只需要输出翻译后的结果，"
+        "不要额外解释：\n\n你好。"
+    )
+
+
+def test_official_prompt_zh_target_uses_zh_template() -> None:
+    assert official_prompt("Xin chào.", source_language_code="vi", target_language_code="zh") == (
+        "将以下文本翻译为中文，注意只需要输出翻译后的结果，"
+        "不要额外解释：\n\nXin chào."
     )
 
 

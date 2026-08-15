@@ -83,10 +83,55 @@ LANGUAGE_NAMES = {
     "zh-Hans": "Simplified Chinese",
     "zh-Hant": "Traditional Chinese",
 }
+LANGUAGE_NAMES_ZH = {
+    "ar": "阿拉伯语",
+    "bn": "孟加拉语",
+    "bo": "藏语",
+    "cs": "捷克语",
+    "de": "德语",
+    "en": "英语",
+    "es": "西班牙语",
+    "fa": "波斯语",
+    "fil": "菲律宾语",
+    "fr": "法语",
+    "gu": "古吉拉特语",
+    "he": "希伯来语",
+    "hi": "印地语",
+    "id": "印尼语",
+    "it": "意大利语",
+    "ja": "日语",
+    "kk": "哈萨克语",
+    "km": "高棉语",
+    "ko": "韩语",
+    "mn": "蒙古语",
+    "mr": "马拉地语",
+    "ms": "马来语",
+    "my": "缅甸语",
+    "nl": "荷兰语",
+    "pl": "波兰语",
+    "pt": "葡萄牙语",
+    "ru": "俄语",
+    "ta": "泰米尔语",
+    "te": "泰卢固语",
+    "th": "泰语",
+    "tl": "菲律宾语",
+    "tr": "土耳其语",
+    "ug": "维吾尔语",
+    "uk": "乌克兰语",
+    "ur": "乌尔多语",
+    "vi": "越南语",
+    "yue": "粤语",
+    "zh": "中文",
+    "zh-Hans": "简体中文",
+    "zh-Hant": "繁体中文",
+}
+PROMPT_TEMPLATE_ZH = (
+    "将以下文本翻译为{target_language}，注意只需要输出翻译后的结果，"
+    "不要额外解释：\n\n{source_text}"
+)
 PROMPT_TEMPLATE = (
-    "Translate the following text from {source_language} to {target_language}. "
-    "Note that you should only output the translated result without any "
-    "additional explanation:\n\n{source_text}"
+    "Translate the following segment into {target_language}, "
+    "without additional explanation.\n\n{source_text}"
 )
 
 INFERENCE_FILES = (
