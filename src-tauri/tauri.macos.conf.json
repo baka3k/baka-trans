@@ -6,7 +6,8 @@
   "bundle": {
     "targets": ["dmg", "app"],
     "macOS": {
-      "signingIdentity": "Apple Development: quanghiep0206@gmail.com (4LSKATAAV4)"
+      "signingIdentity": null
     }
   }
 }
+
