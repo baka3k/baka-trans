@@ -1,4 +1,8 @@
+pub mod api_key;
+pub mod openai_compatible;
+
 use crate::error::{AppError, AppResult};
+use crate::local_translation::openai_compatible::normalize_openai_chat_completions_url;
 use crate::models::{
     Language, LocalTranslationConfig, LocalTranslationConfigDraft, LocalTranslationEngine, LocalTranslationTestResult,
     LocalTtsProvider, WhisperModelDownloadProgress, WhisperModelOption,
@@ -433,9 +437,9 @@ pub async fn test_config(
     app: Option<&tauri::AppHandle>,
     draft: LocalTranslationConfigDraft,
 ) -> AppResult<LocalTranslationTestResult> {
-    let fallback_model = draft.model.trim().to_string();
-    let fallback_endpoint = normalize_ollama_chat_url(&draft.base_url)
-        .unwrap_or_else(|_| draft.base_url.trim().to_string());
+    let engine = draft.translation_engine;
+    let fallback_model = effective_model(&draft);
+    let fallback_endpoint = effective_endpoint(&draft);
     let config = match normalize_and_validate(draft.clone(), true) {
         Ok(config) => config,
         Err(error) => {
@@ -457,8 +461,8 @@ pub async fn test_config(
             LocalTtsProvider::Vieneu => "VieNeu-TTS",
         };
         return Ok(failed_test_result(
-            config.model,
-            normalize_ollama_chat_url(&config.base_url)?,
+            effective_model_from_config(&config),
+            effective_endpoint_from_config(&config),
             AppError::new(
                 "local_tts_voice_missing",
                 format!("The selected {provider_name} voice is no longer available."),
@@ -477,8 +481,8 @@ pub async fn test_config(
             .map_err(|err| AppError::new("local_whisper_test_join_error", err.to_string()))?;
     if let Err(error) = whisper_result {
         return Ok(failed_test_result(
-            config.model,
-            normalize_ollama_chat_url(&config.base_url)?,
+            effective_model_from_config(&config),
+            effective_endpoint_from_config(&config),
             error,
             LocalTestHealth {
                 whisper_model_readable: true,
@@ -488,14 +492,98 @@ pub async fn test_config(
         ));
     }
 
-    let ollama = OllamaClient::new(&config, Language::Ja, Language::Vi)?;
-    let endpoint = ollama.endpoint().to_string();
-    let (probe, _) = match ollama.translate("こんにちは").await {
+    match engine {
+        LocalTranslationEngine::HuggingfaceOffline => {
+            Ok(LocalTranslationTestResult {
+                ok: true,
+                message: "Whisper and the selected voice are ready. The offline Hy-MT2 runtime will be tested when started.".to_string(),
+                model: effective_model_from_config(&config),
+                endpoint: effective_endpoint_from_config(&config),
+                whisper_model_readable: true,
+                whisper_model_loaded: true,
+                ollama_reachable: false,
+                ollama_model_accepted: false,
+                tts_voice_available: true,
+            })
+        }
+        LocalTranslationEngine::OpenaiCompatible => {
+            test_openai_compatible_engine(&config).await
+        }
+    }
+}
+
+fn effective_model(draft: &LocalTranslationConfigDraft) -> String {
+    let model = draft.openai_model.trim();
+    if !model.is_empty() {
+        return model.to_string();
+    }
+    draft.model.trim().to_string()
+}
+
+fn effective_endpoint(draft: &LocalTranslationConfigDraft) -> String {
+    let url = draft.openai_base_url.trim();
+    if !url.is_empty() {
+        return openai_compatible::normalize_openai_chat_completions_url(url)
+            .unwrap_or_else(|_| url.to_string());
+    }
+    normalize_ollama_chat_url(&draft.base_url).unwrap_or_else(|_| draft.base_url.trim().to_string())
+}
+
+fn effective_model_from_config(config: &LocalTranslationConfig) -> String {
+    if !config.openai_model.is_empty() {
+        return config.openai_model.clone();
+    }
+    config.model.clone()
+}
+
+fn effective_endpoint_from_config(config: &LocalTranslationConfig) -> String {
+    if !config.openai_base_url.is_empty() {
+        return openai_compatible::normalize_openai_chat_completions_url(&config.openai_base_url)
+            .unwrap_or_else(|_| config.openai_base_url.clone());
+    }
+    if !config.base_url.is_empty() {
+        return normalize_ollama_chat_url(&config.base_url)
+            .unwrap_or_else(|_| config.base_url.clone());
+    }
+    String::new()
+}
+
+async fn test_openai_compatible_engine(
+    config: &LocalTranslationConfig,
+) -> AppResult<LocalTranslationTestResult> {
+    let api_key_info = api_key::load_local_translation_api_key()?;
+    let client = match openai_compatible::OpenAiCompatibleClient::new(
+        &config.openai_base_url,
+        &config.openai_model,
+        config.openai_timeout_seconds,
+        config.openai_temperature,
+        config.openai_max_output_tokens,
+        api_key_info.map(|info| info.key),
+        Language::Ja,
+        Language::Vi,
+    ) {
+        Ok(client) => client,
+        Err(error) => {
+            return Ok(failed_test_result(
+                config.openai_model.clone(),
+                config.openai_base_url.clone(),
+                error,
+                LocalTestHealth {
+                    whisper_model_readable: true,
+                    whisper_model_loaded: true,
+                    tts_voice_available: true,
+                    ..LocalTestHealth::default()
+                },
+            ));
+        }
+    };
+    let endpoint = client.endpoint().to_string();
+    let (probe, _) = match client.translate("こんにちは").await {
         Ok(response) => response,
         Err(error) => {
-            let reachable = error.code != "local_ollama_request_error";
+            let reachable = error.code != "local_openai_request_error";
             return Ok(failed_test_result(
-                config.model,
+                config.openai_model.clone(),
                 endpoint,
                 error,
                 LocalTestHealth {
@@ -511,10 +599,10 @@ pub async fn test_config(
     Ok(LocalTranslationTestResult {
         ok: true,
         message: format!(
-            "Whisper, Gemma, and the selected voice are ready. Probe translation: {} characters.",
+            "Whisper, the OpenAI-compatible endpoint, and the selected voice are ready. Probe translation: {} characters.",
             probe.chars().count()
         ),
-        model: config.model,
+        model: config.openai_model.clone(),
         endpoint,
         whisper_model_readable: true,
         whisper_model_loaded: true,
@@ -568,12 +656,10 @@ pub fn normalize_and_validate(
     draft: LocalTranslationConfigDraft,
     require_model_path: bool,
 ) -> AppResult<LocalTranslationConfig> {
-    let endpoint = normalize_ollama_chat_url(&draft.base_url)?;
-    let model = require_non_empty(
-        &draft.model,
-        "local_ollama_model_missing",
-        "Choose an installed Ollama model.",
-    )?;
+    let (legacy_endpoint, legacy_model, legacy_keep_alive) =
+        validate_legacy_ollama_fields(&draft)?;
+    let (openai_endpoint, openai_model) =
+        validate_openai_compatible_fields(&draft)?;
     let model_path = draft.model_path.trim().to_string();
     if require_model_path {
         validate_model_path(&model_path)?;
@@ -615,14 +701,6 @@ pub fn normalize_and_validate(
         ));
     }
     let threads = draft.threads.clamp(1, maximum_thread_count());
-    let keep_alive = draft
-        .keep_alive
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned);
-    // Retained in the persisted schema for backward compatibility. VieNeu is now
-    // reached exclusively through the app-managed, authenticated runtime.
     let vieneu_base_url = "managed://vieneu".to_string();
     let vieneu_style = draft.vieneu_style.trim();
     if !matches!(vieneu_style, "tu_nhien" | "tin_tuc" | "doc_truyen") {
@@ -635,16 +713,17 @@ pub fn normalize_and_validate(
     Ok(LocalTranslationConfig {
         schema_version: CONFIG_SCHEMA_VERSION,
         translation_engine: draft.translation_engine,
-        base_url: endpoint
-            .strip_suffix("/api/chat")
-            .unwrap_or(&endpoint)
-            .trim_end_matches('/')
-            .to_string(),
-        model,
+        openai_base_url: openai_endpoint,
+        openai_model,
+        openai_timeout_seconds: draft.openai_timeout_seconds.clamp(5, 300),
+        openai_temperature: draft.openai_temperature.clamp(0.0, 2.0),
+        openai_max_output_tokens: draft.openai_max_output_tokens.clamp(32, 16_384),
+        base_url: legacy_endpoint,
+        model: legacy_model,
         timeout_seconds: draft.timeout_seconds.clamp(5, 300),
         temperature: draft.temperature.clamp(0.0, 1.0),
         max_output_tokens: draft.max_output_tokens.clamp(32, 2_048),
-        keep_alive,
+        keep_alive: legacy_keep_alive,
         model_path,
         language: "ja".to_string(),
         threads,
@@ -667,6 +746,61 @@ pub fn normalize_and_validate(
         tts_volume: draft.tts_volume.clamp(0.0, 1.0),
         tts_output_sample_rate_hz: crate::tts::LOCAL_TTS_SAMPLE_RATE,
     })
+}
+
+fn validate_legacy_ollama_fields(
+    draft: &LocalTranslationConfigDraft,
+) -> AppResult<(String, String, Option<String>)> {
+    let base_url = draft.base_url.trim();
+    let model = draft.model.trim();
+    if base_url.is_empty() && model.is_empty() {
+        return Ok((String::new(), String::new(), None));
+    }
+    let endpoint = normalize_ollama_chat_url(base_url)?;
+    let model = require_non_empty(
+        model,
+        "local_ollama_model_missing",
+        "Choose an installed Ollama model.",
+    )?;
+    let keep_alive = draft
+        .keep_alive
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    Ok((
+        endpoint
+            .strip_suffix("/api/chat")
+            .unwrap_or(&endpoint)
+            .trim_end_matches('/')
+            .to_string(),
+        model,
+        keep_alive,
+    ))
+}
+
+fn validate_openai_compatible_fields(
+    draft: &LocalTranslationConfigDraft,
+) -> AppResult<(String, String)> {
+    let base_url = draft.openai_base_url.trim();
+    let model = draft.openai_model.trim();
+    if draft.translation_engine != LocalTranslationEngine::OpenaiCompatible {
+        return Ok((base_url.to_string(), model.to_string()));
+    }
+    if base_url.is_empty() {
+        return Err(AppError::new(
+            "local_openai_base_url_missing",
+            "Enter an OpenAI-compatible base URL.",
+        ));
+    }
+    if model.is_empty() {
+        return Err(AppError::new(
+            "local_openai_model_missing",
+            "Enter an OpenAI-compatible model name.",
+        ));
+    }
+    let endpoint = normalize_openai_chat_completions_url(base_url)?;
+    Ok((endpoint, model.to_string()))
 }
 
 pub fn normalize_ollama_chat_url(base_url: &str) -> AppResult<String> {
@@ -831,7 +965,15 @@ fn read_config_from_path(path: &Path) -> AppResult<LocalTranslationConfig> {
     }
     let raw = std::fs::read_to_string(path)
         .map_err(|err| AppError::new("local_config_read_error", err.to_string()))?;
-    let mut config: LocalTranslationConfig = serde_json::from_str(&raw).map_err(|err| {
+
+    let legacy_schema = detect_legacy_schema_version(&raw);
+    if let Some(version) = legacy_schema {
+        if version < CONFIG_SCHEMA_VERSION {
+            return migrate_legacy_config(path, &raw, version);
+        }
+    }
+
+    let config: LocalTranslationConfig = serde_json::from_str(&raw).map_err(|err| {
         AppError::new(
             "local_config_parse_error",
             format!("Could not parse {}: {err}", path.display()),
@@ -846,10 +988,111 @@ fn read_config_from_path(path: &Path) -> AppResult<LocalTranslationConfig> {
             ),
         ));
     }
-    if config.model.trim() == LEGACY_DEFAULT_OLLAMA_MODEL {
-        config.model = DEFAULT_OLLAMA_MODEL.to_string();
-        write_config_to_path(path, &config)?;
+    Ok(config)
+}
+
+fn detect_legacy_schema_version(raw: &str) -> Option<u32> {
+    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
+    value
+        .get("schemaVersion")
+        .or_else(|| value.get("schema_version"))
+        .and_then(serde_json::Value::as_u64)
+        .map(|v| v as u32)
+}
+
+fn migrate_legacy_config(path: &Path, raw: &str, from_version: u32) -> AppResult<LocalTranslationConfig> {
+    let backup_path = path.with_extension("json.legacy-backup");
+    if !backup_path.exists() {
+        std::fs::write(&backup_path, raw)
+            .map_err(|err| AppError::new("local_config_write_error", format!("Could not create legacy backup: {err}")))?;
     }
+
+    let legacy: serde_json::Value = serde_json::from_str(raw).map_err(|err| {
+        AppError::new(
+            "local_config_parse_error",
+            format!("Could not parse legacy config: {err}"),
+        )
+    })?;
+
+    let mut config = LocalTranslationConfig::default();
+    config.schema_version = CONFIG_SCHEMA_VERSION;
+    config.translation_engine = LocalTranslationEngine::HuggingfaceOffline;
+
+    if let Some(base_url) = legacy.get("baseUrl").and_then(|v| v.as_str()) {
+        config.base_url = base_url.to_string();
+    }
+    if let Some(model) = legacy.get("model").and_then(|v| v.as_str()) {
+        config.model = model.to_string();
+    }
+    if let Some(timeout) = legacy.get("timeoutSeconds").and_then(|v| v.as_u64()) {
+        config.timeout_seconds = timeout;
+    }
+    if let Some(temp) = legacy.get("temperature").and_then(|v| v.as_f64()) {
+        config.temperature = temp as f32;
+    }
+    if let Some(tokens) = legacy.get("maxOutputTokens").and_then(|v| v.as_u64()) {
+        config.max_output_tokens = tokens as u32;
+    }
+    if let Some(keep_alive) = legacy.get("keepAlive").and_then(|v| v.as_str()) {
+        config.keep_alive = Some(keep_alive.to_string());
+    }
+
+    if let Some(model_path) = legacy.get("modelPath").and_then(|v| v.as_str()) {
+        config.model_path = model_path.to_string();
+    }
+    if let Some(language) = legacy.get("language").and_then(|v| v.as_str()) {
+        config.language = language.to_string();
+    }
+    if let Some(threads) = legacy.get("threads").and_then(|v| v.as_u64()) {
+        config.threads = threads as u32;
+    }
+    if let Some(use_gpu) = legacy.get("useGpu").and_then(|v| v.as_bool()) {
+        config.use_gpu = use_gpu;
+    }
+    if let Some(rate) = legacy.get("sampleRateHz").and_then(|v| v.as_u64()) {
+        config.sample_rate_hz = rate as u32;
+    }
+    if let Some(v) = legacy.get("minimumSpeechMs").and_then(|v| v.as_u64()) {
+        config.minimum_speech_ms = v;
+    }
+    if let Some(v) = legacy.get("silenceToCommitMs").and_then(|v| v.as_u64()) {
+        config.silence_to_commit_ms = v;
+    }
+    if let Some(v) = legacy.get("maximumUtteranceMs").and_then(|v| v.as_u64()) {
+        config.maximum_utterance_ms = v;
+    }
+    if let Some(v) = legacy.get("preRollMs").and_then(|v| v.as_u64()) {
+        config.pre_roll_ms = v;
+    }
+    if let Some(v) = legacy.get("speechThreshold").and_then(|v| v.as_f64()) {
+        config.speech_threshold = v as f32;
+    }
+    if let Some(v) = legacy.get("voiceId").and_then(|v| v.as_str()) {
+        config.voice_id = v.to_string();
+    }
+    if let Some(v) = legacy.get("ttsRate").and_then(|v| v.as_f64()) {
+        config.tts_rate = v as f32;
+    }
+    if let Some(v) = legacy.get("ttsVolume").and_then(|v| v.as_f64()) {
+        config.tts_volume = v as f32;
+    }
+    if let Some(v) = legacy.get("ttsOutputSampleRateHz").and_then(|v| v.as_u64()) {
+        config.tts_output_sample_rate_hz = v as u32;
+    }
+    if let Some(v) = legacy.get("vieneuStyle").and_then(|v| v.as_str()) {
+        config.vieneu_style = v.to_string();
+    }
+
+    if from_version < 2 {
+        if let Some(engine) = legacy.get("translationEngine").and_then(|v| v.as_str()) {
+            match engine {
+                "ollama" | "local" => config.translation_engine = LocalTranslationEngine::HuggingfaceOffline,
+                _ => {}
+            }
+        }
+    }
+
+    write_config_to_path(path, &config)?;
     Ok(config)
 }
 
