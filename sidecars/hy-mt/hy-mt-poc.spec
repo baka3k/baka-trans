@@ -6,7 +6,7 @@ transformers_datas, transformers_binaries, transformers_hidden = collect_all("tr
 safetensors_datas, safetensors_binaries, safetensors_hidden = collect_all("safetensors")
 
 a = Analysis(
-    ["poc_entry.py"],
+    ["server.py"],
     pathex=["."],
     binaries=torch_binaries + transformers_binaries + safetensors_binaries,
     datas=torch_datas + transformers_datas + safetensors_datas,
@@ -15,7 +15,7 @@ a = Analysis(
         + transformers_hidden
         + safetensors_hidden
         + collect_submodules("transformers.models.hunyuan_v1_dense")
-        + ["hy_mt_poc.benchmark", "hy_mt_poc.download", "hy_mt_poc.runner"]
+        + ["hy_mt_poc.lifecycle", "hy_mt_poc.protocol", "hy_mt_poc.runner", "hy_mt_poc.server"]
     ),
     hookspath=[],
     hooksconfig={},
@@ -31,7 +31,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="hy-mt-poc",
+    name="hy-mt-sidecar",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -44,5 +44,5 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=False,
-    name="hy-mt-poc",
+    name="hy-mt-sidecar",
 )

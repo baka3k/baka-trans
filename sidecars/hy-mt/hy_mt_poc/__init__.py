@@ -1,4 +1,4 @@
-"""HY-MT M5 proof-of-concept tooling."""
+"""HY-MT feasibility tooling and managed sidecar runtime."""
 
 from .constants import MODEL_ID, MODEL_REVISION
 

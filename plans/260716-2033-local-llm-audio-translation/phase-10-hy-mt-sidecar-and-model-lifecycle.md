@@ -2,7 +2,11 @@
 
 ## Context
 
-Phase 09 has approved exact model and runtime pins. This phase turns the POC into a deterministic sidecar with a strict protocol and a safe model installer. It does not yet route live sessions through HY-MT.
+Phase 09 retains the exact model and runtime pins under an owner-approved
+**CAUTION**, not a quality GO. This phase turns the POC into a deterministic
+sidecar with a strict protocol and a safe model installer so the candidate can
+be evaluated safely. It does not route live sessions through HY-MT, alter
+Ollama, or open Phases 11-15.
 
 ## Requirements
 
@@ -55,13 +59,13 @@ Unknown message types, duplicate active IDs, unsupported languages, oversized te
 
 ## Todo
 
-- [ ] Immutable manifest and all file hashes are pinned.
-- [ ] Interrupted/corrupt installs never activate.
-- [ ] Serve mode translates with network disabled.
-- [ ] NDJSON protocol and stable error catalog are tested.
-- [ ] Symlink/path escape, oversized line, and stdout-pollution cases are rejected.
-- [ ] Cooperative and forced cancellation paths are tested.
-- [ ] Bundled executable passes offline smoke tests.
+- [x] Immutable manifest and all file hashes are pinned.
+- [x] Interrupted/corrupt installs never activate.
+- [ ] Serve mode translates with network disabled (requires the active managed model on a target host).
+- [x] NDJSON protocol and stable error catalog are tested.
+- [x] Symlink/path escape, oversized line, and stdout-pollution cases are rejected.
+- [x] Cooperative cancellation is tested; forced-kill supervision belongs to the Rust manager in Phase 11.
+- [x] Bundled executable passes an install-state smoke test; an offline translation smoke test requires the active managed model.
 
 ## Risks
 

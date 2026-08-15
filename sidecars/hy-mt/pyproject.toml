@@ -1,7 +1,7 @@
 [project]
-name = "baka-trans-hy-mt-poc"
+name = "baka-trans-hy-mt-sidecar"
 version = "0.1.0"
-description = "Isolated HY-MT M5 feasibility and packaging POC"
+description = "Managed, offline-only HY-MT translation sidecar"
 requires-python = "==3.12.*"
 dependencies = [
   "huggingface-hub==0.34.4",

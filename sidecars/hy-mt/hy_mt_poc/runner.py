@@ -6,6 +6,7 @@ import os
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from threading import Event
 from typing import Any
 
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
@@ -25,13 +26,17 @@ from .prompting import tokenize_chat
 
 
 class DeadlineCriteria(StoppingCriteria):
-    def __init__(self, deadline: float | None) -> None:
+    def __init__(self, deadline: float | None, cancelled: Event | None = None) -> None:
         self.deadline = deadline
+        self.cancelled = cancelled
         self.triggered = False
 
     def __call__(self, input_ids: Any, scores: Any, **kwargs: Any) -> bool:
         del input_ids, scores, kwargs
-        self.triggered = self.deadline is not None and time.monotonic() >= self.deadline
+        self.triggered = bool(
+            (self.cancelled is not None and self.cancelled.is_set())
+            or (self.deadline is not None and time.monotonic() >= self.deadline)
+        )
         return self.triggered
 
 
@@ -102,6 +107,7 @@ class HyMtRunner:
         max_new_tokens: int = MAX_NEW_TOKENS,
         timeout_seconds: float | None = None,
         seed: int = 0,
+        cancellation: Event | None = None,
     ) -> TranslationResult:
         if generation_mode not in {"greedy", "recommended"}:
             raise ValueError("generation mode must be 'greedy' or 'recommended'")
@@ -111,7 +117,7 @@ class HyMtRunner:
         input_ids = tokenize_chat(self.tokenizer, source_text).to(self.device.selected)
         input_tokens = int(input_ids.shape[1])
         deadline = None if timeout_seconds is None else time.monotonic() + timeout_seconds
-        deadline_criteria = DeadlineCriteria(deadline)
+        deadline_criteria = DeadlineCriteria(deadline, cancellation)
         generation: dict[str, Any] = {
             "max_new_tokens": max_new_tokens,
             "stopping_criteria": StoppingCriteriaList([deadline_criteria]),

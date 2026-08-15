@@ -1,15 +1,17 @@
 ---
 type: feasibility-gate
 date: 2026-08-15
-verdict: stop
+verdict: caution
 ---
 
 # HY-MT M5 POC and Decision Gate
 
 ## Summary
 
-**STOP. Do not begin Phases 10-15. Keep the production Ollama path and default
-engine unchanged.**
+**CAUTION (owner-approved limited continuation). Phase 10 may proceed to build
+the isolated sidecar/model lifecycle only. Keep the production Ollama path and
+default engine unchanged; do not route live sessions to HY-MT or begin Phases
+11-15 without a fresh quality gate.**
 
 The exact `tencent/HY-MT1.5-1.8B` candidate runs locally on Apple M5 MPS with
 BF16, packages into a same-platform PyInstaller one-folder runtime, works with
@@ -20,8 +22,12 @@ cases changed critical technical terms, names, or instructions. The required
 current TranslateGemma/Ollama comparison, bilingual human sign-off, and combined
 Whisper/HY-MT/TTS memory run were also unavailable on this machine.
 
-This is a result of the gate, not a partial product integration. No production
-Rust, Tauri, settings, engine-selection, or Ollama-default code changed.
+The original hard gate result was STOP. The product owner explicitly accepted a
+limited-risk continuation on 2026-08-15: Phase 10 may make the candidate
+installable and process-isolated for further evaluation. This is not quality
+approval or permission to replace, route around, or remove Ollama. No
+production Rust, Tauri, settings, engine-selection, or Ollama-default code has
+changed as part of Phase 09.
 
 ## Decision Matrix
 
@@ -40,14 +46,17 @@ Rust, Tauri, settings, engine-selection, or Ollama-default code changed.
 | One-folder package | PASS for spike | arm64 runtime starts, loads, and translates offline; size/startup need mitigation |
 | Internal Vietnam license assumption | CAUTION | Vietnam is in the defined Territory, but legal acceptance and operational territory controls remain required |
 
-The quality failure alone violates the Phase 09 success criteria and is enough
-for STOP. The missing comparison, human review, and combined-process evidence
-independently prevent GO.
+The quality failure violates the original Phase 09 success criteria. The
+missing comparison, human review, and combined-process evidence independently
+prevent GO. The owner-approved CAUTION is intentionally narrower than GO:
+Phase 10 creates no user-selectable translation route and must retain the
+evidence needed for a fresh quality gate.
 
 ## Tested Pins
 
-These pins describe the failed POC candidate and are retained for reproduction.
-They are **not proposed Phase 10 production pins** because the gate stopped.
+These pins describe the failed POC candidate and are retained for reproduction
+and the owner-approved, isolated Phase 10 sidecar. They are **not approved for
+a user-selectable engine, live routing, or a default change**.
 
 | Component | Exact value |
 | --- | --- |
@@ -303,8 +312,9 @@ Raw evidence is in [hy-mt-m5-poc-evidence](hy-mt-m5-poc-evidence/):
 
 ## Required Follow-up
 
-The Phase 09 result closes Phases 10-15 under the current plan. A new proposal
-would need a newly reviewed model/revision or prompting approach, the same fixed
-corpus with bilingual human acceptance and an installed Ollama baseline, and a
-combined Whisper/HY-MT/TTS memory run. It must start as a new gate; it must not
-reinterpret this STOP as permission to wire the failed candidate into Tauri.
+The owner-approved continuation opens **Phase 10 only**. Phases 11-15 remain
+closed. Before any engine selection, Tauri wiring, live-session routing, or
+default change, a new gate must evaluate a reviewed model/revision or prompting
+approach against the same corpus with bilingual human acceptance, an installed
+Ollama baseline, and a combined Whisper/HY-MT/TTS memory run. This CAUTION must
+not be interpreted as permission to wire the failed candidate into Tauri.

@@ -16,5 +16,7 @@ sidecars/hy-mt/.artifacts/
 sidecars/hy-mt/.pytest_cache/
 sidecars/hy-mt/build/
 sidecars/hy-mt/dist/
+sidecars/hy-mt/bundle/*
+!sidecars/hy-mt/bundle/.gitkeep
 sidecars/hy-mt/__pycache__/
 sidecars/hy-mt/**/*.pyc

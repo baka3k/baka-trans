@@ -12,7 +12,7 @@ wheels = [
 ]
 
 [[package]]
-name = "baka-trans-hy-mt-poc"
+name = "baka-trans-hy-mt-sidecar"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
