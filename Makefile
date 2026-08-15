@@ -11,11 +11,17 @@
 #     or `export LLM_BASE_URL=...`). The app installs the VieNeu-TTS model
 #     on first run, so it is not part of `make build`.
 #   - On macOS, ggml (pulled in by whisper-rs) uses std::filesystem::path,
-#     which Apple's libc++ marks `@available(macOS 10.15, strict)`. We pin
-#     MACOSX_DEPLOYMENT_TARGET to 10.15 on Darwin so the class is not
-#     "explicitly marked unavailable" during the Tauri build. Override with
-#     `make build MACOSX_DEPLOYMENT_TARGET=11.0` if your app needs a
-#     higher minimum.
+#     which Apple's libc++ marks `@available(macOS 10.15, strict)`. The actual
+#     pin lives in `.cargo/config.toml` (`[env] MACOSX_DEPLOYMENT_TARGET = "10.15"`)
+#     because cargo does NOT propagate arbitrary parent env vars to build
+#     scripts — only what's in `.cargo/config.toml` `[env]` reaches them.
+#     `tauri-build` only sets this itself when `bundle.macos.minimum_system_version`
+#     is set in tauri config (it isn't), so without the cargo config the
+#     value defaults to 10.13 and ggml fails to compile. The Makefile also
+#     exports the var as a fallback for tools that DO read env directly
+#     (cmake `-E env`, xcrun, etc.). Override per-build with
+#     `make build MACOSX_DEPLOYMENT_TARGET=11.0` if your app needs a higher
+#     minimum.
 
 SHELL := /bin/bash
 

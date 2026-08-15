@@ -1,0 +1,16 @@
+# Per-workspace cargo settings.
+#
+# Cargo does not propagate arbitrary environment variables from the parent
+# process to build scripts; build scripts only see what cargo explicitly
+# passes. `tauri-build` only emits `cargo:rustc-env=MACOSX_DEPLOYMENT_TARGET=…`
+# when `bundle.macos.minimum_system_version` is set in tauri config (it isn't
+# here), so without this entry the var defaults to whatever whisper-rs-sys's
+# upstream cc-rs detects (10.13 on CommandLineTools). That in turn makes
+# Apple's libc++ mark `std::filesystem::path` as unavailable, breaking the
+# ggml build inside whisper-rs-sys.
+#
+# Pinning it here makes cargo set the var for every build script in the
+# workspace, including whisper-rs-sys → whisper.cpp → ggml. 10.15 is the
+# minimum where `<filesystem>` is fully usable on macOS.
+[env]
+MACOSX_DEPLOYMENT_TARGET = "10.15"
