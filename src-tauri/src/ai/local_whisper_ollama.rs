@@ -1,5 +1,5 @@
 use crate::error::{AppError, AppResult};
-use crate::local_translation::OllamaClient;
+use crate::local_translation::TranslationClient;
 use crate::models::{
     Language, LocalTranslationConfig, ManualBoundaryEvent, ManualBoundaryStatus, SessionStatus,
     TranscriptItem, TranscriptStatus, TranscriptUpdateMode, TranslatedAudioLevelEvent,
@@ -35,7 +35,7 @@ struct TranslationWorker {
     app: AppHandle,
     config: LocalTranslationConfig,
     context: Arc<WhisperContext>,
-    ollama: OllamaClient,
+    client: TranslationClient,
     transcript_store: Arc<Mutex<Vec<TranscriptItem>>>,
     generation: u64,
     active_generation: Arc<AtomicU64>,
@@ -122,7 +122,7 @@ pub async fn run_local_translation(
     } = runtime;
     let whisper_language =
         crate::local_translation::whisper_language_code(source_language)?.map(str::to_string);
-    let ollama = OllamaClient::new(&config, source_language, target_language)?;
+    let client = TranslationClient::new(&config, source_language, target_language)?;
     let (utterance_tx, utterance_rx) = mpsc::channel(UTTERANCE_QUEUE_CAPACITY);
     let cancellation = Arc::new(AtomicBool::new(false));
     let activity = Arc::new(PipelineActivity::default());
@@ -145,7 +145,7 @@ pub async fn run_local_translation(
             app: app.clone(),
             config: config.clone(),
             context,
-            ollama,
+            client,
             transcript_store: transcript_store.clone(),
             generation,
             active_generation: active_generation.clone(),
@@ -265,7 +265,7 @@ fn spawn_translation_worker(
             app,
             config,
             context,
-            ollama,
+            client,
             transcript_store,
             generation,
             active_generation,
@@ -361,12 +361,12 @@ fn spawn_translation_worker(
                 break;
             }
 
-            let translation = ollama.translate(&source_text).await;
+            let translation = client.translate(&source_text).await;
             if !is_worker_active(generation, &active_generation, &cancellation) {
                 break;
             }
             match translation {
-                Ok((translated_text, _ollama_latency_ms)) => {
+                Ok((translated_text, _translation_latency_ms)) => {
                     let speech_text = translated_text.clone();
                     emit_snapshot(
                         &app,
@@ -1195,11 +1195,15 @@ mod tests {
             model_path,
             ..LocalTranslationConfig::default()
         };
-        let (translated, _) = OllamaClient::new(&local_config, Language::Ja, Language::Vi)
-            .unwrap()
-            .translate(&source)
-            .await
-            .unwrap();
+        let (translated, _) = crate::local_translation::OllamaClient::new(
+            &local_config,
+            Language::Ja,
+            Language::Vi,
+        )
+        .unwrap()
+        .translate(&source)
+        .await
+        .unwrap();
         assert!(!translated.is_empty());
         println!("Japanese: {source}\nVietnamese: {translated}");
     }

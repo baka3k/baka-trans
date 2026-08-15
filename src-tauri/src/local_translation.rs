@@ -338,7 +338,7 @@ impl Default for LocalTranslationConfigDraft {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct OllamaClient {
     client: Client,
     endpoint: String,
@@ -413,6 +413,59 @@ impl OllamaClient {
         let content = parse_ollama_response(status, &body)?;
         let latency_ms = started.elapsed().as_millis().min(86_400_000) as u64;
         Ok((content, latency_ms))
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum TranslationClient {
+    Ollama(OllamaClient),
+    OpenAiCompatible(openai_compatible::OpenAiCompatibleClient),
+}
+
+impl TranslationClient {
+    pub fn new(
+        config: &LocalTranslationConfig,
+        source_language: Language,
+        target_language: Language,
+    ) -> AppResult<Self> {
+        match config.translation_engine {
+            LocalTranslationEngine::HuggingfaceOffline => {
+                Ok(Self::Ollama(OllamaClient::new(
+                    config,
+                    source_language,
+                    target_language,
+                )?))
+            }
+            LocalTranslationEngine::OpenaiCompatible => {
+                let api_key_info = api_key::load_local_translation_api_key()?;
+                Ok(Self::OpenAiCompatible(
+                    openai_compatible::OpenAiCompatibleClient::new(
+                        &config.openai_base_url,
+                        &config.openai_model,
+                        config.openai_timeout_seconds,
+                        config.openai_temperature,
+                        config.openai_max_output_tokens,
+                        api_key_info.map(|info| info.key),
+                        source_language,
+                        target_language,
+                    )?,
+                ))
+            }
+        }
+    }
+
+    pub async fn translate(&self, source_text: &str) -> AppResult<(String, u64)> {
+        match self {
+            Self::Ollama(client) => client.translate(source_text).await,
+            Self::OpenAiCompatible(client) => client.translate(source_text).await,
+        }
+    }
+
+    pub fn endpoint(&self) -> &str {
+        match self {
+            Self::Ollama(client) => client.endpoint(),
+            Self::OpenAiCompatible(client) => client.endpoint(),
+        }
     }
 }
 
@@ -1592,5 +1645,70 @@ mod tests {
         let (content, _) = client.translate("こんにちは").await.unwrap();
         assert_eq!(content, "Xin chào");
         server.join().unwrap();
+    }
+
+    #[test]
+    fn translation_client_dispatches_huggingface_offline_to_ollama() {
+        let config = LocalTranslationConfig {
+            translation_engine: LocalTranslationEngine::HuggingfaceOffline,
+            base_url: "http://localhost:11434".to_string(),
+            model: "gemma3:4b".to_string(),
+            ..LocalTranslationConfig::default()
+        };
+        let client = TranslationClient::new(&config, Language::Ja, Language::Vi).unwrap();
+        assert!(matches!(client, TranslationClient::Ollama(_)));
+        assert_eq!(client.endpoint(), "http://localhost:11434/api/chat");
+    }
+
+    #[test]
+    fn translation_client_dispatches_openai_compatible() {
+        let config = LocalTranslationConfig {
+            translation_engine: LocalTranslationEngine::OpenaiCompatible,
+            openai_base_url: "http://localhost:8080/v1".to_string(),
+            openai_model: "gemma-3-4b-it".to_string(),
+            ..LocalTranslationConfig::default()
+        };
+        let client = TranslationClient::new(&config, Language::Ja, Language::Vi).unwrap();
+        assert!(matches!(client, TranslationClient::OpenAiCompatible(_)));
+        assert_eq!(
+            client.endpoint(),
+            "http://localhost:8080/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn translation_client_rejects_auto_target_language() {
+        let config = LocalTranslationConfig {
+            translation_engine: LocalTranslationEngine::HuggingfaceOffline,
+            base_url: "http://localhost:11434".to_string(),
+            model: "gemma3:4b".to_string(),
+            ..LocalTranslationConfig::default()
+        };
+        let result = TranslationClient::new(&config, Language::Ja, Language::Auto);
+        assert_eq!(result.unwrap_err().code, "unsupported_target_language");
+    }
+
+    #[test]
+    fn translation_client_rejects_missing_ollama_base_url() {
+        let config = LocalTranslationConfig {
+            translation_engine: LocalTranslationEngine::HuggingfaceOffline,
+            base_url: String::new(),
+            model: "gemma3:4b".to_string(),
+            ..LocalTranslationConfig::default()
+        };
+        let result = TranslationClient::new(&config, Language::Ja, Language::Vi);
+        assert_eq!(result.unwrap_err().code, "local_ollama_base_url_missing");
+    }
+
+    #[test]
+    fn translation_client_rejects_missing_openai_base_url() {
+        let config = LocalTranslationConfig {
+            translation_engine: LocalTranslationEngine::OpenaiCompatible,
+            openai_base_url: String::new(),
+            openai_model: "gemma-3-4b-it".to_string(),
+            ..LocalTranslationConfig::default()
+        };
+        let result = TranslationClient::new(&config, Language::Ja, Language::Vi);
+        assert_eq!(result.unwrap_err().code, "local_openai_base_url_missing");
     }
 }
