@@ -104,6 +104,8 @@ class ServeLoop:
         try:
             result = self.runner.translate(
                 request["text"],
+                source_language_code=request["sourceLanguage"],
+                target_language=request["targetLanguage"],
                 generation_mode="greedy",
                 max_new_tokens=request["maxNewTokens"],
                 timeout_seconds=DEFAULT_TRANSLATE_TIMEOUT_SECONDS,

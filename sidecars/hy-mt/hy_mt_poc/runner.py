@@ -18,7 +18,7 @@ os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, StoppingCriteria, StoppingCriteriaList
 
-from .constants import MAX_NEW_TOKENS
+from .constants import MAX_NEW_TOKENS, TARGET_LANGUAGE_NAME
 from .decoding import decode_generated_suffix
 from .device import DeviceDecision, select_device, torch_dtype
 from .evidence import memory_snapshot
@@ -92,8 +92,19 @@ class HyMtRunner:
             "memoryAfterLoad": self.loaded_memory,
         }
 
-    def render_prompt(self, source_text: str) -> dict[str, Any]:
-        input_ids = tokenize_chat(self.tokenizer, source_text)
+    def render_prompt(
+        self,
+        source_text: str,
+        *,
+        source_language_code: str = "ja",
+        target_language: str = TARGET_LANGUAGE_NAME,
+    ) -> dict[str, Any]:
+        input_ids = tokenize_chat(
+            self.tokenizer,
+            source_text,
+            source_language_code=source_language_code,
+            target_language=target_language,
+        )
         return {
             "rendered": self.tokenizer.decode(input_ids[0], skip_special_tokens=False),
             "inputTokens": int(input_ids.shape[1]),
@@ -103,6 +114,8 @@ class HyMtRunner:
         self,
         source_text: str,
         *,
+        source_language_code: str = "ja",
+        target_language: str = TARGET_LANGUAGE_NAME,
         generation_mode: str,
         max_new_tokens: int = MAX_NEW_TOKENS,
         timeout_seconds: float | None = None,
@@ -114,7 +127,12 @@ class HyMtRunner:
         if max_new_tokens <= 0 or max_new_tokens > MAX_NEW_TOKENS:
             raise ValueError(f"max new tokens must be between 1 and {MAX_NEW_TOKENS}")
 
-        input_ids = tokenize_chat(self.tokenizer, source_text).to(self.device.selected)
+        input_ids = tokenize_chat(
+            self.tokenizer,
+            source_text,
+            source_language_code=source_language_code,
+            target_language=target_language,
+        ).to(self.device.selected)
         input_tokens = int(input_ids.shape[1])
         deadline = None if timeout_seconds is None else time.monotonic() + timeout_seconds
         deadline_criteria = DeadlineCriteria(deadline, cancellation)

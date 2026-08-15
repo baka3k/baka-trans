@@ -77,7 +77,13 @@ def validate_translate(message: dict[str, Any]) -> dict[str, Any]:
         raise ProtocolError("request_too_large", "Translation text exceeds the supported request size.")
     if not isinstance(max_new_tokens, int) or isinstance(max_new_tokens, bool) or not 1 <= max_new_tokens <= MAX_NEW_TOKENS:
         raise ProtocolError("invalid_token_limit", f"maxNewTokens must be between 1 and {MAX_NEW_TOKENS}.")
-    return {"id": request_id, "text": text, "maxNewTokens": max_new_tokens}
+    return {
+        "id": request_id,
+        "text": text,
+        "maxNewTokens": max_new_tokens,
+        "sourceLanguage": source,
+        "targetLanguage": target,
+    }
 
 
 def validate_cancel(message: dict[str, Any]) -> str:

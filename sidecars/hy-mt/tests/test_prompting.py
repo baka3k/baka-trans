@@ -16,18 +16,36 @@ class RecordingTokenizer:
 
 def test_official_prompt_matches_model_card_shape() -> None:
     assert official_prompt("  おはよう。 ") == (
-        "Translate the following text into Vietnamese. Note that you should only output "
-        "the translated result without any additional explanation:\n\nおはよう。"
+        "Translate the following text from Japanese to Vietnamese. "
+        "Note that you should only output the translated result without any "
+        "additional explanation:\n\nおはよう。"
     )
     assert chat_messages("おはよう。") == [
         {
                 "role": "user",
                 "content": (
-                    "Translate the following text into Vietnamese. Note that you should only output "
-                    "the translated result without any additional explanation:\n\nおはよう。"
+                    "Translate the following text from Japanese to Vietnamese. "
+                    "Note that you should only output the translated result without any "
+                    "additional explanation:\n\nおはよう。"
                 ),
         }
     ]
+
+
+def test_official_prompt_includes_explicit_source_language() -> None:
+    assert official_prompt("Good morning.", source_language_code="en") == (
+        "Translate the following text from English to Vietnamese. "
+        "Note that you should only output the translated result without any "
+        "additional explanation:\n\nGood morning."
+    )
+
+
+def test_official_prompt_falls_back_to_code_for_unknown_language() -> None:
+    assert official_prompt("test", source_language_code="xyz") == (
+        "Translate the following text from xyz to Vietnamese. "
+        "Note that you should only output the translated result without any "
+        "additional explanation:\n\ntest"
+    )
 
 
 def test_chat_template_has_no_system_or_generation_prompt() -> None:

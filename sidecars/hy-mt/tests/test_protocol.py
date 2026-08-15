@@ -20,7 +20,13 @@ def translate(**overrides: object) -> dict[str, object]:
 
 
 def test_translate_request_is_bounded_and_normalized() -> None:
-    assert validate_translate(translate()) == {"id": "request-1", "text": "確認してください。", "maxNewTokens": 32}
+    assert validate_translate(translate()) == {
+        "id": "request-1",
+        "text": "確認してください。",
+        "maxNewTokens": 32,
+        "sourceLanguage": "ja",
+        "targetLanguage": "vi",
+    }
 
 
 def test_translate_request_accepts_english_source() -> None:
@@ -28,6 +34,8 @@ def test_translate_request_accepts_english_source() -> None:
         "id": "request-1",
         "text": "Good morning.",
         "maxNewTokens": 32,
+        "sourceLanguage": "en",
+        "targetLanguage": "vi",
     }
 
 

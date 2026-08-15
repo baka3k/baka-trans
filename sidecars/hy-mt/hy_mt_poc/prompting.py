@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from .constants import MAX_INPUT_CHARS, PROMPT_TEMPLATE, TARGET_LANGUAGE_NAME
+from .constants import LANGUAGE_NAMES, MAX_INPUT_CHARS, PROMPT_TEMPLATE, TARGET_LANGUAGE_NAME
+
+
+def language_name(code: str) -> str:
+    return LANGUAGE_NAMES.get(code, code)
 
 
 def validate_source_text(source_text: str) -> str:
@@ -23,22 +27,43 @@ def validate_source_text(source_text: str) -> str:
 def official_prompt(
     source_text: str,
     *,
+    source_language_code: str = "ja",
     target_language: str = TARGET_LANGUAGE_NAME,
 ) -> str:
     normalized = validate_source_text(source_text)
     return PROMPT_TEMPLATE.format(
+        source_language=language_name(source_language_code),
         target_language=target_language,
         source_text=normalized,
     )
 
 
-def chat_messages(source_text: str) -> list[dict[str, str]]:
-    return [{"role": "user", "content": official_prompt(source_text)}]
+def chat_messages(
+    source_text: str,
+    *,
+    source_language_code: str = "ja",
+    target_language: str = TARGET_LANGUAGE_NAME,
+) -> list[dict[str, str]]:
+    return [{"role": "user", "content": official_prompt(
+        source_text,
+        source_language_code=source_language_code,
+        target_language=target_language,
+    )}]
 
 
-def tokenize_chat(tokenizer: Any, source_text: str) -> Any:
+def tokenize_chat(
+    tokenizer: Any,
+    source_text: str,
+    *,
+    source_language_code: str = "ja",
+    target_language: str = TARGET_LANGUAGE_NAME,
+) -> Any:
     tokenized = tokenizer.apply_chat_template(
-        chat_messages(source_text),
+        chat_messages(
+            source_text,
+            source_language_code=source_language_code,
+            target_language=target_language,
+        ),
         tokenize=True,
         add_generation_prompt=True,
         return_tensors="pt",
