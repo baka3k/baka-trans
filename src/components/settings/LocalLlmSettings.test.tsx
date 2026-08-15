@@ -98,6 +98,8 @@ describe("LocalLlmSettings", () => {
       const [draft, setDraft] = useState<LocalTranslationConfigDraft>({
         ...defaultLocalTranslationConfig,
         translationEngine: "openai_compatible",
+        openaiBaseUrl: "https://api.example.com/v1",
+        openaiModel: "gpt-4o-mini",
         baseUrl: "https://api.example.com/v1",
         model: "gpt-4o-mini",
         modelPath: "C:\\models\\ggml-small.bin",
