@@ -7,11 +7,13 @@ use crate::models::{
     LocalTranslationTestResult, LocalTtsProvider, LocalVoice, LookHelpConfig, LookHelpStatus,
     ManualBoundaryRequest, MeetingSummaryConfig, MeetingSummaryResult, MeetingSummaryStatus,
     MeetingSummaryStatusEvent, OverlayConfig, OverlayGeometry, OverlayStatus, SessionConfig,
-    TranscriptItem, TranslationCredentialStatus, TranslationEngineTestResult,
-    TranslationProvider, VieNeuRuntimeStatus, WhisperModelOption,
+    TranscriptItem, TranslationCredentialStatus, TranslationEngineTestResult, TranslationProvider,
+    VieNeuRuntimeStatus, WhisperModelOption,
 };
 use crate::session::AppState;
-use crate::{ai, hy_mt, llm, local_translation, look_help, overlay, security, summary_agent, tts, vieneu};
+use crate::{
+    ai, hy_mt, llm, local_translation, look_help, overlay, security, summary_agent, tts, vieneu,
+};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Duration;
@@ -176,9 +178,10 @@ pub async fn test_local_translation_config(
 
 #[tauri::command]
 pub async fn test_translation_engine(
+    app: AppHandle,
     draft: LocalTranslationConfigDraft,
 ) -> AppResult<TranslationEngineTestResult> {
-    local_translation::test_engine(draft).await
+    local_translation::test_engine(&app, draft).await
 }
 
 #[tauri::command]
@@ -194,7 +197,9 @@ pub async fn download_whisper_model(app: AppHandle, model_id: String) -> AppResu
 #[tauri::command]
 pub async fn get_whisper_model_dir() -> AppResult<String> {
     run_blocking(|| {
-        Ok(local_translation::whisper_model_dir()?.to_string_lossy().into_owned())
+        Ok(local_translation::whisper_model_dir()?
+            .to_string_lossy()
+            .into_owned())
     })
     .await
 }

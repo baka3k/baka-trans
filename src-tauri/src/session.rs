@@ -284,9 +284,7 @@ impl AppState {
             .lock()
             .map_err(lock_error)?
             .as_ref()
-            .is_some_and(|config| {
-                config.translation_provider == TranslationProvider::LocalWhisper
-            });
+            .is_some_and(|config| config.translation_provider == TranslationProvider::LocalWhisper);
         if local_session {
             *self.playback.lock().map_err(lock_error)? = None;
             *self.monitor_playback.lock().map_err(lock_error)? = None;

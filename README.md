@@ -55,7 +55,7 @@ Common local errors:
 | `local_whisper_model_load_error` | Verify the file is a compatible, non-empty whisper.cpp model. |
 | `local_openai_request_error` | Verify the configured OpenAI-compatible endpoint URL and network connectivity. |
 | `local_openai_provider_error` | Check the configured model name and API key, then retry the Local LLM test. |
-| `local_hy_mt2_not_available` | The offline Hy-MT2 engine is not yet available; use the OpenAI-compatible engine instead. |
+| `local_hy_mt2_not_available` | The offline Hy-MT2 engine is not enabled for live sessions yet (quality gate CAUTION); test it from settings or use the OpenAI-compatible engine. |
 | `local_translation_backlog_full` | Use shorter utterances, a smaller/faster model, or more capable hardware. |
 | `vieneu_model_not_installed` | Open Local LLM and select **Install VieNeu-TTS**. |
 | `vieneu_install_failed` | Select **Resume setup**; existing verified download data is reused. |

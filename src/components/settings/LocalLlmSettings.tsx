@@ -205,7 +205,7 @@ export function LocalLlmSettings({
               onInstall={onHyMtInstall}
               onCancel={onHyMtCancel}
             />
-            <p className="local-text-only-note">Managed Hy-MT2 runs from verified local files. The quality gate remains under CAUTION, so the offline engine is not selectable for live translation yet.</p>
+            <p className="local-text-only-note">Managed Hy-MT2 runs from verified local files. The quality gate remains under CAUTION, so the offline engine is not selectable for live translation yet. Use “Test translation engine” to check its output quality.</p>
           </>
         ) : <>
         <label className="field">

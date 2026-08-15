@@ -1163,5 +1163,4 @@ mod tests {
         assert!(worker.is_none());
         assert!(cancellation.load(Ordering::SeqCst));
     }
-
 }

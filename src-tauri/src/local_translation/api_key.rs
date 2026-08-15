@@ -38,14 +38,16 @@ pub fn load_local_translation_api_key() -> AppResult<Option<ApiKeyInfo>> {
             if secret.is_empty() {
                 return Ok(None);
             }
-            *key_cache()
-                .lock()
-                .map_err(|err| crate::error::AppError::new("credential_cache_error", err.to_string()))? =
-                Some(secret.clone());
+            *key_cache().lock().map_err(|err| {
+                crate::error::AppError::new("credential_cache_error", err.to_string())
+            })? = Some(secret.clone());
             Ok(Some(ApiKeyInfo { key: secret }))
         }
         Err(keyring::Error::NoEntry) => Ok(None),
-        Err(err) => Err(crate::error::AppError::new("keychain_error", err.to_string())),
+        Err(err) => Err(crate::error::AppError::new(
+            "keychain_error",
+            err.to_string(),
+        )),
     }
 }
 

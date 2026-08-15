@@ -361,7 +361,7 @@ impl TranslationClient {
             LocalTranslationEngine::HuggingfaceOffline => {
                 Err(AppError::new(
                     "local_hy_mt2_not_available",
-                    "The offline Hy-MT2 translation engine is not yet available.",
+                    "The offline Hy-MT2 engine is not enabled for live sessions yet (quality gate CAUTION). Use 'Test translation engine' in settings to evaluate it, or choose the OpenAI-compatible engine.",
                 ))
             }
             LocalTranslationEngine::OpenaiCompatible => {
@@ -465,21 +465,53 @@ pub async fn test_config(
 
     match engine {
         LocalTranslationEngine::HuggingfaceOffline => {
+            let Some(handle) = app else {
+                return Ok(failed_test_result(
+                    crate::hy_mt::HY_MT_MODEL_ID.to_string(),
+                    "managed offline runtime".to_string(),
+                    AppError::new(
+                        "local_hy_mt2_not_available",
+                        "The offline Hy-MT2 engine is not enabled for live sessions yet (quality gate CAUTION).",
+                    ),
+                    LocalTestHealth {
+                        whisper_model_readable: true,
+                        whisper_model_loaded: true,
+                        tts_voice_available: true,
+                        ..LocalTestHealth::default()
+                    },
+                ));
+            };
+            let probe = crate::hy_mt::probe_translation_engine(handle).await;
+            if let Some(error) = probe.error {
+                return Ok(failed_test_result(
+                    crate::hy_mt::HY_MT_MODEL_ID.to_string(),
+                    "managed offline runtime".to_string(),
+                    error,
+                    LocalTestHealth {
+                        whisper_model_readable: true,
+                        whisper_model_loaded: true,
+                        engine_reachable: probe.reachable,
+                        engine_accepted: probe.accepted,
+                        tts_voice_available: true,
+                    },
+                ));
+            }
             Ok(LocalTranslationTestResult {
                 ok: true,
-                message: "Whisper and the selected voice are ready. The offline Hy-MT2 engine is not bundled in this build yet; translation needs the OpenAI-compatible engine.".to_string(),
-                model: effective_model_from_config(&config),
-                endpoint: effective_endpoint_from_config(&config),
+                message: format!(
+                    "Whisper, the offline Hy-MT2 engine, and the selected voice are ready. Probe translation: {}",
+                    truncate_probe_message(probe.translated_text.as_deref().unwrap_or_default())
+                ),
+                model: crate::hy_mt::HY_MT_MODEL_ID.to_string(),
+                endpoint: "managed offline runtime".to_string(),
                 whisper_model_readable: true,
                 whisper_model_loaded: true,
-                engine_reachable: false,
-                engine_accepted: false,
+                engine_reachable: true,
+                engine_accepted: true,
                 tts_voice_available: true,
             })
         }
-        LocalTranslationEngine::OpenaiCompatible => {
-            test_openai_compatible_engine(&config).await
-        }
+        LocalTranslationEngine::OpenaiCompatible => test_openai_compatible_engine(&config).await,
     }
 }
 
@@ -550,43 +582,74 @@ async fn test_openai_compatible_engine(
 }
 
 pub async fn test_engine(
+    app: &tauri::AppHandle,
     draft: LocalTranslationConfigDraft,
 ) -> AppResult<TranslationEngineTestResult> {
     match draft.translation_engine {
-        LocalTranslationEngine::HuggingfaceOffline => Ok(TranslationEngineTestResult {
-            engine: "huggingface_offline".to_string(),
-            model: "tencent/Hy-MT2-1.8B".to_string(),
-            endpoint: "managed offline runtime".to_string(),
-            reachable: false,
-            accepted: false,
-            message: "The offline Hy-MT2 engine is not bundled in this build yet. Choose the OpenAI-compatible API engine for now.".to_string(),
-        }),
-        LocalTranslationEngine::OpenaiCompatible => {
-            let (endpoint, model) = validate_openai_compatible_fields(&draft)?;
-            let probe = probe_openai_engine(
-                &endpoint,
-                &model,
-                draft.openai_timeout_seconds.clamp(5, 300),
-                draft.openai_temperature.clamp(0.0, 2.0),
-                draft.openai_max_output_tokens.clamp(32, 16_384),
-            )
-            .await;
-            Ok(TranslationEngineTestResult {
-                engine: "openai_compatible".to_string(),
-                model,
-                endpoint: probe.endpoint,
-                reachable: probe.reachable,
-                accepted: probe.accepted,
-                message: match probe.error {
-                    Some(error) => error.message,
-                    None => format!(
-                        "The endpoint accepted a probe translation ({} characters).",
-                        probe.probe_characters
-                    ),
-                },
-            })
+        LocalTranslationEngine::HuggingfaceOffline => {
+            let probe = crate::hy_mt::probe_translation_engine(app).await;
+            Ok(offline_engine_test_result(probe))
         }
+        LocalTranslationEngine::OpenaiCompatible => test_engine_openai_compatible(draft).await,
     }
+}
+
+fn offline_engine_test_result(probe: crate::hy_mt::HyMtEngineProbe) -> TranslationEngineTestResult {
+    let message = match &probe.error {
+        Some(error) => error.message.clone(),
+        None => format!(
+            "The offline Hy-MT2 engine loaded in {:.0} ms on {} and translated the probe in {:.0} ms: {}",
+            probe.load_ms,
+            probe.device,
+            probe.latency_ms.unwrap_or(0.0),
+            truncate_probe_message(probe.translated_text.as_deref().unwrap_or_default())
+        ),
+    };
+    TranslationEngineTestResult {
+        engine: "huggingface_offline".to_string(),
+        model: crate::hy_mt::HY_MT_MODEL_ID.to_string(),
+        endpoint: "managed offline runtime".to_string(),
+        reachable: probe.reachable,
+        accepted: probe.accepted,
+        message,
+    }
+}
+
+fn truncate_probe_message(text: &str) -> String {
+    const MAX_PROBE_MESSAGE_CHARS: usize = 400;
+    if text.chars().count() <= MAX_PROBE_MESSAGE_CHARS {
+        return text.to_string();
+    }
+    let truncated: String = text.chars().take(MAX_PROBE_MESSAGE_CHARS).collect();
+    format!("{truncated}…")
+}
+
+async fn test_engine_openai_compatible(
+    draft: LocalTranslationConfigDraft,
+) -> AppResult<TranslationEngineTestResult> {
+    let (endpoint, model) = validate_openai_compatible_fields(&draft)?;
+    let probe = probe_openai_engine(
+        &endpoint,
+        &model,
+        draft.openai_timeout_seconds.clamp(5, 300),
+        draft.openai_temperature.clamp(0.0, 2.0),
+        draft.openai_max_output_tokens.clamp(32, 16_384),
+    )
+    .await;
+    Ok(TranslationEngineTestResult {
+        engine: "openai_compatible".to_string(),
+        model,
+        endpoint: probe.endpoint,
+        reachable: probe.reachable,
+        accepted: probe.accepted,
+        message: match probe.error {
+            Some(error) => error.message,
+            None => format!(
+                "The endpoint accepted a probe translation ({} characters).",
+                probe.probe_characters
+            ),
+        },
+    })
 }
 
 struct EngineProbe {
@@ -703,8 +766,7 @@ pub fn normalize_and_validate(
     draft: LocalTranslationConfigDraft,
     require_model_path: bool,
 ) -> AppResult<LocalTranslationConfig> {
-    let (openai_endpoint, openai_model) =
-        validate_openai_compatible_fields(&draft)?;
+    let (openai_endpoint, openai_model) = validate_openai_compatible_fields(&draft)?;
     let model_path = draft.model_path.trim().to_string();
     if require_model_path {
         validate_model_path(&model_path)?;
@@ -894,11 +956,19 @@ fn detect_legacy_schema_version(raw: &str) -> Option<u32> {
         .map(|v| v as u32)
 }
 
-fn migrate_legacy_config(path: &Path, raw: &str, from_version: u32) -> AppResult<LocalTranslationConfig> {
+fn migrate_legacy_config(
+    path: &Path,
+    raw: &str,
+    from_version: u32,
+) -> AppResult<LocalTranslationConfig> {
     let backup_path = path.with_extension("json.legacy-backup");
     if !backup_path.exists() {
-        std::fs::write(&backup_path, raw)
-            .map_err(|err| AppError::new("local_config_write_error", format!("Could not create legacy backup: {err}")))?;
+        std::fs::write(&backup_path, raw).map_err(|err| {
+            AppError::new(
+                "local_config_write_error",
+                format!("Could not create legacy backup: {err}"),
+            )
+        })?;
     }
 
     let legacy: serde_json::Value = serde_json::from_str(raw).map_err(|err| {
@@ -961,7 +1031,9 @@ fn migrate_legacy_config(path: &Path, raw: &str, from_version: u32) -> AppResult
     if from_version < 2 {
         if let Some(engine) = legacy.get("translationEngine").and_then(|v| v.as_str()) {
             match engine {
-                "ollama" | "local" => config.translation_engine = LocalTranslationEngine::HuggingfaceOffline,
+                "ollama" | "local" => {
+                    config.translation_engine = LocalTranslationEngine::HuggingfaceOffline
+                }
                 _ => {}
             }
         }
@@ -1092,7 +1164,10 @@ mod tests {
         assert_eq!(config.language, "ja");
         assert_eq!(config.sample_rate_hz, 16_000);
         assert_eq!(config.openai_temperature, 0.0);
-        assert_eq!(config.translation_engine, LocalTranslationEngine::HuggingfaceOffline);
+        assert_eq!(
+            config.translation_engine,
+            LocalTranslationEngine::HuggingfaceOffline
+        );
         assert_eq!(config.tts_rate, 1.0);
         assert_eq!(config.tts_volume, 1.0);
         assert_eq!(config.tts_output_sample_rate_hz, 24_000);
@@ -1179,9 +1254,18 @@ mod tests {
 
         let raw = std::fs::read_to_string(&path).unwrap();
         let json: serde_json::Value = serde_json::from_str(&raw).unwrap();
-        assert!(json.get("baseUrl").is_none(), "Legacy base_url must not be persisted");
-        assert!(json.get("model").is_none(), "Legacy model must not be persisted");
-        assert!(json.get("keepAlive").is_none(), "Legacy keep_alive must not be persisted");
+        assert!(
+            json.get("baseUrl").is_none(),
+            "Legacy base_url must not be persisted"
+        );
+        assert!(
+            json.get("model").is_none(),
+            "Legacy model must not be persisted"
+        );
+        assert!(
+            json.get("keepAlive").is_none(),
+            "Legacy keep_alive must not be persisted"
+        );
 
         let _ = std::fs::remove_dir_all(directory);
     }
@@ -1222,7 +1306,10 @@ mod tests {
         let migrated = read_config_from_path(&path).unwrap();
 
         assert_eq!(migrated.schema_version, CONFIG_SCHEMA_VERSION);
-        assert_eq!(migrated.translation_engine, LocalTranslationEngine::HuggingfaceOffline);
+        assert_eq!(
+            migrated.translation_engine,
+            LocalTranslationEngine::HuggingfaceOffline
+        );
         assert_eq!(migrated.model_path, "/some/whisper-model.bin");
         assert_eq!(migrated.voice_id, "test-voice");
 
@@ -1233,9 +1320,18 @@ mod tests {
 
         let persisted_raw = std::fs::read_to_string(&path).unwrap();
         let persisted: serde_json::Value = serde_json::from_str(&persisted_raw).unwrap();
-        assert!(persisted.get("model").is_none(), "v3 JSON must not contain legacy model field");
-        assert!(persisted.get("baseUrl").is_none(), "v3 JSON must not contain legacy base_url field");
-        assert!(persisted.get("keepAlive").is_none(), "v3 JSON must not contain legacy keep_alive field");
+        assert!(
+            persisted.get("model").is_none(),
+            "v3 JSON must not contain legacy model field"
+        );
+        assert!(
+            persisted.get("baseUrl").is_none(),
+            "v3 JSON must not contain legacy base_url field"
+        );
+        assert!(
+            persisted.get("keepAlive").is_none(),
+            "v3 JSON must not contain legacy keep_alive field"
+        );
         assert_eq!(persisted["schemaVersion"], CONFIG_SCHEMA_VERSION);
 
         let _ = std::fs::remove_dir_all(directory);
@@ -1260,7 +1356,10 @@ mod tests {
         let migrated = read_config_from_path(&path).unwrap();
 
         assert_eq!(migrated.schema_version, CONFIG_SCHEMA_VERSION);
-        assert_eq!(migrated.translation_engine, LocalTranslationEngine::HuggingfaceOffline);
+        assert_eq!(
+            migrated.translation_engine,
+            LocalTranslationEngine::HuggingfaceOffline
+        );
         assert_eq!(migrated.voice_id, "v1-voice");
 
         let _ = std::fs::remove_dir_all(directory);
@@ -1371,21 +1470,56 @@ mod tests {
         assert_eq!(result.unwrap_err().code, "local_openai_base_url_missing");
     }
 
-    #[tokio::test]
-    async fn test_engine_reports_offline_engine_as_not_bundled() {
-        let result = test_engine(LocalTranslationConfigDraft::default())
-            .await
-            .unwrap();
+    #[test]
+    fn offline_engine_test_result_reports_probe_translation() {
+        let result = offline_engine_test_result(crate::hy_mt::HyMtEngineProbe {
+            device: "mps".to_string(),
+            load_ms: 1234.5,
+            translated_text: Some("Xin chào".to_string()),
+            latency_ms: Some(56.5),
+            reachable: true,
+            accepted: true,
+            error: None,
+        });
 
         assert_eq!(result.engine, "huggingface_offline");
+        assert_eq!(result.model, "tencent/Hy-MT2-1.8B");
+        assert_eq!(result.endpoint, "managed offline runtime");
+        assert!(result.reachable);
+        assert!(result.accepted);
+        assert!(result.message.contains("Xin chào"));
+    }
+
+    #[test]
+    fn offline_engine_test_result_surfaces_probe_errors() {
+        let result = offline_engine_test_result(crate::hy_mt::HyMtEngineProbe {
+            device: String::new(),
+            load_ms: 0.0,
+            translated_text: None,
+            latency_ms: None,
+            reachable: false,
+            accepted: false,
+            error: Some(AppError::new(
+                "hy_mt_model_missing",
+                "The Hy-MT2 model is not installed yet.",
+            )),
+        });
+
         assert!(!result.reachable);
         assert!(!result.accepted);
-        assert!(result.message.contains("not bundled in this build yet"));
+        assert!(result.message.contains("not installed"));
+    }
+
+    #[test]
+    fn probe_message_truncates_long_translations() {
+        let long = "あ".repeat(500);
+        assert_eq!(truncate_probe_message(&long).chars().count(), 401);
+        assert_eq!(truncate_probe_message("short"), "short");
     }
 
     #[tokio::test]
     async fn test_engine_validates_openai_fields_before_probing() {
-        let result = test_engine(LocalTranslationConfigDraft {
+        let result = test_engine_openai_compatible(LocalTranslationConfigDraft {
             translation_engine: LocalTranslationEngine::OpenaiCompatible,
             openai_base_url: String::new(),
             openai_model: String::new(),

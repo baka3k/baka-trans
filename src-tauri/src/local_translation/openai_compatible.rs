@@ -53,9 +53,7 @@ impl OpenAiCompatibleClient {
             ));
         }
         let client = Client::builder()
-            .timeout(Duration::from_secs(
-                timeout_seconds.max(5).min(300),
-            ))
+            .timeout(Duration::from_secs(timeout_seconds.max(5).min(300)))
             .redirect(Policy::none())
             .build()
             .map_err(|err| AppError::new("local_openai_client_error", err.to_string()))?;
@@ -86,9 +84,7 @@ impl OpenAiCompatibleClient {
         if source_text.chars().count() > MAX_SOURCE_TEXT_CHARS {
             return Err(AppError::new(
                 "local_openai_text_too_long",
-                format!(
-                    "Source text exceeds the maximum of {MAX_SOURCE_TEXT_CHARS} characters."
-                ),
+                format!("Source text exceeds the maximum of {MAX_SOURCE_TEXT_CHARS} characters."),
             ));
         }
 
@@ -113,16 +109,14 @@ impl OpenAiCompatibleClient {
             }
         }
 
-        let response = request
-            .send()
-            .await
-            .map_err(|err| AppError::new("local_openai_request_error", redact_error(err.to_string())))?;
+        let response = request.send().await.map_err(|err| {
+            AppError::new("local_openai_request_error", redact_error(err.to_string()))
+        })?;
 
         let status = response.status();
-        let body_bytes = response
-            .bytes()
-            .await
-            .map_err(|err| AppError::new("local_openai_response_error", redact_error(err.to_string())))?;
+        let body_bytes = response.bytes().await.map_err(|err| {
+            AppError::new("local_openai_response_error", redact_error(err.to_string()))
+        })?;
 
         if body_bytes.len() > MAX_RESPONSE_BODY_BYTES {
             return Err(AppError::new(
@@ -205,7 +199,10 @@ fn is_loopback_url(url_str: &str) -> AppResult<bool> {
         )
     })?;
     let host = url.host_str().unwrap_or("");
-    if matches!(host, "localhost" | "127.0.0.1" | "::1" | "0.0.0.0" | "[::1]") {
+    if matches!(
+        host,
+        "localhost" | "127.0.0.1" | "::1" | "0.0.0.0" | "[::1]"
+    ) {
         return Ok(true);
     }
     if let Ok(ip) = host.parse::<IpAddr>() {
@@ -341,10 +338,8 @@ mod tests {
     #[test]
     fn preserves_existing_chat_completions_path() {
         assert_eq!(
-            normalize_openai_chat_completions_url(
-                "https://api.example.com/v1/chat/completions"
-            )
-            .unwrap(),
+            normalize_openai_chat_completions_url("https://api.example.com/v1/chat/completions")
+                .unwrap(),
             "https://api.example.com/v1/chat/completions"
         );
     }
@@ -488,8 +483,7 @@ mod tests {
 
     #[test]
     fn handles_malformed_json() {
-        let err =
-            parse_openai_chat_completion_response(StatusCode::OK, "not json").unwrap_err();
+        let err = parse_openai_chat_completion_response(StatusCode::OK, "not json").unwrap_err();
         assert_eq!(err.code, "local_openai_response_parse_error");
     }
 
@@ -534,10 +528,7 @@ mod tests {
             .build()
             .unwrap();
         let result = rt.block_on(client.translate(&long_text));
-        assert_eq!(
-            result.unwrap_err().code,
-            "local_openai_text_too_long"
-        );
+        assert_eq!(result.unwrap_err().code, "local_openai_text_too_long");
     }
 
     #[test]
@@ -559,9 +550,6 @@ mod tests {
             .build()
             .unwrap();
         let result = rt.block_on(client.translate(""));
-        assert_eq!(
-            result.unwrap_err().code,
-            "local_translation_empty_source"
-        );
+        assert_eq!(result.unwrap_err().code, "local_translation_empty_source");
     }
 }
