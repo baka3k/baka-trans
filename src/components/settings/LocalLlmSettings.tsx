@@ -1,4 +1,6 @@
 import type {
+  HyMtModelProgress,
+  HyMtModelStatus,
   LocalTranslationConfigDraft,
   LocalTranslationTestResult,
   LocalVoice,
@@ -54,6 +56,9 @@ interface LocalLlmSettingsProps {
   vieneuRuntime?: VieNeuRuntimeStatus | null;
   vieneuProgress?: VieNeuRuntimeProgress | null;
   vieneuBusy?: boolean;
+  hyMtModel?: HyMtModelStatus | null;
+  hyMtProgress?: HyMtModelProgress | null;
+  hyMtBusy?: boolean;
   onChange: (draft: LocalTranslationConfigDraft) => void;
   onSave: () => void;
   onTest: () => void;
@@ -65,6 +70,8 @@ interface LocalLlmSettingsProps {
   onVieNeuInstall?: () => void;
   onVieNeuCancel?: () => void;
   onVieNeuRestart?: () => void;
+  onHyMtInstall?: () => void;
+  onHyMtCancel?: () => void;
 }
 
 export function validateLocalTranslationDraft(
@@ -132,6 +139,9 @@ export function LocalLlmSettings({
   vieneuRuntime = null,
   vieneuProgress = null,
   vieneuBusy = false,
+  hyMtModel = null,
+  hyMtProgress = null,
+  hyMtBusy = false,
   onChange,
   onSave,
   onTest,
@@ -143,6 +153,8 @@ export function LocalLlmSettings({
   onVieNeuInstall = () => undefined,
   onVieNeuCancel = () => undefined,
   onVieNeuRestart = () => undefined,
+  onHyMtInstall = () => undefined,
+  onHyMtCancel = () => undefined,
 }: LocalLlmSettingsProps) {
   const errors = validateLocalTranslationDraft(draft, vieneuRuntime);
   const engineFieldsInvalid =
@@ -185,7 +197,16 @@ export function LocalLlmSettings({
           </select>
         </label>
         {draft.translationEngine === "huggingface_offline" ? (
-          <p className="local-text-only-note">Managed Hy-MT2 runs from verified local files. The quality gate remains under CAUTION.</p>
+          <>
+            <HyMtModelCard
+              status={hyMtModel}
+              progress={hyMtProgress}
+              busy={hyMtBusy}
+              onInstall={onHyMtInstall}
+              onCancel={onHyMtCancel}
+            />
+            <p className="local-text-only-note">Managed Hy-MT2 runs from verified local files. The quality gate remains under CAUTION, so the offline engine is not selectable for live translation yet.</p>
+          </>
         ) : <>
         <label className="field">
           <span>Server URL</span>
@@ -572,6 +593,62 @@ function VieNeuRuntimeCard({
           <button type="button" onClick={onRestart} disabled={busy || phase === "starting"}>
             {phase === "starting" ? "Starting VieNeu-TTS" : status?.running ? "Restart VieNeu-TTS" : "Start VieNeu-TTS"}
           </button>
+        ) : (
+          <button type="button" className="primary" onClick={onInstall} disabled={busy || phase === "unsupported"}>
+            {busy ? "Preparing setup" : actionLabel}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function HyMtModelCard({
+  status,
+  progress,
+  busy,
+  onInstall,
+  onCancel,
+}: {
+  status: HyMtModelStatus | null;
+  progress: HyMtModelProgress | null;
+  busy: boolean;
+  onInstall: () => void;
+  onCancel: () => void;
+}) {
+  const phase = progress?.phase ?? status?.phase ?? "not_installed";
+  const active = phase === "downloading" || phase === "verifying";
+  const installed = Boolean(status?.modelInstalled);
+  const downloadedBytes = progress?.downloadedBytes ?? (installed ? status?.totalBytes ?? 0 : 0);
+  const totalBytes = progress?.totalBytes ?? status?.totalBytes ?? 0;
+  const percent = progress?.percent ??
+    (totalBytes > 0 ? Math.round((downloadedBytes / totalBytes) * 100) : 0);
+  const message = progress?.message ?? status?.message ?? "Checking the managed Hy-MT2 model…";
+  const actionLabel = phase === "paused"
+    ? "Resume download"
+    : phase === "error" ? "Retry install" : "Install Hy-MT2 model";
+
+  return (
+    <div className={`vieneu-runtime-card ${installed ? "installed" : ""}`} aria-live="polite">
+      <div className="vieneu-runtime-heading">
+        <div>
+          <strong>Managed Hy-MT2 1.8B</strong>
+          <span>Download the pinned, SHA-256 verified offline translation model (~3.8 GiB).</span>
+        </div>
+        <span className="vieneu-runtime-badge">{phase.replace(/_/g, " ")}</span>
+      </div>
+      <p>{message}</p>
+      {(active || phase === "paused" || installed) && totalBytes ? (
+        <div className="vieneu-runtime-progress">
+          <progress max={100} value={percent} aria-label="Hy-MT2 model setup progress" />
+          <span>{percent}% · {formatMib(downloadedBytes)} / {formatMib(totalBytes)}</span>
+        </div>
+      ) : null}
+      <div className="button-row vieneu-runtime-actions">
+        {active ? (
+          <button type="button" onClick={onCancel}>Pause download</button>
+        ) : installed ? (
+          <span className="vieneu-runtime-badge">verified · {status?.modelRevision.slice(0, 7) ?? ""}</span>
         ) : (
           <button type="button" className="primary" onClick={onInstall} disabled={busy || phase === "unsupported"}>
             {busy ? "Preparing setup" : actionLabel}

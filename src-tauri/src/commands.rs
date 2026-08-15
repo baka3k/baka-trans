@@ -2,16 +2,16 @@ use crate::audio;
 use crate::error::{AppError, AppResult};
 use crate::models::{
     ApiKeyTestResult, AppStatus, AudioDevices, AudioOutputChannel, ExportRequest,
-    ExportedTranscript, LlmProviderProfile, LlmProviderProfileDraft, LlmProviderTestResult,
-    LocalTranslationConfig, LocalTranslationConfigDraft, LocalTranslationTestResult,
-    LocalTtsProvider, LocalVoice, LookHelpConfig, LookHelpStatus, ManualBoundaryRequest,
-    MeetingSummaryConfig, MeetingSummaryResult, MeetingSummaryStatus, MeetingSummaryStatusEvent,
-    OverlayConfig, OverlayGeometry, OverlayStatus, SessionConfig, TranscriptItem,
-    TranslationCredentialStatus, TranslationEngineTestResult, TranslationProvider,
-    VieNeuRuntimeStatus, WhisperModelOption,
+    ExportedTranscript, HyMtModelStatus, LlmProviderProfile, LlmProviderProfileDraft,
+    LlmProviderTestResult, LocalTranslationConfig, LocalTranslationConfigDraft,
+    LocalTranslationTestResult, LocalTtsProvider, LocalVoice, LookHelpConfig, LookHelpStatus,
+    ManualBoundaryRequest, MeetingSummaryConfig, MeetingSummaryResult, MeetingSummaryStatus,
+    MeetingSummaryStatusEvent, OverlayConfig, OverlayGeometry, OverlayStatus, SessionConfig,
+    TranscriptItem, TranslationCredentialStatus, TranslationEngineTestResult,
+    TranslationProvider, VieNeuRuntimeStatus, WhisperModelOption,
 };
 use crate::session::AppState;
-use crate::{ai, llm, local_translation, look_help, overlay, security, summary_agent, tts, vieneu};
+use crate::{ai, hy_mt, llm, local_translation, look_help, overlay, security, summary_agent, tts, vieneu};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Duration;
@@ -205,6 +205,27 @@ pub async fn get_vieneu_runtime_status(
     manager: State<'_, vieneu::VieNeuManager>,
 ) -> AppResult<VieNeuRuntimeStatus> {
     manager.status(&app).await
+}
+
+#[tauri::command]
+pub async fn get_hy_mt_model_status(
+    app: AppHandle,
+    manager: State<'_, hy_mt::HyMtManager>,
+) -> AppResult<HyMtModelStatus> {
+    manager.status(&app).await
+}
+
+#[tauri::command]
+pub async fn install_hy_mt_model(
+    app: AppHandle,
+    manager: State<'_, hy_mt::HyMtManager>,
+) -> AppResult<HyMtModelStatus> {
+    manager.install(app).await
+}
+
+#[tauri::command]
+pub fn cancel_hy_mt_model_install(manager: State<'_, hy_mt::HyMtManager>) {
+    manager.cancel_install();
 }
 
 #[tauri::command]

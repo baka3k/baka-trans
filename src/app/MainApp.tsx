@@ -66,6 +66,9 @@ import {
   installVieNeuRuntime,
   cancelVieNeuRuntimeInstall,
   restartVieNeuRuntime,
+  getHyMtModelStatus,
+  installHyMtModel,
+  cancelHyMtModelInstall,
   resumeSession,
   runMeetingSummaryAgent,
   saveLlmProfile,
@@ -126,6 +129,8 @@ import type {
   LocalTranslationTestResult,
   TranslationEngineTestResult,
   LocalVoice,
+  HyMtModelProgress,
+  HyMtModelStatus,
   VieNeuRuntimeProgress,
   VieNeuRuntimeStatus,
   ManualBoundaryEvent,
@@ -369,6 +374,9 @@ export default function MainApp({
   const [vieneuRuntime, setVieNeuRuntime] = useState<VieNeuRuntimeStatus | null>(null);
   const [vieneuProgress, setVieNeuProgress] = useState<VieNeuRuntimeProgress | null>(null);
   const [vieneuBusy, setVieNeuBusy] = useState(false);
+  const [hyMtModel, setHyMtModel] = useState<HyMtModelStatus | null>(null);
+  const [hyMtProgress, setHyMtProgress] = useState<HyMtModelProgress | null>(null);
+  const [hyMtBusy, setHyMtBusy] = useState(false);
   const [localPipelineStage, setLocalPipelineStage] =
     useState<LocalPipelineStage>("listening");
   const conversationFeedRef = useRef<HTMLDivElement | null>(null);
@@ -661,6 +669,20 @@ export default function MainApp({
             : current,
         );
       }),
+      listen<HyMtModelProgress>("hy-mt-model-progress", (event) => {
+        setHyMtProgress(event.payload);
+        setHyMtModel((current) =>
+          current
+            ? {
+                ...current,
+                phase: event.payload.phase,
+                modelInstalled:
+                  event.payload.phase === "installed" ? true : current.modelInstalled,
+                message: event.payload.message,
+              }
+            : current,
+        );
+      }),
       listen<AppErrorPayload>("app-error", (event) => setError(event.payload)),
       listen<MeetingSummaryStatusEvent>("summary-agent-status", (event) => {
         setSummaryStatus(event.payload.message);
@@ -748,7 +770,7 @@ export default function MainApp({
   async function hydrate() {
     setBusy(true);
     try {
-      const [deviceList, appStatus, transcriptSnapshot, profiles, localConfig, models, runtime, whisperModelDir] =
+      const [deviceList, appStatus, transcriptSnapshot, profiles, localConfig, models, runtime, whisperModelDir, hyMtStatus] =
         await Promise.all([
         listAudioDevices(),
         getAppStatus(),
@@ -758,6 +780,7 @@ export default function MainApp({
         experience === "local" ? listWhisperModels() : Promise.resolve([]),
         experience === "local" ? getVieNeuRuntimeStatus() : Promise.resolve(null),
         experience === "local" ? safeGetWhisperModelDir() : Promise.resolve(""),
+        experience === "local" ? getHyMtModelStatus() : Promise.resolve(null),
       ]);
       let voices: LocalVoice[] = [];
       let voiceLoadError: AppErrorPayload | null = null;
@@ -793,6 +816,7 @@ export default function MainApp({
           : localDraft;
       setLocalVoices(voices);
       setVieNeuRuntime(runtime);
+      setHyMtModel(hyMtStatus);
       setWhisperModels(models);
       setSelectedWhisperModelId(
         models.find((model) => model.recommended)?.id ?? models[0]?.id ?? "",
@@ -1025,6 +1049,26 @@ export default function MainApp({
 
   async function cancelManagedVieNeu() {
     await cancelVieNeuRuntimeInstall().catch((cause) => setError(normalizeError(cause)));
+  }
+
+  async function installHyMt() {
+    if (hyMtBusy) return;
+    setHyMtBusy(true);
+    setError(null);
+    try {
+      const status = await installHyMtModel();
+      setHyMtModel(status);
+      setHyMtProgress(null);
+    } catch (cause) {
+      setError(normalizeError(cause));
+      setHyMtModel(await getHyMtModelStatus().catch(() => hyMtModel));
+    } finally {
+      setHyMtBusy(false);
+    }
+  }
+
+  async function cancelHyMtInstall() {
+    await cancelHyMtModelInstall().catch((cause) => setError(normalizeError(cause)));
   }
 
   async function restartManagedVieNeu() {
@@ -1942,6 +1986,9 @@ export default function MainApp({
               vieneuRuntime={vieneuRuntime}
               vieneuProgress={vieneuProgress}
               vieneuBusy={vieneuBusy}
+              hyMtModel={hyMtModel}
+              hyMtProgress={hyMtProgress}
+              hyMtBusy={hyMtBusy}
               previewDisabled={
                 !outputDeviceId || status !== "idle" || testingTone !== null || localMonitorActive
               }
@@ -1964,6 +2011,8 @@ export default function MainApp({
               onVieNeuInstall={() => void installManagedVieNeu()}
               onVieNeuCancel={() => void cancelManagedVieNeu()}
               onVieNeuRestart={() => void restartManagedVieNeu()}
+              onHyMtInstall={() => void installHyMt()}
+              onHyMtCancel={() => void cancelHyMtInstall()}
             />
 
             <div className="panel summary-config-panel">

@@ -414,7 +414,7 @@ struct DownloadGuard<'a> {
 /// Resolve the shared user-side model cache directory used for all downloaded
 /// ML artifacts (Whisper, VieNeu, future Hy-MT2). Lives outside the
 /// per-app Application Support folder so models survive reinstalls.
-fn model_cache_dir() -> AppResult<PathBuf> {
+pub(crate) fn model_cache_dir() -> AppResult<PathBuf> {
     #[cfg(target_os = "windows")]
     let home = std::env::var_os("USERPROFILE").ok_or_else(|| {
         AppError::new(

@@ -785,6 +785,41 @@ pub struct VieNeuRuntimeProgress {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HyMtModelPhase {
+    #[default]
+    NotInstalled,
+    Paused,
+    Downloading,
+    Verifying,
+    Installed,
+    Error,
+    Unsupported,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct HyMtModelStatus {
+    pub phase: HyMtModelPhase,
+    pub runtime_available: bool,
+    pub model_installed: bool,
+    pub model_id: String,
+    pub model_revision: String,
+    pub total_bytes: u64,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct HyMtModelProgress {
+    pub phase: HyMtModelPhase,
+    pub downloaded_bytes: u64,
+    pub total_bytes: u64,
+    pub percent: Option<u8>,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalVoice {

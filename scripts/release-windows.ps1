@@ -28,6 +28,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 if ($Action -eq "build") {
   & (Join-Path $PSScriptRoot "build-vieneu-sidecar.ps1")
+  & (Join-Path $PSScriptRoot "build-hy-mt-sidecar.ps1")
   npm run tauri -- build --bundles nsis
   $Bundle = Join-Path $Root "src-tauri/target/release/bundle/nsis"
   if (-not (Test-Path $Bundle)) {

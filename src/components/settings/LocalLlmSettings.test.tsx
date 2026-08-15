@@ -309,4 +309,98 @@ describe("LocalLlmSettings", () => {
     expect(screen.getByRole("button", { name: "Downloading 50%" })).toBeDisabled();
     expect(screen.getByRole("progressbar", { name: "Downloading ggml-small-q5_1.bin" })).toHaveValue(50);
   });
+
+  it("offers a managed Hy-MT2 download with progress and pause", async () => {
+    const user = userEvent.setup();
+    const onInstall = vi.fn();
+    const onCancel = vi.fn();
+    const baseProps = {
+      draft: { ...defaultLocalTranslationConfig, voiceId: "vi-voice" },
+      dirty: false,
+      saving: false,
+      testing: false,
+      testResult: null,
+      onChange: () => undefined,
+      onSave: () => undefined,
+      onTest: () => undefined,
+      voices: [],
+      previewing: false,
+      onPreview: () => undefined,
+      whisperModels,
+      selectedWhisperModelId: "small-q5_1",
+      whisperDownload: null,
+      whisperDownloading: false,
+      onWhisperModelSelect: () => undefined,
+      onWhisperDownload: () => undefined,
+      onHyMtInstall: onInstall,
+      onHyMtCancel: onCancel,
+    };
+    const { rerender } = render(
+      <LocalLlmSettings
+        {...baseProps}
+        hyMtModel={{
+          phase: "not_installed",
+          runtimeAvailable: true,
+          modelInstalled: false,
+          modelId: "tencent/Hy-MT2-1.8B",
+          modelRevision: "9a341cd1b679d3efd23b46e847b01745a71ed792",
+          totalBytes: 4086796766,
+          message: "Install Hy-MT2 to download the pinned offline translation model.",
+        }}
+        hyMtProgress={null}
+        hyMtBusy={false}
+      />,
+    );
+
+    expect(screen.getByText("Managed Hy-MT2 1.8B")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Install Hy-MT2 model" }));
+    expect(onInstall).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <LocalLlmSettings
+        {...baseProps}
+        hyMtModel={{
+          phase: "not_installed",
+          runtimeAvailable: true,
+          modelInstalled: false,
+          modelId: "tencent/Hy-MT2-1.8B",
+          modelRevision: "9a341cd1b679d3efd23b46e847b01745a71ed792",
+          totalBytes: 4086796766,
+          message: "Downloading the verified Hy-MT2 model…",
+        }}
+        hyMtProgress={{
+          phase: "downloading",
+          downloadedBytes: 2043398383,
+          totalBytes: 4086796766,
+          percent: 50,
+          message: "Downloading the verified Hy-MT2 model…",
+        }}
+        hyMtBusy
+      />,
+    );
+    expect(screen.getByRole("progressbar", { name: "Hy-MT2 model setup progress" })).toHaveValue(50);
+    await user.click(screen.getByRole("button", { name: "Pause download" }));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <LocalLlmSettings
+        {...baseProps}
+        hyMtModel={{
+          phase: "installed",
+          runtimeAvailable: true,
+          modelInstalled: true,
+          modelId: "tencent/Hy-MT2-1.8B",
+          modelRevision: "9a341cd1b679d3efd23b46e847b01745a71ed792",
+          totalBytes: 4086796766,
+          message: "Hy-MT2 model is installed and verified.",
+        }}
+        hyMtProgress={null}
+        hyMtBusy={false}
+      />,
+    );
+    expect(screen.getByText(/verified · 9a341cd/)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Install Hy-MT2 model" }),
+    ).not.toBeInTheDocument();
+  });
 });

@@ -26,7 +26,8 @@
   "bundle": {
     "active": true,
     "resources": {
-      "../sidecars/vieneu-tts/bundle/": "vieneu-bridge/"
+      "../sidecars/vieneu-tts/bundle/": "vieneu-bridge/",
+      "../sidecars/hy-mt/bundle/": "hy-mt/"
     },
     "icon": [
       "icons/32x32.png",

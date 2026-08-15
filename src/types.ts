@@ -252,6 +252,33 @@ export interface VieNeuRuntimeProgress {
   message: string;
 }
 
+export type HyMtModelPhase =
+  | "not_installed"
+  | "paused"
+  | "downloading"
+  | "verifying"
+  | "installed"
+  | "error"
+  | "unsupported";
+
+export interface HyMtModelStatus {
+  phase: HyMtModelPhase;
+  runtimeAvailable: boolean;
+  modelInstalled: boolean;
+  modelId: string;
+  modelRevision: string;
+  totalBytes: number;
+  message: string;
+}
+
+export interface HyMtModelProgress {
+  phase: HyMtModelPhase;
+  downloadedBytes: number;
+  totalBytes: number;
+  percent?: number;
+  message: string;
+}
+
 export type LocalTranslationConfigDraft = Omit<LocalTranslationConfig, "schemaVersion">;
 
 export interface LocalTranslationTestResult {

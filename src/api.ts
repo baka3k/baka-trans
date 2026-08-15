@@ -5,6 +5,7 @@ import type {
   AudioOutputChannel,
   AudioDevices,
   ExportedTranscript,
+  HyMtModelStatus,
   LookHelpConfig,
   LookHelpStatus,
   LocalTranslationConfig,
@@ -141,6 +142,18 @@ export function cancelVieNeuRuntimeInstall() {
 
 export function restartVieNeuRuntime() {
   return invoke<VieNeuRuntimeStatus>("restart_vieneu_runtime");
+}
+
+export function getHyMtModelStatus() {
+  return invoke<HyMtModelStatus>("get_hy_mt_model_status");
+}
+
+export function installHyMtModel() {
+  return invoke<HyMtModelStatus>("install_hy_mt_model");
+}
+
+export function cancelHyMtModelInstall() {
+  return invoke<void>("cancel_hy_mt_model_install");
 }
 
 export function previewLocalTts(
