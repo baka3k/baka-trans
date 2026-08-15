@@ -23,11 +23,20 @@ def test_translate_request_is_bounded_and_normalized() -> None:
     assert validate_translate(translate()) == {"id": "request-1", "text": "確認してください。", "maxNewTokens": 32}
 
 
+def test_translate_request_accepts_english_source() -> None:
+    assert validate_translate(translate(sourceLanguage="en", text="Good morning.")) == {
+        "id": "request-1",
+        "text": "Good morning.",
+        "maxNewTokens": 32,
+    }
+
+
 @pytest.mark.parametrize(
     ("payload", "code"),
     [
         (translate(protocolVersion=2), "protocol_mismatch"),
-        (translate(sourceLanguage="en"), "unsupported_language"),
+        (translate(targetLanguage="en"), "unsupported_language"),
+        (translate(sourceLanguage=""), "unsupported_language"),
         (translate(text=""), "invalid_text"),
         (translate(maxNewTokens=0), "invalid_token_limit"),
         (translate(id=""), "invalid_id"),

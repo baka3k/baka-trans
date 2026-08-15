@@ -65,8 +65,10 @@ def validate_translate(message: dict[str, Any]) -> dict[str, Any]:
     target = message.get("targetLanguage")
     text = message.get("text")
     max_new_tokens = message.get("maxNewTokens", MAX_NEW_TOKENS)
-    if source != "ja" or target != "vi":
-        raise ProtocolError("unsupported_language", "Only Japanese-to-Vietnamese translation is supported.")
+    if not isinstance(source, str) or not source:
+        raise ProtocolError("unsupported_language", "Source language must be a non-empty language code.")
+    if target != "vi":
+        raise ProtocolError("unsupported_language", "Only Vietnamese target language is currently supported.")
     if not isinstance(text, str) or not text.strip():
         raise ProtocolError("invalid_text", "Translation text must be non-empty.")
     if len(text.strip()) > MAX_INPUT_CHARS:

@@ -38,7 +38,7 @@ uv run --frozen python server.py serve --model-root /absolute/app-data/hy-mt --d
 ```
 
 `serve` expects one JSON object per input line. It first emits `ready`, accepts
-only `translate` (`ja` → `vi`) and `cancel`, processes one translation at a
+only `translate` (any source → `vi`) and `cancel`, processes one translation at a
 time, and exits when the parent closes stdin. Primary protocol errors are
 stable and do not include text, tokens, tracebacks, or absolute paths.
 
