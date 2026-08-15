@@ -227,6 +227,7 @@ const summaryPromptPresetOptions = meetingSummaryPromptPresets.map(({ id, label 
   label,
 }));
 const routingStorageKey = "baka-trans-routing-profile-v1";
+const languageStorageKeyPrefix = "baka-trans-language-pref-v1";
 const activeSessionStatuses: SessionStatus[] = ["listening", "translating", "speaking"];
 const deviceAutoRefreshIntervalMs = 5000;
 const isWindows = navigator.userAgent.toLowerCase().includes("windows");
@@ -306,9 +307,13 @@ export default function MainApp({
       experience === "local" ? "local_whisper" : "google_live_translate",
     );
   const [sourceLanguage, setSourceLanguage] = useState<Language>(
-    experience === "local" ? "ja" : "auto",
+    () =>
+      readLanguagePreference(experience)?.source ??
+      (experience === "local" ? "ja" : "auto"),
   );
-  const [targetLanguage, setTargetLanguage] = useState<Language>("vi");
+  const [targetLanguage, setTargetLanguage] = useState<Language>(
+    () => readLanguagePreference(experience)?.target ?? "vi",
+  );
   const [inputDeviceId, setInputDeviceId] = useState("");
   const [outputDeviceId, setOutputDeviceId] = useState("");
   const [translationOutputChannel, setTranslationOutputChannel] =
@@ -705,6 +710,19 @@ export default function MainApp({
       setTargetLanguage(targetLanguageOptions[0]?.value ?? "vi");
     }
   }, [targetLanguage, targetLanguageOptions]);
+
+  useEffect(() => {
+    if (!sourceOptions.some((option) => option.value === sourceLanguage)) {
+      setSourceLanguage(sourceOptions[0]?.value ?? "auto");
+    }
+  }, [sourceLanguage, sourceOptions]);
+
+  useEffect(() => {
+    persistLanguagePreference(experience, {
+      source: sourceLanguage,
+      target: targetLanguage,
+    });
+  }, [experience, sourceLanguage, targetLanguage]);
 
   useEffect(() => {
     if (translationProvider !== "local_whisper") {
@@ -3627,6 +3645,32 @@ function readRoutingProfile(): RoutingProfile | null {
 
 function persistRoutingProfile(profile: RoutingProfile) {
   window.localStorage.setItem(routingStorageKey, JSON.stringify(profile));
+}
+
+function languageStorageKey(experience: "cloud" | "local") {
+  return `${languageStorageKeyPrefix}-${experience}`;
+}
+
+function readLanguagePreference(
+  experience: "cloud" | "local",
+): { source?: Language; target?: Language } | null {
+  try {
+    const raw = window.localStorage.getItem(languageStorageKey(experience));
+    return raw ? (JSON.parse(raw) as { source?: Language; target?: Language }) : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistLanguagePreference(
+  experience: "cloud" | "local",
+  preference: { source: Language; target: Language },
+) {
+  try {
+    window.localStorage.setItem(languageStorageKey(experience), JSON.stringify(preference));
+  } catch {
+    // ignore storage failures (private mode / quota)
+  }
 }
 
 function isStereoCapable(device?: AudioDeviceInfo) {
