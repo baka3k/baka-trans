@@ -826,17 +826,40 @@ fn resample_linear(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
         return samples.to_vec();
     }
 
+    let source = if from_rate > to_rate {
+        low_pass_for_decimation(samples, from_rate, to_rate)
+    } else {
+        samples.to_vec()
+    };
     let ratio = from_rate as f32 / to_rate as f32;
-    let output_len = ((samples.len() as f32) / ratio).ceil() as usize;
+    let output_len = ((source.len() as f32) / ratio).ceil() as usize;
     (0..output_len)
         .map(|index| {
             let src_pos = index as f32 * ratio;
             let left = src_pos.floor() as usize;
-            let right = (left + 1).min(samples.len() - 1);
+            let right = (left + 1).min(source.len() - 1);
             let frac = src_pos - left as f32;
-            samples[left] * (1.0 - frac) + samples[right] * frac
+            source[left] * (1.0 - frac) + source[right] * frac
         })
         .collect()
+}
+
+fn low_pass_for_decimation(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
+    let window = (((from_rate as f32) / (to_rate as f32)).round() as usize).max(2);
+    moving_average(&moving_average(samples, window), window)
+}
+
+fn moving_average(samples: &[f32], window: usize) -> Vec<f32> {
+    let mut output = Vec::with_capacity(samples.len());
+    let mut sum = 0.0_f32;
+    for (index, sample) in samples.iter().enumerate() {
+        sum += *sample;
+        if index >= window {
+            sum -= samples[index - window];
+        }
+        output.push(sum / window as f32);
+    }
+    output
 }
 
 fn f32_to_pcm16(samples: &[f32]) -> Vec<i16> {
@@ -1086,6 +1109,26 @@ mod tests {
         let input = vec![0.0; 48_000];
         let output = resample_linear(&input, 48_000, 24_000);
         assert_eq!(output.len(), 24_000);
+    }
+
+    #[test]
+    fn downsampling_attenuates_aliasing_frequencies() {
+        let sample_count = 48_000;
+        let low_tone: Vec<f32> = (0..sample_count)
+            .map(|index| (2.0 * PI * 1_000.0 * index as f32 / 48_000.0).sin())
+            .collect();
+        let high_tone: Vec<f32> = (0..sample_count)
+            .map(|index| (2.0 * PI * 12_000.0 * index as f32 / 48_000.0).sin())
+            .collect();
+
+        let low_output = resample_linear(&low_tone, 48_000, 16_000);
+        let high_output = resample_linear(&high_tone, 48_000, 16_000);
+
+        assert!(rms_f32(&low_output) > rms_f32(&high_output) * 2.0);
+    }
+
+    fn rms_f32(samples: &[f32]) -> f32 {
+        (samples.iter().map(|sample| sample * sample).sum::<f32>() / samples.len() as f32).sqrt()
     }
 
     #[test]

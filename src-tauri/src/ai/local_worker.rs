@@ -952,6 +952,18 @@ fn push_sentence(sentences: &mut Vec<String>, candidate: &str) {
     }
 }
 
+const WHISPER_MEL_HOP_SAMPLES: usize = 160;
+const WHISPER_MIN_AUDIO_CTX_FRAMES: i32 = 32;
+const WHISPER_MAX_AUDIO_CTX_FRAMES: i32 = 1_500;
+
+fn utterance_mel_frames(sample_count: usize) -> i32 {
+    let frames = sample_count.div_ceil(WHISPER_MEL_HOP_SAMPLES);
+    if frames > WHISPER_MAX_AUDIO_CTX_FRAMES as usize {
+        return 0;
+    }
+    frames.max(WHISPER_MIN_AUDIO_CTX_FRAMES as usize) as i32
+}
+
 fn transcribe(
     context: &WhisperContext,
     samples: Vec<i16>,
@@ -987,7 +999,12 @@ fn transcribe(
     params.set_print_realtime(false);
     params.set_print_special(false);
     params.set_print_timestamps(false);
+    params.set_suppress_nst(true);
     params.set_n_threads(threads as i32);
+    let audio_ctx = utterance_mel_frames(samples.len());
+    if audio_ctx > 0 {
+        params.set_audio_ctx(audio_ctx);
+    }
     let abort_callback: Box<dyn FnMut() -> bool> =
         Box::new(move || cancellation.load(Ordering::SeqCst));
     params.set_abort_callback_safe::<Option<Box<dyn FnMut() -> bool>>, Box<dyn FnMut() -> bool>>(
@@ -1505,6 +1522,19 @@ mod tests {
         assert_eq!(chunks.len(), 3);
         assert_eq!(chunks[0].chars().count(), MAX_SENTENCE_CHARS);
         assert_eq!(chunks.concat(), atom);
+    }
+
+    #[test]
+    fn audio_ctx_tracks_utterance_length() {
+        assert_eq!(utterance_mel_frames(0), WHISPER_MIN_AUDIO_CTX_FRAMES);
+        assert_eq!(utterance_mel_frames(1_600), WHISPER_MIN_AUDIO_CTX_FRAMES);
+        assert_eq!(utterance_mel_frames(160 * 100), 100);
+        assert_eq!(utterance_mel_frames(160 * 100 + 1), 101);
+        assert_eq!(
+            utterance_mel_frames(160 * WHISPER_MAX_AUDIO_CTX_FRAMES as usize),
+            WHISPER_MAX_AUDIO_CTX_FRAMES
+        );
+        assert_eq!(utterance_mel_frames(480_000), 0);
     }
 
     #[tokio::test]
