@@ -304,8 +304,8 @@ fn spawn_translation_worker(
                 break;
             }
 
-            let source_text = match transcription {
-                Ok(text) => text,
+            let whisper_segments = match transcription {
+                Ok(segments) => segments,
                 Err(error) => {
                     emit_snapshot(
                         &app,
@@ -335,7 +335,10 @@ fn spawn_translation_worker(
                 break;
             }
 
-            let sentences = split_sentences(&source_text);
+            let sentences: Vec<String> = whisper_segments
+                .iter()
+                .flat_map(|segment| split_sentences(segment))
+                .collect();
             let sentence_count = sentences.len();
             let pending_items: Vec<TranscriptItem> = sentences
                 .into_iter()
@@ -702,6 +705,8 @@ fn sentence_item_id(utterance_id: &str, index: usize, sentence_count: usize) -> 
 }
 
 const SENTENCE_CLOSERS: &[char] = &['"', '\'', ')', ']', '”', '’', '』', '」'];
+const SENTENCE_PAUSE_DELIMITERS: &[char] = &[',', '、', '，', ';', '；'];
+const MAX_SENTENCE_CHARS: usize = 60;
 
 fn split_sentences(text: &str) -> Vec<String> {
     let normalized: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -735,7 +740,92 @@ fn split_sentences(text: &str) -> Vec<String> {
         current.clear();
     }
     push_sentence(&mut sentences, &current);
+
     sentences
+        .into_iter()
+        .flat_map(|sentence| split_oversized_sentence(&sentence, MAX_SENTENCE_CHARS))
+        .collect()
+}
+
+fn split_oversized_sentence(sentence: &str, max_chars: usize) -> Vec<String> {
+    if sentence.chars().count() <= max_chars {
+        return vec![sentence.to_string()];
+    }
+
+    let mut chunks: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut current_len = 0_usize;
+    for atom in split_at_pause_delimiters(sentence) {
+        let atom_len = atom.chars().count();
+        if atom_len > max_chars {
+            push_sentence(&mut chunks, &current);
+            current.clear();
+            current_len = 0;
+            chunks.extend(split_long_atom(&atom, max_chars));
+            continue;
+        }
+        if current_len > 0 && current_len + atom_len > max_chars {
+            push_sentence(&mut chunks, &current);
+            current.clear();
+            current_len = 0;
+        }
+        current.push_str(&atom);
+        current_len += atom_len;
+    }
+    push_sentence(&mut chunks, &current);
+    chunks
+}
+
+fn split_at_pause_delimiters(sentence: &str) -> Vec<String> {
+    let mut atoms: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for ch in sentence.chars() {
+        current.push(ch);
+        if SENTENCE_PAUSE_DELIMITERS.contains(&ch) {
+            atoms.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() {
+        atoms.push(current);
+    }
+    atoms
+}
+
+fn split_long_atom(atom: &str, max_chars: usize) -> Vec<String> {
+    let words: Vec<&str> = atom.split_whitespace().collect();
+    if words.len() > 1 {
+        let mut chunks: Vec<String> = Vec::new();
+        let mut current = String::new();
+        for word in words {
+            if !current.is_empty() && current.chars().count() + 1 + word.chars().count() > max_chars
+            {
+                push_sentence(&mut chunks, &current);
+                current.clear();
+            }
+            if !current.is_empty() {
+                current.push(' ');
+            }
+            current.push_str(word);
+        }
+        push_sentence(&mut chunks, &current);
+        return chunks;
+    }
+    hard_split_chars(atom, max_chars)
+}
+
+fn hard_split_chars(text: &str, max_chars: usize) -> Vec<String> {
+    let mut chunks: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for ch in text.chars() {
+        current.push(ch);
+        if current.chars().count() >= max_chars {
+            chunks.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+    chunks
 }
 
 fn is_sentence_terminator(ch: char) -> bool {
@@ -762,7 +852,7 @@ fn transcribe(
     threads: u32,
     language: Option<&str>,
     cancellation: Arc<AtomicBool>,
-) -> AppResult<String> {
+) -> AppResult<Vec<String>> {
     if samples.is_empty() {
         return Err(AppError::new(
             "local_whisper_empty_audio",
@@ -803,7 +893,7 @@ fn transcribe(
             format!("Whisper inference failed: {err}"),
         )
     })?;
-    let text = state
+    let segments = state
         .as_iter()
         .map(|segment| {
             segment
@@ -817,17 +907,17 @@ fn transcribe(
                 })
         })
         .collect::<AppResult<Vec<_>>>()?
-        .join(" ")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    if text.is_empty() {
+        .into_iter()
+        .map(|segment| segment.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+    if segments.is_empty() {
         return Err(AppError::new(
             "local_whisper_no_speech",
             "Whisper did not detect speech in this utterance.",
         ));
     }
-    Ok(text)
+    Ok(segments)
 }
 
 struct PcmSegmenter {
@@ -1259,6 +1349,56 @@ mod tests {
         assert_eq!(sentence_item_id("u1", 0, 1), "u1");
         assert_eq!(sentence_item_id("u1", 0, 3), "u1:0");
         assert_eq!(sentence_item_id("u1", 2, 3), "u1:2");
+    }
+
+    #[test]
+    fn unpunctuated_latin_text_chunks_at_word_boundaries() {
+        let text = vec!["word"; 30].join(" ");
+        let chunks = split_sentences(&text);
+        assert!(chunks.len() > 1);
+        assert!(chunks
+            .iter()
+            .all(|chunk| chunk.chars().count() <= MAX_SENTENCE_CHARS));
+        assert_eq!(chunks.join(" "), text);
+    }
+
+    #[test]
+    fn unpunctuated_cjk_text_chunks_by_length() {
+        let text: String = "あいうえお".repeat(40);
+        let chunks = split_sentences(&text);
+        assert_eq!(chunks.len(), 4);
+        assert!(chunks
+            .iter()
+            .all(|chunk| chunk.chars().count() <= MAX_SENTENCE_CHARS));
+        assert_eq!(chunks.concat(), text);
+    }
+
+    #[test]
+    fn oversized_sentence_splits_at_pause_delimiters() {
+        let text = "alpha bravo charlie, delta echo foxtrot, golf hotel india, juliet kilo lima, mike november oscar";
+        let chunks = split_sentences(text);
+        assert!(chunks.len() > 1);
+        assert!(chunks
+            .iter()
+            .all(|chunk| chunk.chars().count() <= MAX_SENTENCE_CHARS));
+        assert!(chunks.iter().any(|chunk| chunk.ends_with(',')));
+    }
+
+    #[test]
+    fn short_comma_sentence_stays_intact() {
+        assert_eq!(
+            split_sentences("Yes, no, maybe."),
+            vec!["Yes, no, maybe.".to_string()]
+        );
+    }
+
+    #[test]
+    fn long_atom_without_delimiters_or_spaces_hard_splits() {
+        let atom = "x".repeat(130);
+        let chunks = split_oversized_sentence(&atom, MAX_SENTENCE_CHARS);
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks[0].chars().count(), MAX_SENTENCE_CHARS);
+        assert_eq!(chunks.concat(), atom);
     }
 
     #[tokio::test]
