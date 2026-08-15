@@ -1,15 +1,18 @@
-# HY-MT sidecar
+# HY-MT2 sidecar
 
-This project contains the isolated Phase 09 POC and the Phase 10 managed
-sidecar for `tencent/Hy-MT2-1.8B`. The desktop application owns the managed
-model root, child process, installation, and shutdown. Users need no Python,
-terminal, Ollama, or global Hugging Face cache for the HY-MT path.
+This project contains the isolated Phase 09 POC and the Phase 10/16.1 managed
+sidecar for `tencent/Hy-MT2-1.8B` at revision
+`9a341cd1b679d3efd23b46e847b01745a71ed792`. The desktop application owns the
+managed model root, child process, installation, and shutdown. Users need no
+Python, terminal, Ollama, or global Hugging Face cache for the HY-MT2 path.
 
 The sidecar is not a network service. In serve mode it communicates only with
 its parent over inherited stdin/stdout using versioned NDJSON, has no listening
-port, forces local-only loading, rejects Hub credentials, and reserves stdout
-for protocol frames. Ollama remains the product default until the later engine
-selection and pipeline phases explicitly opt into HY-MT.
+port, forces local-only loading with `trust_remote_code=False`, rejects Hub
+credentials, and reserves stdout for protocol frames. The ready message
+declares model ID, revision, protocol version, runtime version, device, dtype,
+and `trustRemoteCode: false` so the parent can verify exact identity before
+sending any translation request.
 
 ## Quick start
 

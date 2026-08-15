@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from .constants import MODEL_ARTIFACTS, MODEL_ID, MODEL_REVISION, RUNTIME_VERSION, TOTAL_MODEL_BYTES
+from .constants import MODEL_ARTIFACTS, MODEL_ID, MODEL_REVISION, RUNTIME_VERSION, TOTAL_MODEL_BYTES, TRUST_REMOTE_CODE
 
 MANIFEST_NAME = "install-manifest.json"
 ACTIVE_NAME = "active"
@@ -122,6 +122,7 @@ def _manifest() -> dict[str, Any]:
         "modelId": MODEL_ID,
         "revision": MODEL_REVISION,
         "runtimeVersion": RUNTIME_VERSION,
+        "trustRemoteCode": TRUST_REMOTE_CODE,
         "verifiedAt": int(time.time()),
         "totalBytes": TOTAL_MODEL_BYTES,
         "artifacts": [asdict(artifact) for artifact in ARTIFACTS],

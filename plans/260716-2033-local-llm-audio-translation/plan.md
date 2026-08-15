@@ -230,7 +230,11 @@ CPAL capture 16 kHz
 | 13 | [phase-13-hy-mt-pipeline-integration.md](phase-13-hy-mt-pipeline-integration.md) | blocked by 11-12 | Whisper → selected engine → transcript/TTS integration, cancellation, fallback, and regressions |
 | 14 | [phase-14-hy-mt-macos-packaging.md](phase-14-hy-mt-macos-packaging.md) | blocked by 13 | macOS arm64 sidecar build, nested signing/notarization, offline and hardware release evidence |
 | 15 | [phase-15-hy-mt-windows-packaging.md](phase-15-hy-mt-windows-packaging.md) | blocked by 13 | Windows same-platform build, CPU/CUDA capability matrix, installer/Defender and hardware evidence |
-| 16 | [phase-16-hy-mt2-openai-compatible-migration.md](phase-16-hy-mt2-openai-compatible-migration.md) | in progress | Remove Ollama, adopt pinned Hy-MT2 offline runtime, and add explicit OpenAI-compatible translation settings |
+| 16 | [phase-16-hy-mt2-openai-compatible-migration.md](phase-16-hy-mt2-openai-compatible-migration.md) | planned umbrella | Controlled Ollama retirement and dual-engine migration |
+| 16.1 | [phase-16-01-hy-mt2-gate-and-sidecar.md](phase-16-01-hy-mt2-gate-and-sidecar.md) | in progress | Hy-MT2 pins, native-runtime audit, and offline gate evidence |
+| 16.2 | [phase-16-02-engine-config-and-api-client.md](phase-16-02-engine-config-and-api-client.md) | blocked by 16.1 | Schema-v3 migration, keychain secrets, and secure OpenAI-compatible client |
+| 16.3 | [phase-16-03-rust-dispatcher-and-session.md](phase-16-03-rust-dispatcher-and-session.md) | blocked by 16.1-16.2 | Managed sidecar process and ordered local-worker dispatcher |
+| 16.4 | [phase-16-04-settings-and-cutover.md](phase-16-04-settings-and-cutover.md) | blocked by 16.2-16.3 | Accessible settings UX, retirement of Ollama, and regression/cutover evidence |
 
 ## Dependencies and Cross-Plan Coordination
 

@@ -1,5 +1,14 @@
 # Phase 16: Hy-MT2 Offline and OpenAI-Compatible Translation Migration
 
+## Execution Breakdown
+
+This umbrella is implemented in dependency order:
+
+1. [16.1 Hy-MT2 Gate and Sidecar](phase-16-01-hy-mt2-gate-and-sidecar.md)
+2. [16.2 Engine Config and API Client](phase-16-02-engine-config-and-api-client.md)
+3. [16.3 Rust Dispatcher and Session](phase-16-03-rust-dispatcher-and-session.md)
+4. [16.4 Settings and Cutover](phase-16-04-settings-and-cutover.md)
+
 ## Context
 
 The product owner has removed Ollama from the intended product direction. Local

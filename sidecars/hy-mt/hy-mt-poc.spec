@@ -15,7 +15,19 @@ a = Analysis(
         + transformers_hidden
         + safetensors_hidden
         + collect_submodules("transformers.models.hunyuan_v1_dense")
-        + ["hy_mt_poc.lifecycle", "hy_mt_poc.protocol", "hy_mt_poc.runner", "hy_mt_poc.server"]
+        + [
+            "hy_mt_poc.benchmark",
+            "hy_mt_poc.constants",
+            "hy_mt_poc.decoding",
+            "hy_mt_poc.device",
+            "hy_mt_poc.download",
+            "hy_mt_poc.evidence",
+            "hy_mt_poc.lifecycle",
+            "hy_mt_poc.prompting",
+            "hy_mt_poc.protocol",
+            "hy_mt_poc.runner",
+            "hy_mt_poc.server",
+        ]
     ),
     hookspath=[],
     hooksconfig={},

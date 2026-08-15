@@ -11,7 +11,7 @@ import threading
 from pathlib import Path
 from typing import Any, BinaryIO, TextIO
 
-from .constants import DEFAULT_TRANSLATE_TIMEOUT_SECONDS, MODEL_ID, MODEL_REVISION, PROTOCOL_VERSION, RUNTIME_VERSION
+from .constants import DEFAULT_TRANSLATE_TIMEOUT_SECONDS, MODEL_ID, MODEL_REVISION, PROTOCOL_VERSION, RUNTIME_IDENTITY, RUNTIME_VERSION, TRUST_REMOTE_CODE
 from .lifecycle import LifecycleError, active_path, install, status, validate_model
 from .protocol import ProtocolError, emit, parse_line, validate_cancel, validate_translate
 from .runner import HyMtRunner
@@ -63,6 +63,7 @@ class ServeLoop:
             "runtimeVersion": RUNTIME_VERSION,
             "modelId": MODEL_ID,
             "revision": MODEL_REVISION,
+            "trustRemoteCode": TRUST_REMOTE_CODE,
             "device": metadata["actualDevice"],
             "dtype": metadata["actualDtype"],
             "pid": os.getpid(),

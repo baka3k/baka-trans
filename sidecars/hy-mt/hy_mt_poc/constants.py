@@ -28,10 +28,19 @@ REPOSITORY_FILES = (
 MAX_INPUT_CHARS = 4_000
 MAX_NEW_TOKENS = 256
 PROTOCOL_VERSION = 1
-RUNTIME_VERSION = "0.1.0"
+RUNTIME_VERSION = "0.2.0"
+TRUST_REMOTE_CODE = False
 MAX_PROTOCOL_LINE_BYTES = 64 * 1024
 MAX_REQUEST_BYTES = 48 * 1024
 DEFAULT_TRANSLATE_TIMEOUT_SECONDS = 20.0
+
+RUNTIME_IDENTITY = {
+    "modelId": MODEL_ID,
+    "revision": MODEL_REVISION,
+    "protocolVersion": PROTOCOL_VERSION,
+    "runtimeVersion": RUNTIME_VERSION,
+    "trustRemoteCode": TRUST_REMOTE_CODE,
+}
 
 # The install manifest deliberately includes only model inputs used at runtime.
 # It is not a Hugging Face cache manifest and never accepts arbitrary repository
