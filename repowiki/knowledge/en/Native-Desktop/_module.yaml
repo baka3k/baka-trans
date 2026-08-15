@@ -1,0 +1,26 @@
+name: Native-Desktop
+scope: Rust/Tauri desktop host, command dispatch, session state, audio, and provider integrations.
+files:
+  - src-tauri/src/lib.rs
+  - src-tauri/src/commands.rs
+  - src-tauri/src/session.rs
+  - src-tauri/src/models.rs
+  - src-tauri/src/audio.rs
+  - src-tauri/src/security.rs
+  - src-tauri/src/ai.rs
+  - src-tauri/src/local_translation.rs
+  - src-tauri/src/overlay.rs
+  - src-tauri/src/look_help.rs
+  - src-tauri/src/vieneu.rs
+dependencies:
+  - VieNeu-Sidecar
+relationships:
+  - type: depended_by
+    target: Frontend
+  - type: depends_on
+    target: VieNeu-Sidecar
+sub_modules:
+  - ai
+  - session
+  - overlay
+  - local-runtime

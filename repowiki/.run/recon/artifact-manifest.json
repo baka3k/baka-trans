@@ -1,0 +1,14 @@
+{
+  "schema_version":"1.0",
+  "producer_skill":"hi-repo-recon",
+  "created_at":"2026-08-15T00:00:00+07:00",
+  "inputs":{"repo_root":"/Users/hieplq1.aip/baka3k/baka-trans","scope":"all","depth":"deep"},
+  "status":"succeeded",
+  "artifacts":[
+    {"path":"module-inventory.json","media_type":"application/json","required":true,"sha256":"5f1657eb821e78c0bf34bb4ddad40810cb35021f96d78f61a7a1dd79f0debf8b","validation":"parsed"},
+    {"path":"entry-point-map.json","media_type":"application/json","required":true,"sha256":"494196aeba404a64af8ebec38742ad10a3cc0f203bbdb5cc9f3f1d08576db3ad","validation":"parsed"},
+    {"path":"key-functions.json","media_type":"application/json","required":true,"sha256":"dfdac38048f05a1f472a0ccf334776407da82ae1ef1690b3f988f5243977365a","validation":"parsed"}
+  ],
+  "evidence_refs":["src-tauri/src/lib.rs","src/api.ts","sidecars/vieneu-tts/server.py"],
+  "warnings":["Native rg/direct-file retrieval used because higher retrieval layers were unavailable."]
+}

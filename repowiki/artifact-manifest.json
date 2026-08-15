@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.0",
+  "producer_skill": "hi-repowiki",
+  "created_at": "2026-08-15T00:00:00+07:00",
+  "inputs": {
+    "repo_root": "/Users/hieplq1.aip/baka3k/baka-trans",
+    "project_id": "baka-trans",
+    "language": "en",
+    "mode": "generate",
+    "coverage_profile": "comprehensive"
+  },
+  "status": "partial",
+  "artifacts": [
+    {"path":"wiki_plan.yaml","media_type":"application/yaml","required":true,"sha256":"fd084dd548195348b82f1df06e00d36ae6695317144e95dfbaefa33a2c940266","validation":"present"},
+    {"path":"topic-coverage.json","media_type":"application/json","required":true,"sha256":"a83816c5da84c024b3dcaff7a25b5717c53987e51de960ef29b76a3120e23623","validation":"skill-validator-passed"},
+    {"path":"en/meta/repowiki-metadata.json","media_type":"application/json","required":true,"sha256":"fef2ec6dea89ca95121d2d33c9fe52be468a74f9c5cabea4b31447d3547d074a","validation":"parsed"},
+    {"path":"knowledge/en/_index.yaml","media_type":"application/yaml","required":true,"validation":"present"}
+  ],
+  "summary": {"pages":13,"knowledge_cards":3,"facets":43,"documented_or_merged":30,"not_applicable":13},
+  "warnings": ["No live mind_mcp, graph_mcp, or Serena retrieval layer was available; native rg and direct source reading provided the evidence.","npm test could not start because node_modules is absent and vitest is not installed in this checkout."]
+}

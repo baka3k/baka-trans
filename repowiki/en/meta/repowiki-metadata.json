@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-08-15T00:00:00+07:00",
+  "language": "en",
+  "template": "architecture",
+  "source_revision": "f1e277ccd346ee8e2c93845861d635139a58f9fe",
+  "page_count": 13,
+  "knowledge_card_count": 3,
+  "coverage_profile": "comprehensive",
+  "status": "partial",
+  "evidence_gaps": ["No live MCP/Serena/graph index was available; source evidence was retrieved with rg/direct reads."]
+}

@@ -1,0 +1,8 @@
+{
+  "entries": [
+    {"name":"renderer bootstrap","kind":"ui","module":"frontend","file":"src/main.tsx","symbol":"ReactDOM.createRoot","trigger":"webview load","downstream_targets":["App"],"evidence_refs":["src/main.tsx"],"confidence":"verified"},
+    {"name":"desktop bootstrap","kind":"desktop","module":"native-desktop","file":"src-tauri/src/main.rs","symbol":"main","trigger":"process start","downstream_targets":["baka_trans_lib::run"],"evidence_refs":["src-tauri/src/main.rs","src-tauri/src/lib.rs"],"confidence":"verified"},
+    {"name":"Tauri command handler","kind":"IPC","module":"native-desktop","file":"src-tauri/src/lib.rs","symbol":"tauri::generate_handler","trigger":"renderer invoke","downstream_targets":["commands"],"evidence_refs":["src-tauri/src/lib.rs"],"confidence":"verified"},
+    {"name":"VieNeu bridge","kind":"HTTP","module":"vieneu-sidecar","file":"sidecars/vieneu-tts/server.py","symbol":"BridgeServer","trigger":"Rust manager subprocess start","downstream_targets":["/health","/voices","/synthesize"],"evidence_refs":["sidecars/vieneu-tts/server.py"],"confidence":"verified"}
+  ]
+}

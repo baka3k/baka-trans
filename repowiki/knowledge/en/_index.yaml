@@ -1,0 +1,13 @@
+modules:
+  - name: Frontend
+    path: Frontend
+    parent: null
+    dependencies: [Native-Desktop]
+  - name: Native-Desktop
+    path: Native-Desktop
+    parent: null
+    dependencies: [VieNeu-Sidecar]
+  - name: VieNeu-Sidecar
+    path: VieNeu-Sidecar
+    parent: null
+    dependencies: []

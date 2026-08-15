@@ -1,0 +1,14 @@
+{
+  "schema_version":"1.0",
+  "producer_skill":"hi-tech-build-audit",
+  "created_at":"2026-08-15T00:00:00+07:00",
+  "inputs":{"repo_root":"/Users/hieplq1.aip/baka3k/baka-trans","target_env":"auto","depth":"deep"},
+  "status":"succeeded",
+  "artifacts":[
+    {"path":"build-report.md","media_type":"text/markdown","required":true,"sha256":"3971e4a8c679b1bc0996129e1b956471ab4882bf46c2460c3b010338db30df3a","validation":"present"},
+    {"path":"tech-stack.json","media_type":"application/json","required":true,"sha256":"dee811619d9d2cedd7f59fb6b592957a326f318340433b2e2a0e514771ce5e79","validation":"parsed"},
+    {"path":"ci-cd-pipelines.md","media_type":"text/markdown","required":true,"sha256":"999b469c4db637a67defe23dda6845d9a7f2fb134305321f79f764ae8af75cc2","validation":"present"}
+  ],
+  "evidence_refs":["package.json","src-tauri/Cargo.toml",".github/workflows/desktop.yml"],
+  "warnings":[]
+}

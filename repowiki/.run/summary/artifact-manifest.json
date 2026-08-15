@@ -1,0 +1,13 @@
+{
+  "schema_version":"1.0",
+  "producer_skill":"hi-module-summary-report",
+  "created_at":"2026-08-15T00:00:00+07:00",
+  "inputs":{"module_inventory":"repowiki/.run/recon/module-inventory.json","tech_audit":"repowiki/.run/audit/tech-stack.json","audience":"engineering","depth":"detailed"},
+  "status":"succeeded",
+  "artifacts":[
+    {"path":"module-summary.md","media_type":"text/markdown","required":true,"sha256":"5f96a1a79eb8c8a4d25fb4bb25f6bf2bcc2deb95a7f89a3ccd88666daa09552d","validation":"present"},
+    {"path":"risk-assessment.md","media_type":"text/markdown","required":true,"sha256":"731ec51c81677f3e51df4070378b571ca66626138b8b9280479379cb52505e11","validation":"present"}
+  ],
+  "evidence_refs":["repowiki/.run/recon/module-inventory.json","repowiki/.run/audit/tech-stack.json"],
+  "warnings":[]
+}

@@ -1,0 +1,8 @@
+{
+  "functions": [
+    {"name":"run","qualified_name":"baka_trans_lib::run","file":"src-tauri/src/lib.rs","signature":"pub fn run()","role":"registers Tauri state and IPC commands","evidence_refs":["src-tauri/src/lib.rs"],"confidence":"verified"},
+    {"name":"start_session","qualified_name":"AppState::start_session","file":"src-tauri/src/session.rs","signature":"pub async fn start_session","role":"validates and starts selected translation pipeline","evidence_refs":["src-tauri/src/session.rs"],"confidence":"verified"},
+    {"name":"run_local_translation","qualified_name":"ai::local_whisper_ollama::run_local_translation","file":"src-tauri/src/ai/local_whisper_ollama.rs","signature":"pub async fn run_local_translation","role":"runs local recognition, translation, and speech path","evidence_refs":["src-tauri/src/ai/local_whisper_ollama.rs"],"confidence":"verified"},
+    {"name":"synthesize","qualified_name":"VieNeuRuntime.synthesize","file":"sidecars/vieneu-tts/server.py","signature":"def synthesize","role":"generates WAV from validated synthesis request","evidence_refs":["sidecars/vieneu-tts/server.py"],"confidence":"verified"}
+  ]
+}

@@ -1,0 +1,21 @@
+name: Frontend
+scope: React renderer, typed native IPC client, and presentation logic.
+files:
+  - src/main.tsx
+  - src/App.tsx
+  - src/api.ts
+  - src/types.ts
+  - src/transcript.ts
+  - src/languages.ts
+  - src/app/MainApp.tsx
+  - src/components/session/SessionCommandBar.tsx
+dependencies:
+  - Native-Desktop
+relationships:
+  - type: depends_on
+    target: Native-Desktop
+sub_modules:
+  - app
+  - components
+  - ui
+setup: inherited

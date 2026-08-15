@@ -1,0 +1,10 @@
+{
+  "technologies": [
+    {"category":"frontend","name":"React","version":"^18.3.1","evidence_refs":["package.json"],"confidence":"verified"},
+    {"category":"frontend","name":"Tauri API","version":"^2.8.0","evidence_refs":["package.json"],"confidence":"verified"},
+    {"category":"native","name":"Rust/Tauri","version":"2021 / 2.8.0","evidence_refs":["src-tauri/Cargo.toml"],"confidence":"verified"},
+    {"category":"audio","name":"CPAL","version":"0.15","evidence_refs":["src-tauri/Cargo.toml"],"confidence":"verified"},
+    {"category":"local AI","name":"whisper-rs","version":"0.16","evidence_refs":["src-tauri/Cargo.toml"],"confidence":"verified"},
+    {"category":"sidecar","name":"Python/VieNeu","version":">=3.10 / 3.2.3","evidence_refs":["sidecars/vieneu-tts/pyproject.toml"],"confidence":"verified"}
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "source_revision": "f1e277ccd346ee8e2c93845861d635139a58f9fe",
+  "retrieval_layer": "native-rg",
+  "modules": [
+    {"name":"frontend","path":"src","kind":"renderer","languages":["TypeScript","TSX","CSS"],"responsibility":"React UI, Tauri client, transcript presentation","key_files":["src/main.tsx","src/App.tsx","src/app/MainApp.tsx","src/api.ts"],"dependencies":[{"target":"native-desktop","relation":"Tauri command/event IPC","evidence":"src/api.ts"}],"evidence_refs":["src/main.tsx","src/api.ts"],"confidence":"verified"},
+    {"name":"native-desktop","path":"src-tauri/src","kind":"desktop-host","languages":["Rust"],"responsibility":"Tauri commands, session/audio orchestration, providers, native windows","key_files":["src-tauri/src/lib.rs","src-tauri/src/commands.rs","src-tauri/src/session.rs"],"dependencies":[{"target":"vieneu-sidecar","relation":"managed local TTS subprocess/HTTP bridge","evidence":"src-tauri/src/vieneu.rs"}],"evidence_refs":["src-tauri/src/lib.rs","src-tauri/src/vieneu.rs"],"confidence":"verified"},
+    {"name":"vieneu-sidecar","path":"sidecars/vieneu-tts","kind":"local-service","languages":["Python"],"responsibility":"Managed authenticated loopback Vietnamese TTS bridge","key_files":["sidecars/vieneu-tts/server.py","sidecars/vieneu-tts/pyproject.toml"],"dependencies":[],"evidence_refs":["sidecars/vieneu-tts/server.py"],"confidence":"verified"},
+    {"name":"release-tooling","path":"scripts","kind":"automation","languages":["Bash","PowerShell","JavaScript"],"responsibility":"Version and target-native release automation","key_files":["scripts/release-macos.sh","scripts/release-windows.ps1","scripts/build-vieneu-sidecar.ps1"],"dependencies":[],"evidence_refs":["package.json","scripts/release-macos.sh"],"confidence":"verified"}
+  ]
+}

@@ -1,0 +1,12 @@
+name: VieNeu-Sidecar
+scope: Managed Python loopback bridge and bundled Vietnamese TTS runtime.
+files:
+  - sidecars/vieneu-tts/server.py
+  - sidecars/vieneu-tts/pyproject.toml
+  - sidecars/vieneu-tts/bridge.spec
+  - scripts/build-vieneu-sidecar.ps1
+dependencies: []
+relationships:
+  - type: depended_by
+    target: Native-Desktop
+sub_modules: []

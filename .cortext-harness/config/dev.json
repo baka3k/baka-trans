@@ -6,33 +6,22 @@
   },
   "code": {
     "env": {
+      "CORTEX_STORAGE_INSTANCE": "bakatrans",
       "GRAPH_PROVIDER": "falkordb",
       "CODE_GRAPH_PROVIDER": "falkordb",
-      "FALKORDB_URI": "redis://localhost:6379",
-      "FALKORDB_HOST": "localhost",
-      "FALKORDB_PORT": "6379",
-      "FALKORDB_USER": "",
-      "FALKORDB_PASSWORD": "",
       "FALKORDB_GRAPH": "bakatrans",
-      "FALKORDB_SSL": "false",
-      "NEO4J_URI": "redis://localhost:6379",
-      "NEO4J_DB": "bakatrans",
-      "NEO4J_USER": "",
-      "NEO4J_PASS": "",
-      "QDRANT_HOST": "localhost",
-      "QDRANT_PORT": "6333",
       "QDRANT_COLLECTION": "bakatrans",
       "EMBEDDING_MODEL": "jinaai/jina-embeddings-v3",
       "BATCH_SIZE": "1",
       "MAX_EMBED_CHARS": "500",
-      "device": "cuda"
+      "device": "mps"
     },
     "source": {
       "projects": [
         {
           "git": "",
           "folder": [
-            "C:\\ai\\baka-trans"
+            "/Users/hieplq1.aip/baka3k"
           ]
         }
       ]
@@ -40,32 +29,21 @@
   },
   "doc": {
     "env": {
+      "CORTEX_STORAGE_INSTANCE": "bakatrans",
       "GRAPH_PROVIDER": "falkordb",
       "DOC_GRAPH_PROVIDER": "falkordb",
-      "FALKORDB_URI": "redis://localhost:6379",
-      "FALKORDB_HOST": "localhost",
-      "FALKORDB_PORT": "6379",
-      "FALKORDB_USER": "",
-      "FALKORDB_PASSWORD": "",
       "FALKORDB_GRAPH": "bakatrans-doc",
-      "FALKORDB_SSL": "false",
-      "NEO4J_URI": "redis://localhost:6379",
-      "NEO4J_DB": "bakatrans-doc",
-      "NEO4J_USER": "",
-      "NEO4J_PASS": "",
-      "QDRANT_HOST": "localhost",
-      "QDRANT_PORT": "6333",
       "EMBEDDING_MODEL": "BAAI/bge-m3",
       "BATCH_SIZE": "1",
       "MAX_EMBED_CHARS": "500",
-      "device": "cuda"
+      "device": "mps"
     },
     "source": {
       "projects": [
         {
-          "git": "QDRANT_HOST [localhost]:",
+          "git": "/Users/hieplq1.aip/baka3k/baka-trans/plans",
           "folder": [
-            "C:\\ai\\baka-trans\\plans"
+            "/Users/hieplq1.aip/baka3k/baka-trans/plans"
           ]
         }
       ]

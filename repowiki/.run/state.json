@@ -1,0 +1,8 @@
+{
+  "schema_version": "1.0",
+  "run_id": "repowiki-baka-trans-f1e277c",
+  "inputs": {"repo_root":"/Users/hieplq1.aip/baka3k/baka-trans","project_id":"baka-trans","mode":"generate","language":"en"},
+  "stages": {"recon":"succeeded","audit":"succeeded","facet_scan":"succeeded","domain_evidence":"partial","summary":"succeeded","plan":"succeeded","pages":"succeeded","cards":"succeeded","index":"succeeded"},
+  "updated_at": "2026-08-15T00:00:00+07:00",
+  "warning": "MCP/Serena indexes were not available; native source retrieval was used."
+}

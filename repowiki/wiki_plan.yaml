@@ -1,0 +1,27 @@
+version: 1
+repowiki:
+  template: architecture
+  coverage:
+    profile: comprehensive
+    include: []
+    exclude: []
+    max_depth: 3
+  notes:
+    - text: Focus on real-time translation pipelines, platform boundaries, and onboarding.
+      author: Codex
+  documents: []
+knowledgecard:
+  notes:
+    - text: Group cards by executable runtime boundaries rather than every source folder.
+      author: Codex
+scope:
+  include: []
+  exclude:
+    - "**/node_modules/**"
+    - "**/vendor/**"
+    - "**/.git/**"
+    - "**/dist/**"
+    - "**/build/**"
+    - "**/__pycache__/**"
+    - "**/*.generated.*"
+    - "**/*.min.*"
