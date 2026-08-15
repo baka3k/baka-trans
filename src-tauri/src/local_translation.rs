@@ -19,7 +19,8 @@ use whisper_rs::{get_lang_id, WhisperContext, WhisperContextParameters};
 const CONFIG_SCHEMA_VERSION: u32 = 3;
 const CONFIG_DIR_NAME: &str = "dev.baka3k.baka-trans";
 const CONFIG_FILE_NAME: &str = "local-translation-config.json";
-const WHISPER_MODEL_DIR_NAME: &str = "whisper-models";
+const MODEL_CACHE_DIR_NAME: &str = ".bakatrans";
+const WHISPER_CACHE_SUBDIR: &str = "whisper";
 const WHISPER_MODEL_SOURCE: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
 static WHISPER_DOWNLOAD_ACTIVE: AtomicBool = AtomicBool::new(false);
 
@@ -255,14 +256,28 @@ fn whisper_model_spec(model_id: &str) -> AppResult<&'static WhisperModelSpec> {
 }
 
 fn whisper_model_dir() -> AppResult<PathBuf> {
-    let config = config_path()?;
-    let parent = config.parent().ok_or_else(|| {
+    Ok(model_cache_dir()?.join(WHISPER_CACHE_SUBDIR))
+}
+
+/// Resolve the shared user-side model cache directory used for all downloaded
+/// ML artifacts (Whisper, VieNeu, future Hy-MT2). Lives outside the
+/// per-app Application Support folder so models survive reinstalls.
+fn model_cache_dir() -> AppResult<PathBuf> {
+    #[cfg(target_os = "windows")]
+    let home = std::env::var_os("USERPROFILE").ok_or_else(|| {
         AppError::new(
-            "local_config_path_error",
-            "Local translation config path has no parent directory.",
+            "model_cache_dir_error",
+            "Could not resolve USERPROFILE for the model cache directory.",
         )
     })?;
-    Ok(parent.join(WHISPER_MODEL_DIR_NAME))
+    #[cfg(not(target_os = "windows"))]
+    let home = std::env::var_os("HOME").ok_or_else(|| {
+        AppError::new(
+            "model_cache_dir_error",
+            "Could not resolve HOME for the model cache directory.",
+        )
+    })?;
+    Ok(PathBuf::from(home).join(MODEL_CACHE_DIR_NAME))
 }
 
 fn download_percent(downloaded_bytes: u64, total_bytes: Option<u64>) -> Option<u8> {

@@ -166,6 +166,7 @@ run_check() {
     cargo check
     cargo test
   )
+  scripts/build-vieneu-sidecar.sh
   npm run tauri -- build --bundles app,dmg
   verify_artifacts
 

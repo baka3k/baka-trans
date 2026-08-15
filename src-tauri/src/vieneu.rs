@@ -17,6 +17,8 @@ use uuid::Uuid;
 
 pub const VIENEU_MODEL_VERSION: &str = "v3-turbo-int8-2026-07";
 pub const VIENEU_MODEL_BYTES: u64 = 256_068_309;
+const MODEL_CACHE_DIR_NAME: &str = ".bakatrans";
+const VIENEU_CACHE_SUBDIR: &str = "vieneu";
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(180);
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const EVENT_NAME: &str = "vieneu-runtime-progress";
@@ -389,12 +391,8 @@ struct ManagedPaths {
 }
 
 impl ManagedPaths {
-    fn resolve(app: &AppHandle) -> AppResult<Self> {
-        let root = app
-            .path()
-            .app_local_data_dir()
-            .map_err(|error| AppError::new("vieneu_data_path_error", error.to_string()))?
-            .join("vieneu");
+    fn resolve(_app: &AppHandle) -> AppResult<Self> {
+        let root = model_cache_dir()?.join(VIENEU_CACHE_SUBDIR);
         let model_parent = root.join("models");
         Ok(Self {
             staging_dir: model_parent.join(format!("{VIENEU_MODEL_VERSION}.partial")),
@@ -411,6 +409,27 @@ impl ManagedPaths {
 
 struct DownloadGuard<'a> {
     manager: &'a VieNeuManager,
+}
+
+/// Resolve the shared user-side model cache directory used for all downloaded
+/// ML artifacts (Whisper, VieNeu, future Hy-MT2). Lives outside the
+/// per-app Application Support folder so models survive reinstalls.
+fn model_cache_dir() -> AppResult<PathBuf> {
+    #[cfg(target_os = "windows")]
+    let home = std::env::var_os("USERPROFILE").ok_or_else(|| {
+        AppError::new(
+            "model_cache_dir_error",
+            "Could not resolve USERPROFILE for the model cache directory.",
+        )
+    })?;
+    #[cfg(not(target_os = "windows"))]
+    let home = std::env::var_os("HOME").ok_or_else(|| {
+        AppError::new(
+            "model_cache_dir_error",
+            "Could not resolve HOME for the model cache directory.",
+        )
+    })?;
+    Ok(PathBuf::from(home).join(MODEL_CACHE_DIR_NAME))
 }
 
 impl<'a> DownloadGuard<'a> {

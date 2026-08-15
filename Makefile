@@ -8,8 +8,10 @@
 #   - The app reaches a translation model over HTTP via an OpenAI-compatible
 #     `/v1/chat/completions` endpoint. `make doctor` probes that endpoint
 #     when `LLM_BASE_URL` is set (e.g. `make doctor LLM_BASE_URL=http://localhost:11434/v1`
-#     or `export LLM_BASE_URL=...`). The app installs the VieNeu-TTS model
-#     on first run, so it is not part of `make build`.
+#     or `export LLM_BASE_URL=...`). `make build` also builds the bundled
+#     VieNeu-TTS bridge (PyInstaller, via scripts/build-vieneu-sidecar.sh) so
+#     the packaged app ships the managed runtime. The VieNeu model itself is
+#     downloaded in-app on first run; it is not part of `make build`.
 #   - On macOS, ggml (pulled in by whisper-rs) uses std::filesystem::path,
 #     which Apple's libc++ marks `@available(macOS 10.15, strict)`. The actual
 #     pin lives in `.cargo/config.toml` (`[env] MACOSX_DEPLOYMENT_TARGET = "10.15"`)
@@ -36,8 +38,10 @@ SHELL := /bin/bash
 ifeq ($(shell uname -s),Darwin)
     MACOSX_DEPLOYMENT_TARGET ?= 10.15
     BUILD_ENV = MACOSX_DEPLOYMENT_TARGET=$(MACOSX_DEPLOYMENT_TARGET)
+    VIENEU_SIDECAR = scripts/build-vieneu-sidecar.sh
 else
     BUILD_ENV =
+    VIENEU_SIDECAR = @printf 'skipped (non-Darwin: build via scripts/build-vieneu-sidecar.ps1)\n'
 endif
 
 .DEFAULT_GOAL := help
@@ -111,10 +115,12 @@ build: doctor
 		fi \
 	fi
 	@printf '\n=== Baka Trans — building desktop app ===\n\n'
-	@printf '[1/3] syncing JS deps via npm ci\n'
+	@printf '[1/4] syncing JS deps via npm ci\n'
 	$(BUILD_ENV) npm ci
-	@printf '\n[2/3] prefetching Rust deps\n'
+	@printf '\n[2/4] prefetching Rust deps\n'
 	$(BUILD_ENV) cargo fetch --manifest-path src-tauri/Cargo.toml
-	@printf '\n[3/3] running tauri build\n'
+	@printf '\n[3/4] building the bundled VieNeu-TTS bridge\n'
+	$(BUILD_ENV) $(VIENEU_SIDECAR)
+	@printf '\n[4/4] running tauri build\n'
 	$(BUILD_ENV) npm run tauri -- build
 	@printf '\n✓ build complete — see src-tauri/target/release/bundle/\n'

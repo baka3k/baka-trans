@@ -317,7 +317,7 @@ export function LocalLlmSettings({
         <div className="whisper-download-card">
           <div className="whisper-download-copy">
             <strong>Download a speech model</strong>
-            <span>Stored privately in this app's data folder and selected automatically.</span>
+            <span>Stored privately in ~/.bakatrans/whisper and selected automatically.</span>
           </div>
           <div className="whisper-download-controls">
             <label className="field">
