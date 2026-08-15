@@ -1,5 +1,6 @@
 # Engineering Logs
 
+- [2026-08-15 — HY-MT M5 feasibility gate stopped](2026-08-15-hy-mt-m5-stop-gate.md)
 - [2026-07-18 — App-managed VieNeu runtime](2026-07-18-managed-vieneu-runtime.md)
 - [2026-07-18 — VieNeu-TTS provider](2026-07-18-vieneu-tts-provider.md)
 - [2026-07-18 — Responsive UI redesign](2026-07-18-responsive-ui-redesign.md)
