@@ -46,7 +46,7 @@ SynthesizedAudio -> PCM16 mono, 24000 Hz
 
 1. Add `LocalVoice`, `LocalTtsConfig`, `LocalTtsTestResult`, `TtsRequest`, and `SynthesizedAudio` contracts.
 2. Extend config with serde/default migration. Preserve existing model path, server, and segmentation values.
-3. Default an empty Ollama model to `gemma3:4b`; preserve non-empty existing model tags.
+3. Default an empty Ollama model to `translategemma:4b`; preserve non-empty existing model tags.
 4. Implement Windows voice discovery and synthesis-to-stream, including container validation/decoding.
 5. Implement macOS voice discovery and synthesis-to-buffer callback.
 6. Normalize supported outputs to mono PCM16 at 24 kHz and reject empty or unsupported buffers.

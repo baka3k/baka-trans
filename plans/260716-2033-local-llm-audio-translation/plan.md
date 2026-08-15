@@ -2,7 +2,7 @@
 title: "Mode Gateway and Local Spoken Translation"
 status: in_progress
 created: 2026-07-16
-updated: 2026-07-18
+updated: 2026-08-15
 mode: hi-plan --full
 ---
 
@@ -19,7 +19,9 @@ Main application route
      -> Local Whisper: dedicated local workspace
         -> existing CPAL capture and 16 kHz normalization
         -> existing whisper-rs transcription
-        -> existing native Ollama /api/chat client using Gemma
+        -> selected translation engine
+           -> existing native Ollama /api/chat client using TranslateGemma
+           -> managed HY-MT1.5 Transformers sidecar (new, opt-in until validated)
         -> new local platform TTS adapter
         -> existing CPAL output-device and channel-routed playback
 ```
@@ -45,6 +47,14 @@ Three scope questions were resolved so the plan is directly implementable:
 1. **When is mode selected?** Show the chooser on every main-window launch. Do not show it for the transparent or Look & Help overlay routes. Do not remember a choice in the first release. A Change mode action returns to the chooser only after the active session has stopped.
 2. **What does Cloud API contain?** It opens the current cloud workspace and preserves Google Live, OpenAI Realtime, summaries, overlays, exports, credential handling, audio routing, and current controls. The Google implementation and event contract are not rewritten.
 3. **What local TTS is used?** Use platform-native installed voices behind a Rust `LocalTtsEngine` boundary: Windows `Windows.Media.SpeechSynthesis` and macOS `AVSpeechSynthesizer` buffer output. Normalize generated audio to PCM16 mono at 24 kHz and feed the existing CPAL playback runtime. This preserves selected headset and channel routing without adding a second model server. A Piper-style engine can be added later behind the same boundary.
+
+### HY-MT extension decisions (2026-08-15)
+
+Three additional scope questions were resolved for the direct Hugging Face extension:
+
+1. **Does “direct Hugging Face” mean hosted inference?** No. `tencent/HY-MT1.5-1.8B` has no Hugging Face Inference Provider deployment. The app downloads pinned model files once, then runs them locally through a bundled Python/PyTorch/Transformers sidecar. End users do not install Python or send meeting text to Hugging Face.
+2. **Does HY-MT immediately replace Ollama?** No. Add `translationEngine: ollama | hy_mt`, migrate existing configs to `ollama`, and keep fallback explicit. HY-MT becomes eligible for the internal default only after the M5 quality, latency, memory, cancellation, and offline gates pass. Never silently retry an utterance through another engine.
+3. **What platforms are in scope?** Run the first gate on the current Apple M5/24 GB machine using explicit MPS selection. Package/sign macOS arm64 next, then build and validate the Windows sidecar on Windows. Windows CPU is the compatibility baseline; CUDA acceleration is capability-tested rather than assumed.
 
 ## Design Read
 
@@ -78,7 +88,7 @@ Reading this as: a preserve-first redesign of a desktop realtime translation uti
 - `src-tauri/src/audio.rs` already owns device discovery, Windows loopback enumeration, PCM capture, resampling, selected-output playback, left/right routing, test tone, and translated-audio metering.
 - `src-tauri/src/ai/local_whisper_ollama.rs` has the insertion seam immediately after `ollama.translate` succeeds.
 - Local mode currently bypasses output validation and playback creation. Frontend controls and docs explicitly label it text-only; those special cases must be removed.
-- The configured Ollama model is currently arbitrary and empty by default. The extension keeps the serialized field compatible but uses `gemma3:4b` as the new default and labels it as the Gemma model.
+- The configured Ollama model remains user-selectable; the current implemented default is `translategemma:4b`. The HY-MT extension preserves this fallback configuration and makes engine-specific labels explicit.
 
 Detailed evidence is recorded in [research/current-state-and-options.md](research/current-state-and-options.md).
 
@@ -101,13 +111,48 @@ Extend `LocalTranslationConfig` without breaking existing persisted JSON:
 
 | Group | Field | Rule |
 | --- | --- | --- |
-| Gemma | `model` | Preserve existing value; default empty values to `gemma3:4b` |
+| Ollama | `model` | Preserve existing value; default empty values to `translategemma:4b` |
 | TTS | `voiceId` | Required installed voice matching target language `vi` |
 | TTS | `rate` | Default 1.0, clamped to a conservative platform-neutral range |
 | TTS | `volume` | Default 1.0, clamped to 0.0-1.0 |
 | TTS | `outputSampleRateHz` | Read-only 24000 normalized PCM contract |
 
 Add commands to list installed local voices and synthesize a short routed test phrase. A local provider is ready only when Whisper loads, Gemma responds, a Vietnamese-capable voice is available, an output device is selected, and the test state is not stale after a runtime-critical edit.
+
+### Translation engine extension
+
+Preserve the serialized session provider value `local_whisper_ollama` so existing settings, tests, and routing remain compatible; relabel it as **Local Whisper** in user-facing copy. Add a backend and frontend `LocalTranslationEngine` enum with `ollama` and `hy_mt` values.
+
+- Increment the local config schema to v2 and migrate v1 documents to `translationEngine: ollama` without losing the Ollama URL/model, Whisper path/tuning, TTS, or audio settings.
+- Keep Ollama fields engine-specific and conditionally validated. HY-MT model ID, revision, artifact manifest, prompt, and generation policy are product-owned rather than editable free-text settings.
+- Replace the worker's concrete `OllamaClient` with an enum dispatcher behind one asynchronous `translate(text)` contract. Avoid a new trait dependency unless enum dispatch proves inadequate.
+- Keep the translation worker single-flight and ordered. HY-MT timeout/failure produces the existing error snapshot and an actionable restart/switch-engine state; it does not duplicate or silently retry the utterance.
+- Rename `ai/local_whisper_ollama.rs` only after dispatcher and regression tests protect module behavior.
+
+### Managed HY-MT runtime
+
+Add `sidecars/hy-mt/` and a Rust `HyMtManager` in `src-tauri/src/hy_mt.rs`, using the process-ownership and install-state lessons from the implemented VieNeu manager without coupling the two runtimes.
+
+```text
+Rust HyMtManager
+  -> installer process (network allowed)
+     -> pinned Hugging Face snapshot in staging
+     -> exact size/SHA-256 verification
+     -> manifest + atomic activation in app-local data
+  -> long-lived inference process (network disabled)
+     -> load verified local model once
+     -> NDJSON stdin/stdout protocol
+     -> one in-flight translation + cancellation/deadline
+```
+
+Runtime rules:
+
+- Pin the POC-tested HY-MT commit and allowlist only the seven inference files; store `License.txt` and the required notice alongside the install manifest.
+- The installer is the only networked mode. Inference sets `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`, disables telemetry, uses `local_files_only=True`, and accepts no Hub token.
+- Stdout is protocol-only NDJSON; logs go to sanitized stderr. Every message includes a protocol version and request ID. The ready message declares model ID/revision, device, dtype, PID, and load time.
+- Rust lazily starts and prewarms the sidecar before capture, owns stdin/stdout and child lifetime, enforces one request at a time, deadlines, bounded restarts, cancellation, unload, and shutdown.
+- Device policy is explicit: probe MPS, CUDA, then CPU; record the actual device/dtype. Do not ship `device_map="auto"` as the product policy.
+- Follow the model card prompt exactly for non-Chinese translation: one user message, language name rather than code, no system prompt, `add_generation_prompt=False`, and decode only generated suffix tokens.
 
 ### TTS engine boundary
 
@@ -135,7 +180,9 @@ CPAL capture 16 kHz
   -> bounded utterance segmenter
   -> Whisper worker
   -> pending source transcript snapshot
-  -> ordered Gemma /api/chat request
+  -> ordered selected-engine translation
+     -> Ollama /api/chat, or
+     -> managed offline HY-MT sidecar
   -> final translated transcript snapshot
   -> bounded TTS request queue
   -> platform TTS synthesis
@@ -171,18 +218,27 @@ CPAL capture 16 kHz
 | 06 | [phase-06-local-tts-contracts.md](phase-06-local-tts-contracts.md) | implemented; macOS hardware pending | Cross-platform local voice/config/synthesis contracts |
 | 07 | [phase-07-spoken-runtime-and-routing.md](phase-07-spoken-runtime-and-routing.md) | implemented | Gemma result -> TTS -> selected CPAL output lifecycle |
 | 08 | [phase-08-regression-and-release-validation.md](phase-08-regression-and-release-validation.md) | automated checks complete; hardware pending | Cloud regression, hardware tests, docs, and release evidence |
+| 09 | [phase-09-hy-mt-m5-poc-and-gate.md](phase-09-hy-mt-m5-poc-and-gate.md) | pending | Validate exact model, prompt, MPS device policy, quality, latency, memory, and packaging feasibility |
+| 10 | [phase-10-hy-mt-sidecar-and-model-lifecycle.md](phase-10-hy-mt-sidecar-and-model-lifecycle.md) | blocked by 09 | Pinned installer, verified model activation, offline NDJSON inference sidecar, and Python tests |
+| 11 | [phase-11-translation-engine-and-manager.md](phase-11-translation-engine-and-manager.md) | blocked by 10 | Config-v2 migration, engine dispatcher, and Rust-managed HY-MT lifecycle |
+| 12 | [phase-12-hy-mt-settings-and-readiness.md](phase-12-hy-mt-settings-and-readiness.md) | blocked by 11 | Engine-selective settings, install/readiness UX, commands/events, and language validation |
+| 13 | [phase-13-hy-mt-pipeline-integration.md](phase-13-hy-mt-pipeline-integration.md) | blocked by 11-12 | Whisper → selected engine → transcript/TTS integration, cancellation, fallback, and regressions |
+| 14 | [phase-14-hy-mt-macos-packaging.md](phase-14-hy-mt-macos-packaging.md) | blocked by 13 | macOS arm64 sidecar build, nested signing/notarization, offline and hardware release evidence |
+| 15 | [phase-15-hy-mt-windows-packaging.md](phase-15-hy-mt-windows-packaging.md) | blocked by 13 | Windows same-platform build, CPU/CUDA capability matrix, installer/Defender and hardware evidence |
 
 ## Dependencies and Cross-Plan Coordination
 
 - Coordinates with `plans/realtime-meeting-translation-macos`, which owns shared capture, playback, session lifecycle, and Google/OpenAI behavior.
 - Coordinates with `plans/260712-2234-application-ui-modernization`, which owns the Fluent shell and accessibility conventions.
+- Uses `plans/260718-2348-managed-vieneu-runtime` as an implemented lifecycle, authenticated/private-process, model-install, and one-folder packaging precedent; HY-MT remains a separate manager and model store.
+- Coordinates with `plans/windows-support` for the Windows build, installer, audio hardware, and manual release gate.
 - This plan owns the chooser, local workspace, Gemma defaults, TTS adapters, and local spoken runtime.
 - No plan is a hard blocker because the required audio and session foundation is implemented.
 
 Runtime prerequisites:
 
 - User-provided compatible multilingual Whisper GGML model.
-- Running local Ollama with the configured Gemma model, default `gemma3:4b`.
+- One selected translation engine: running local Ollama with the configured TranslateGemma model, or an installed/verified managed HY-MT runtime.
 - An installed Vietnamese-capable system voice.
 - A selected translated-audio output device.
 
@@ -201,6 +257,11 @@ Runtime prerequisites:
 | Session/playback integration | `src-tauri/src/session.rs`; minimal helper exposure in `src-tauri/src/audio.rs` only if required |
 | Commands/registration | `src-tauri/src/commands.rs`, `src-tauri/src/lib.rs` |
 | Native dependencies | `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` |
+| HY-MT process/model manager | new `src-tauri/src/hy_mt.rs`, `src-tauri/src/lib.rs`, `src-tauri/src/commands.rs`, manager tests |
+| HY-MT sidecar | new `sidecars/hy-mt/server.py`, `pyproject.toml`, lockfile, protocol/model/install modules, tests, PyInstaller spec, README |
+| Engine/language contracts | `src-tauri/src/models.rs`, `src-tauri/src/local_translation.rs`, `src/types.ts`, `src/languages.ts`, `src/api.ts` and tests |
+| HY-MT status/settings | `src/app/MainApp.tsx`, `src/components/settings/LocalLlmSettings.tsx`, related component/app tests |
+| Packaging | `src-tauri/tauri.conf.json`, new macOS/Windows HY-MT build scripts, `scripts/release-macos.sh`, `scripts/release-windows.ps1`, `package.json` |
 | Docs | `README.md`, Windows/macOS user/release guides, architecture diagrams |
 
 ## Risks and Mitigations
@@ -217,6 +278,13 @@ Runtime prerequisites:
 | Existing local config is lost | Add serde/default migration; preserve non-empty model/path/tuning fields |
 | Gemma response succeeds but TTS fails | Keep transcript final, show speech-specific error, allow replay after TTS recovery |
 | Output/monitor routing conflicts return | Reuse current conflict validation and opposite-channel rules for local audio |
+| Bundled Python/PyTorch runtime is large or fails signing/AV | Measure the one-folder bundle during Phase 09; build on each target OS; sign nested native libraries; gate macOS notarization and Windows Defender smoke tests |
+| 4.09 GB model download is interrupted/corrupt/duplicated | App-private staging, resume, exact allowlist/hash/size validation, atomic activation, repair state, and no global HF cache duplication |
+| HY-MT competes with Whisper/TTS for unified memory | Lazy prewarm, one request, bounded queues, explicit device/dtype, M5 memory-pressure gate, and CPU/GPU capability reporting |
+| Model or runtime accesses the network while translating | Inference-only offline environment, local path plus `local_files_only=True`, no HTTP listener, and no-network integration test |
+| HY-MT output contains explanation/wrong language | Exact model-card prompt, suffix-only decode, output validation, JA→VI quality corpus, and human comparison against current Ollama baseline |
+| Stop leaves generation running or produces a late transcript | Request IDs, stopping criteria/cancel message, generation-token check, forced child termination on deadline, and restart before next request |
+| Automatic fallback duplicates an utterance | Never fallback per utterance; expose explicit engine switch/restart and preserve one final/error snapshot per ID |
 
 ## Success Criteria
 
@@ -231,16 +299,30 @@ Runtime prerequisites:
 - Keyboard navigation, focus return, 200% zoom, forced colors, reduced motion, and sub-768 px layout work for the chooser and local workspace.
 - `npm test`, `npm run build`, `cargo test`, `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings` pass.
 - Windows and macOS hardware validation confirms Vietnamese voice synthesis and playback to a non-default selected headset before the plan is complete.
+- Existing v1 local configs migrate to v2 with `translationEngine: ollama` and preserve all current values; the session provider value remains backward-compatible.
+- On the Apple M5/24 GB POC machine, HY-MT loads on the declared device/dtype, produces accepted JA→VI output without explanations, survives a 30-minute warm run with zero queue drops/crashes/late mutations, and keeps combined memory below 80% without macOS memory-pressure escalation.
+- The M5 report records cold load, warm p50/p95 translation latency, peak sidecar and combined RSS, quality comparison to TranslateGemma, and exact bundle size; Phase 10 does not start unless the gate is GO.
+- HY-MT inference succeeds with network access disabled after installation, and an interrupted/corrupt install is resumable or repairable without activating unverified files.
+- Stop/pause/session-generation invalidation cancels or kills in-flight HY generation so no translation or speech arrives late; no utterance is silently rerun through Ollama.
+- macOS arm64 and Windows bundles include the managed runtime without requiring system Python. Each bundled executable passes its target-platform offline smoke test; macOS nested libraries are signed/notarized and Windows installer/Defender validation is recorded.
+- Internal-use documentation includes the Tencent license/notice, pinned model revision, supported territory assumption, and a manual update procedure; no automatic model update changes reviewed weights.
+- Internal deployment documentation states that Vietnam use does not authorize operation or redistribution in license-excluded territories and includes the runtime dependency inventory/notices.
 
 ## Review and Validation
 
 - Adversarial review: [reports/red-team.md](reports/red-team.md)
 - Critical validation: [reports/validation.md](reports/validation.md)
+- HY-MT prediction: [../../plans/reports/prediction_report_20260815_1230.md](../../plans/reports/prediction_report_20260815_1230.md)
+- HY-MT research: [research/hy-mt-current-state-and-feasibility.md](research/hy-mt-current-state-and-feasibility.md)
+- HY-MT adversarial review: [reports/hy-mt-red-team.md](reports/hy-mt-red-team.md)
+- HY-MT critical validation: [reports/hy-mt-validation.md](reports/hy-mt-validation.md)
 - The plan is GO with platform voice availability and real-device playback retained as release gates.
 
 ## Implementation Handoff
 
 Implement Phases 05-08 in order. Keep the existing Google implementation untouched unless a regression test exposes a shared-runtime defect. Do not mark Phase 08 complete without real Windows and macOS output-device evidence.
+
+For the HY-MT extension, start with Phase 09 only. If its decision is GO, continue Phases 10-13, then package macOS and Windows independently in Phases 14-15. A CAUTION result must name and schedule mitigations; a STOP result leaves Ollama as the active local translation engine and closes Phases 10-15 without partial product integration.
 
 Suggested command:
 
