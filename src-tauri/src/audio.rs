@@ -107,13 +107,23 @@ pub fn list_devices() -> AppResult<AudioDevices> {
         .default_output_device()
         .and_then(|device| device.name().ok());
 
-    let mut inputs = host
+    #[cfg(target_os = "windows")]
+    let mut inputs: Vec<AudioDeviceInfo> = host
         .input_devices()?
         .enumerate()
         .map(|(index, device)| {
             device_info(index, device, DeviceKind::Input, default_input.as_deref())
         })
-        .collect::<Vec<_>>();
+        .collect();
+
+    #[cfg(not(target_os = "windows"))]
+    let inputs: Vec<AudioDeviceInfo> = host
+        .input_devices()?
+        .enumerate()
+        .map(|(index, device)| {
+            device_info(index, device, DeviceKind::Input, default_input.as_deref())
+        })
+        .collect();
 
     let outputs = host
         .output_devices()?

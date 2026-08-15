@@ -371,12 +371,6 @@ impl TranslationClient {
             Self::OpenAiCompatible(client) => client.translate(source_text).await,
         }
     }
-
-    pub fn endpoint(&self) -> &str {
-        match self {
-            Self::OpenAiCompatible(client) => client.endpoint(),
-        }
-    }
 }
 
 pub fn get_config() -> AppResult<LocalTranslationConfig> {
@@ -1242,11 +1236,14 @@ mod tests {
             ..LocalTranslationConfig::default()
         };
         let client = TranslationClient::new(&config, Language::Ja, Language::Vi).unwrap();
-        assert!(matches!(client, TranslationClient::OpenAiCompatible(_)));
-        assert_eq!(
-            client.endpoint(),
-            "http://localhost:8080/v1/chat/completions"
-        );
+        match &client {
+            TranslationClient::OpenAiCompatible(inner) => {
+                assert_eq!(
+                    inner.endpoint(),
+                    "http://localhost:8080/v1/chat/completions"
+                );
+            }
+        }
     }
 
     #[test]
