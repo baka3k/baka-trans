@@ -346,23 +346,128 @@ impl Default for LocalTranslationConfigDraft {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum TranslationClient {
     OpenAiCompatible(openai_compatible::OpenAiCompatibleClient),
+    HyMt(HyMtClient),
+}
+
+impl std::fmt::Debug for TranslationClient {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::OpenAiCompatible(client) => formatter
+                .debug_tuple("OpenAiCompatible")
+                .field(&client.endpoint())
+                .finish(),
+            Self::HyMt(client) => formatter
+                .debug_struct("HyMt")
+                .field("source_language", &client.source_language)
+                .field("target_language", &client.target_language)
+                .finish(),
+        }
+    }
+}
+
+/// Live-session handle for the offline Hy-MT2 runtime.
+#[derive(Clone)]
+pub struct HyMtClient {
+    session: std::sync::Arc<std::sync::Mutex<crate::hy_mt::HyMtSession>>,
+    source_language: String,
+    target_language: String,
+}
+
+impl HyMtClient {
+    async fn start(
+        app: &tauri::AppHandle,
+        source_language: Language,
+        target_language: Language,
+    ) -> AppResult<Self> {
+        let source = source_language.realtime_code().to_string();
+        let target = target_language.realtime_code().to_string();
+        let join_result = tauri::async_runtime::spawn_blocking({
+            let app = app.clone();
+            move || crate::hy_mt::HyMtSession::start(&app)
+        })
+        .await
+        .map_err(|error| {
+            AppError::new(
+                "local_hy_mt2_session_join_error",
+                format!("Could not join the Hy-MT2 session start task: {error}"),
+            )
+        })?;
+        let session = join_result?;
+        Ok(Self {
+            session: std::sync::Arc::new(std::sync::Mutex::new(session)),
+            source_language: source,
+            target_language: target,
+        })
+    }
+
+    /// Test-only entry point that builds a [`HyMtClient`] from a synthetic
+    /// `CommandSpec`, bypassing the managed-runtime manifest lookup so unit
+    /// tests can drive a fake shell through `start_with_spec`+`translate`.
+    #[cfg(test)]
+    pub(crate) async fn start_with_spec(
+        spec: crate::hy_mt::CommandSpec,
+        source_language: Language,
+        target_language: Language,
+    ) -> AppResult<Self> {
+        let source = source_language.realtime_code().to_string();
+        let target = target_language.realtime_code().to_string();
+        let join_result = tauri::async_runtime::spawn_blocking(move || {
+            crate::hy_mt::HyMtSession::start_with_spec(&spec, std::path::Path::new("."), "cpu")
+        })
+        .await
+        .map_err(|error| {
+            AppError::new(
+                "local_hy_mt2_session_join_error",
+                format!("Could not join the Hy-MT2 session start task: {error}"),
+            )
+        })?;
+        let session = join_result?;
+        Ok(Self {
+            session: std::sync::Arc::new(std::sync::Mutex::new(session)),
+            source_language: source,
+            target_language: target,
+        })
+    }
+
+    async fn translate(&self, source_text: &str) -> AppResult<(String, u64)> {
+        let session = self.session.clone();
+        let source_language = self.source_language.clone();
+        let target_language = self.target_language.clone();
+        let text = source_text.to_string();
+        tauri::async_runtime::spawn_blocking(move || {
+            let mut guard = session.lock().map_err(|error| {
+                AppError::new(
+                    "local_hy_mt2_session_lock_error",
+                    format!("The Hy-MT2 session lock was poisoned: {error}"),
+                )
+            })?;
+            guard.translate(&source_language, &target_language, &text)
+        })
+        .await
+        .map_err(|error| {
+            AppError::new(
+                "local_hy_mt2_session_join_error",
+                format!("Could not join the Hy-MT2 translate task: {error}"),
+            )
+        })?
+    }
 }
 
 impl TranslationClient {
-    pub fn new(
+    pub async fn new(
+        app: &tauri::AppHandle,
         config: &LocalTranslationConfig,
         source_language: Language,
         target_language: Language,
     ) -> AppResult<Self> {
         match config.translation_engine {
             LocalTranslationEngine::HuggingfaceOffline => {
-                Err(AppError::new(
-                    "local_hy_mt2_not_available",
-                    "The offline Hy-MT2 engine is not enabled for live sessions yet (quality gate CAUTION). Use 'Test translation engine' in settings to evaluate it, or choose the OpenAI-compatible engine.",
-                ))
+                HyMtClient::start(app, source_language, target_language)
+                    .await
+                    .map(Self::HyMt)
             }
             LocalTranslationEngine::OpenaiCompatible => {
                 let api_key_info = api_key::load_local_translation_api_key()?;
@@ -385,6 +490,7 @@ impl TranslationClient {
     pub async fn translate(&self, source_text: &str) -> AppResult<(String, u64)> {
         match self {
             Self::OpenAiCompatible(client) => client.translate(source_text).await,
+            Self::HyMt(client) => client.translate(source_text).await,
         }
     }
 }
@@ -470,8 +576,8 @@ pub async fn test_config(
                     crate::hy_mt::HY_MT_MODEL_ID.to_string(),
                     "managed offline runtime".to_string(),
                     AppError::new(
-                        "local_hy_mt2_not_available",
-                        "The offline Hy-MT2 engine is not enabled for live sessions yet (quality gate CAUTION).",
+                        "local_hy_mt2_no_app_handle",
+                        "Cannot probe the offline Hy-MT2 engine without an app handle.",
                     ),
                     LocalTestHealth {
                         whisper_model_readable: true,
@@ -1429,15 +1535,23 @@ mod tests {
         let _ = std::fs::remove_file(model_path);
     }
 
-    #[test]
-    fn translation_client_dispatches_openai_compatible() {
-        let config = LocalTranslationConfig {
-            translation_engine: LocalTranslationEngine::OpenaiCompatible,
-            openai_base_url: "http://localhost:8080/v1".to_string(),
-            openai_model: "gemma-3-4b-it".to_string(),
-            ..LocalTranslationConfig::default()
-        };
-        let client = TranslationClient::new(&config, Language::Ja, Language::Vi).unwrap();
+    #[tokio::test]
+    async fn translation_client_dispatches_openai_compatible() {
+        let api_key_info: Option<crate::local_translation::api_key::ApiKeyInfo> = None;
+        let _ = api_key_info; // explicit silence
+        let inner = openai_compatible::OpenAiCompatibleClient::new(
+            "http://localhost:8080/v1",
+            "gemma-3-4b-it",
+            30,
+            0.0,
+            256,
+            None,
+            Language::Ja,
+            Language::Vi,
+        )
+        .expect("OpenAI-compatible client should construct with a valid base URL");
+
+        let client = TranslationClient::OpenAiCompatible(inner);
         match &client {
             TranslationClient::OpenAiCompatible(inner) => {
                 assert_eq!(
@@ -1445,28 +1559,56 @@ mod tests {
                     "http://localhost:8080/v1/chat/completions"
                 );
             }
+            other => panic!("expected OpenAiCompatible variant, got {:?}", other),
         }
     }
 
-    #[test]
-    fn translation_client_rejects_huggingface_offline_as_not_available() {
-        let config = LocalTranslationConfig {
-            translation_engine: LocalTranslationEngine::HuggingfaceOffline,
-            ..LocalTranslationConfig::default()
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn translation_client_dispatches_huggingface_offline() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = std::env::temp_dir().join(format!("baka-trans-hy-mt-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let script = directory.join("fake-hy-mt.sh");
+        std::fs::write(
+            &script,
+            concat!(
+                "#!/bin/sh\n",
+                "printf '%s\\n' '{\"type\":\"ready\",\"protocolVersion\":1,\"runtimeVersion\":\"0.2.0\",\"modelId\":\"tencent/Hy-MT2-1.8B\",\"revision\":\"9a341cd1b679d3efd23b46e847b01745a71ed792\",\"trustRemoteCode\":false,\"device\":\"cpu\",\"dtype\":\"float32\",\"pid\":1,\"loadMs\":25.5}'\n",
+                "IFS= read -r line\n",
+                "id=$(printf '%s' \"$line\" | sed -n 's/.*\"id\":\"\\([^\"]*\\)\".*/\\1/p')\n",
+                "printf '{\"type\":\"result\",\"id\":\"%s\",\"text\":\"Xin chào\",\"inputTokens\":3,\"outputTokens\":3,\"latencyMs\":4.5}\\n' \"$id\"\n",
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let spec = crate::hy_mt::CommandSpec {
+            program: script.clone(),
+            prefix_args: Vec::new(),
+            working_dir: directory.clone(),
         };
-        let result = TranslationClient::new(&config, Language::Ja, Language::Vi);
-        assert_eq!(result.unwrap_err().code, "local_hy_mt2_not_available");
+        let client = HyMtClient::start_with_spec(spec, Language::Ja, Language::Vi)
+            .await
+            .unwrap();
+        let (text, _latency) = client.translate("こんにちは").await.unwrap();
+        assert_eq!(text, "Xin chào");
+        let _ = std::fs::remove_dir_all(directory);
     }
 
-    #[test]
-    fn translation_client_rejects_missing_openai_base_url() {
-        let config = LocalTranslationConfig {
-            translation_engine: LocalTranslationEngine::OpenaiCompatible,
-            openai_base_url: String::new(),
-            openai_model: "gemma-3-4b-it".to_string(),
-            ..LocalTranslationConfig::default()
-        };
-        let result = TranslationClient::new(&config, Language::Ja, Language::Vi);
+    #[tokio::test]
+    async fn translation_client_rejects_missing_openai_base_url() {
+        let result = openai_compatible::OpenAiCompatibleClient::new(
+            "",
+            "gemma-3-4b-it",
+            30,
+            0.0,
+            256,
+            None,
+            Language::Ja,
+            Language::Vi,
+        );
         assert_eq!(result.unwrap_err().code, "local_openai_base_url_missing");
     }
 

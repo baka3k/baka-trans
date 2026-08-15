@@ -122,7 +122,7 @@ pub async fn run_local_translation(
     } = runtime;
     let whisper_language =
         crate::local_translation::whisper_language_code(source_language)?.map(str::to_string);
-    let client = TranslationClient::new(&config, source_language, target_language)?;
+    let client = TranslationClient::new(&app, &config, source_language, target_language).await?;
     let (utterance_tx, utterance_rx) = mpsc::channel(UTTERANCE_QUEUE_CAPACITY);
     let cancellation = Arc::new(AtomicBool::new(false));
     let activity = Arc::new(PipelineActivity::default());
@@ -335,93 +335,104 @@ fn spawn_translation_worker(
                 break;
             }
 
-            let pending = TranscriptItem {
-                id: utterance_id.clone(),
-                timestamp_ms,
-                source_text: source_text.clone(),
-                translated_text: String::new(),
-                status: TranscriptStatus::Partial,
-                latency_ms: None,
-                revision: 1,
-                update_mode: TranscriptUpdateMode::Snapshot,
-                error_message: None,
-            };
-            emit_snapshot(
-                &app,
-                &transcript_store,
-                generation,
-                &active_generation,
-                pending.clone(),
-            )?;
+            let sentences = split_sentences(&source_text);
+            let sentence_count = sentences.len();
+            let pending_items: Vec<TranscriptItem> = sentences
+                .into_iter()
+                .enumerate()
+                .map(|(index, sentence)| TranscriptItem {
+                    id: sentence_item_id(&utterance_id, index, sentence_count),
+                    timestamp_ms,
+                    source_text: sentence,
+                    translated_text: String::new(),
+                    status: TranscriptStatus::Partial,
+                    latency_ms: None,
+                    revision: 1,
+                    update_mode: TranscriptUpdateMode::Snapshot,
+                    error_message: None,
+                })
+                .collect();
+            for pending in &pending_items {
+                emit_snapshot(
+                    &app,
+                    &transcript_store,
+                    generation,
+                    &active_generation,
+                    pending.clone(),
+                )?;
+            }
             activity
                 .translation_stage
                 .store(TRANSLATION_TRANSLATING, Ordering::SeqCst);
             settle_pipeline_activity(&app, generation, &activity)?;
-            if !is_worker_active(generation, &active_generation, &cancellation) {
-                break;
-            }
 
-            let translation = client.translate(&source_text).await;
-            if !is_worker_active(generation, &active_generation, &cancellation) {
-                break;
-            }
-            match translation {
-                Ok((translated_text, _translation_latency_ms)) => {
-                    let speech_text = translated_text.clone();
-                    emit_snapshot(
-                        &app,
-                        &transcript_store,
-                        generation,
-                        &active_generation,
-                        TranscriptItem {
-                            translated_text,
-                            status: TranscriptStatus::Final,
-                            latency_ms: Some(elapsed_ms(started)),
-                            revision: 2,
-                            ..pending
-                        },
-                    )?;
-                    match tts_tx.try_send(TtsRequest {
-                        utterance_id: utterance_id.clone(),
-                        translated_text: speech_text,
-                    }) {
-                        Ok(()) => {}
-                        Err(mpsc::error::TrySendError::Full(_)) => {
-                            let _ = app.emit(
-                                "app-error",
-                                AppError::new(
-                                    "local_tts_backlog_full",
-                                    "Local speech is falling behind. The translated text was kept, but this sentence will not be spoken.",
-                                ),
-                            );
-                        }
-                        Err(mpsc::error::TrySendError::Closed(_)) => {
-                            if is_worker_active(generation, &active_generation, &cancellation) {
+            for pending in pending_items {
+                if !is_worker_active(generation, &active_generation, &cancellation) {
+                    break;
+                }
+                let sentence_text = pending.source_text.clone();
+                let translation = client.translate(&sentence_text).await;
+                if !is_worker_active(generation, &active_generation, &cancellation) {
+                    break;
+                }
+                match translation {
+                    Ok((translated_text, _translation_latency_ms)) => {
+                        let speech_text = translated_text.clone();
+                        emit_snapshot(
+                            &app,
+                            &transcript_store,
+                            generation,
+                            &active_generation,
+                            TranscriptItem {
+                                translated_text,
+                                status: TranscriptStatus::Final,
+                                latency_ms: Some(elapsed_ms(started)),
+                                revision: 2,
+                                ..pending
+                            },
+                        )?;
+                        match tts_tx.try_send(TtsRequest {
+                            utterance_id: utterance_id.clone(),
+                            translated_text: speech_text,
+                        }) {
+                            Ok(()) => {}
+                            Err(mpsc::error::TrySendError::Full(_)) => {
                                 let _ = app.emit(
                                     "app-error",
                                     AppError::new(
-                                        "local_tts_worker_closed",
-                                        "The local speech worker stopped unexpectedly.",
+                                        "local_tts_backlog_full",
+                                        "Local speech is falling behind. The translated text was kept, but this sentence will not be spoken.",
                                     ),
                                 );
                             }
+                            Err(mpsc::error::TrySendError::Closed(_)) => {
+                                if is_worker_active(generation, &active_generation, &cancellation) {
+                                    let _ = app.emit(
+                                        "app-error",
+                                        AppError::new(
+                                            "local_tts_worker_closed",
+                                            "The local speech worker stopped unexpectedly.",
+                                        ),
+                                    );
+                                }
+                            }
                         }
                     }
-                }
-                Err(error) => {
-                    emit_snapshot(
-                        &app,
-                        &transcript_store,
-                        generation,
-                        &active_generation,
-                        TranscriptItem {
-                            status: TranscriptStatus::Error,
-                            latency_ms: Some(elapsed_ms(started)),
-                            revision: 2,
-                            error_message: Some(error.message),
-                            ..pending
-                        },
-                    )?;
+                    Err(error) => {
+                        emit_snapshot(
+                            &app,
+                            &transcript_store,
+                            generation,
+                            &active_generation,
+                            TranscriptItem {
+                                status: TranscriptStatus::Error,
+                                latency_ms: Some(elapsed_ms(started)),
+                                revision: 2,
+                                error_message: Some(error.message),
+                                ..pending
+                            },
+                        )?;
+                    }
                 }
             }
             activity
@@ -680,6 +691,69 @@ fn is_worker_active(
     cancellation: &Arc<AtomicBool>,
 ) -> bool {
     !cancellation.load(Ordering::SeqCst) && is_generation_active(generation, active_generation)
+}
+
+fn sentence_item_id(utterance_id: &str, index: usize, sentence_count: usize) -> String {
+    if sentence_count <= 1 {
+        utterance_id.to_string()
+    } else {
+        format!("{utterance_id}:{index}")
+    }
+}
+
+const SENTENCE_CLOSERS: &[char] = &['"', '\'', ')', ']', '”', '’', '』', '」'];
+
+fn split_sentences(text: &str) -> Vec<String> {
+    let normalized: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.is_empty() {
+        return Vec::new();
+    }
+
+    let chars: Vec<char> = normalized.chars().collect();
+    let mut sentences: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut index = 0;
+
+    while index < chars.len() {
+        let ch = chars[index];
+        current.push(ch);
+        index += 1;
+
+        if !is_sentence_terminator(ch) {
+            continue;
+        }
+        if ch == '.' && is_decimal_separator(&chars, index) {
+            continue;
+        }
+        while index < chars.len()
+            && (is_sentence_terminator(chars[index]) || SENTENCE_CLOSERS.contains(&chars[index]))
+        {
+            current.push(chars[index]);
+            index += 1;
+        }
+        push_sentence(&mut sentences, &current);
+        current.clear();
+    }
+    push_sentence(&mut sentences, &current);
+    sentences
+}
+
+fn is_sentence_terminator(ch: char) -> bool {
+    matches!(ch, '.' | '!' | '?' | '。' | '！' | '？')
+}
+
+fn is_decimal_separator(chars: &[char], next_index: usize) -> bool {
+    next_index < chars.len()
+        && next_index >= 2
+        && chars[next_index].is_ascii_digit()
+        && chars[next_index - 2].is_ascii_digit()
+}
+
+fn push_sentence(sentences: &mut Vec<String>, candidate: &str) {
+    let trimmed = candidate.trim();
+    if !trimmed.is_empty() {
+        sentences.push(trimmed.to_string());
+    }
 }
 
 fn transcribe(
@@ -1117,6 +1191,74 @@ mod tests {
             pipeline_activity_state(&activity),
             (SessionStatus::Speaking, "speaking")
         );
+    }
+
+    #[test]
+    fn splits_latin_sentences_on_terminators() {
+        assert_eq!(
+            split_sentences("Hello there. How are you? I am fine!"),
+            vec![
+                "Hello there.".to_string(),
+                "How are you?".to_string(),
+                "I am fine!".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn splits_cjk_sentences_on_terminators() {
+        assert_eq!(
+            split_sentences("今日はいい天気ですね。どこに行きますか？楽しんでください！"),
+            vec![
+                "今日はいい天気ですね。".to_string(),
+                "どこに行きますか？".to_string(),
+                "楽しんでください！".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn keeps_punctuation_runs_and_closing_quotes() {
+        assert_eq!(
+            split_sentences("Really?! \"Yes.\" (No way.)"),
+            vec![
+                "Really?!".to_string(),
+                "\"Yes.\"".to_string(),
+                "(No way.)".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn does_not_split_decimal_numbers() {
+        assert_eq!(
+            split_sentences("It costs 3.14 dollars. That is cheap."),
+            vec![
+                "It costs 3.14 dollars.".to_string(),
+                "That is cheap.".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn text_without_terminators_stays_single_sentence() {
+        assert_eq!(
+            split_sentences("one two three"),
+            vec!["one two three".to_string()]
+        );
+    }
+
+    #[test]
+    fn empty_text_yields_no_sentences() {
+        assert!(split_sentences("").is_empty());
+        assert!(split_sentences("   ").is_empty());
+    }
+
+    #[test]
+    fn single_sentence_keeps_utterance_id() {
+        assert_eq!(sentence_item_id("u1", 0, 1), "u1");
+        assert_eq!(sentence_item_id("u1", 0, 3), "u1:0");
+        assert_eq!(sentence_item_id("u1", 2, 3), "u1:2");
     }
 
     #[tokio::test]

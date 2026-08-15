@@ -54,5 +54,8 @@ windows = { version = "0.61", features = [
 ] }
 windows-future = "0.2"
 
+[dev-dependencies]
+tauri = { version = "2.8.0", features = ["test"] }
+
 [features]
 custom-protocol = ["tauri/custom-protocol"]

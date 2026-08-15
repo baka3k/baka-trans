@@ -4,7 +4,7 @@ use crate::vieneu::model_cache_dir;
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc as std_mpsc, Arc, Mutex};
 use std::thread;
@@ -28,10 +28,10 @@ const SERVE_PROBE_TEXT: &str = "こんにちは";
 const SERVE_PROBE_MAX_NEW_TOKENS: u32 = 64;
 
 #[derive(Clone)]
-struct CommandSpec {
-    program: PathBuf,
-    prefix_args: Vec<std::ffi::OsString>,
-    working_dir: PathBuf,
+pub(crate) struct CommandSpec {
+    pub(crate) program: PathBuf,
+    pub(crate) prefix_args: Vec<std::ffi::OsString>,
+    pub(crate) working_dir: PathBuf,
 }
 
 pub struct HyMtManager {
@@ -614,155 +614,24 @@ struct ServeFrame {
     message: Option<String>,
 }
 
-struct ChildGuard {
-    child: Child,
-}
-
-impl Drop for ChildGuard {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
-
 fn run_serve_probe(
     spec: &CommandSpec,
     model_root: &Path,
     device: &str,
 ) -> AppResult<HyMtEngineProbe> {
-    let mut command = command_from_spec(spec);
-    command
-        .arg("serve")
-        .arg("--model-root")
-        .arg(model_root)
-        .arg("--device")
-        .arg(device)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    hide_child_window(&mut command);
-    let mut child = command.spawn().map_err(|error| {
-        AppError::new(
-            "hy_mt_serve_spawn_error",
-            format!("Could not start the Hy-MT2 runtime: {error}"),
-        )
-    })?;
-    let stdout = child.stdout.take().ok_or_else(|| {
-        AppError::new("hy_mt_serve_io_error", "Hy-MT2 runtime has no output pipe.")
-    })?;
-    let mut guard = ChildGuard { child };
-    let receiver = spawn_line_reader(stdout);
-
-    let ready_line = read_serve_line(
-        &receiver,
-        &mut guard,
-        SERVE_READY_TIMEOUT,
-        "hy_mt_serve_ready_timeout",
-        "The offline Hy-MT2 engine did not finish loading within two minutes.",
-    )?;
-    let ready = parse_serve_frame(&ready_line)?;
-    if ready.kind == "error" {
-        return Err(AppError::new(
-            "hy_mt_serve_failed",
-            ready
-                .message
-                .unwrap_or_else(|| "The Hy-MT2 runtime failed to start.".to_string()),
-        ));
-    }
-    if ready.kind != "ready" {
-        return Err(AppError::new(
-            "hy_mt_serve_protocol_error",
-            "The Hy-MT2 runtime sent an unexpected startup message.",
-        ));
-    }
-    if ready.protocol_version != Some(HY_MT_PROTOCOL_VERSION)
-        || ready.model_id.as_deref() != Some(HY_MT_MODEL_ID)
-        || ready.revision.as_deref() != Some(HY_MT_MODEL_REVISION)
-    {
-        return Err(AppError::new(
-            "hy_mt_identity_mismatch",
-            "The Hy-MT2 runtime reported an unexpected model identity.",
-        ));
-    }
-
-    let request_id = uuid::Uuid::new_v4().to_string();
-    let request = TranslateRequest {
-        kind: "translate",
-        protocol_version: HY_MT_PROTOCOL_VERSION,
-        id: &request_id,
-        source_language: "ja",
-        target_language: "vi",
-        text: SERVE_PROBE_TEXT,
-        max_new_tokens: SERVE_PROBE_MAX_NEW_TOKENS,
-    };
-    let mut request_line = serde_json::to_string(&request).map_err(|error| {
-        AppError::new(
-            "hy_mt_serve_protocol_error",
-            format!("Could not encode the probe request: {error}"),
-        )
-    })?;
-    request_line.push('\n');
-    {
-        let stdin = guard.child.stdin.as_mut().ok_or_else(|| {
-            AppError::new("hy_mt_serve_io_error", "Hy-MT2 runtime has no input pipe.")
-        })?;
-        stdin
-            .write_all(request_line.as_bytes())
-            .and_then(|_| stdin.flush())
-            .map_err(|error| {
-                AppError::new(
-                    "hy_mt_serve_io_error",
-                    format!("Could not send the probe request: {error}"),
-                )
-            })?;
-    }
-
-    loop {
-        let raw = read_serve_line(
-            &receiver,
-            &mut guard,
-            SERVE_TRANSLATE_TIMEOUT,
-            "hy_mt_serve_timeout",
-            "The offline Hy-MT2 engine did not answer the probe in time.",
-        )?;
-        let frame = parse_serve_frame(&raw)?;
-        let frame_id = frame.id.as_deref();
-        match frame.kind.as_str() {
-            "result" if frame_id == Some(request_id.as_str()) => {
-                let translated_text = frame.text.filter(|text| !text.trim().is_empty());
-                if translated_text.is_none() {
-                    return Err(AppError::new(
-                        "hy_mt_translate_failed",
-                        "The offline Hy-MT2 engine returned an empty translation.",
-                    ));
-                }
-                return Ok(HyMtEngineProbe {
-                    device: ready.device.unwrap_or_else(|| device.to_string()),
-                    load_ms: ready.load_ms.unwrap_or(0.0),
-                    translated_text,
-                    latency_ms: frame.latency_ms,
-                    reachable: true,
-                    accepted: true,
-                    error: None,
-                });
-            }
-            "cancelled" if frame_id == Some(request_id.as_str()) => {
-                return Err(AppError::new(
-                    "hy_mt_translate_cancelled",
-                    "The probe translation was cancelled before completing.",
-                ));
-            }
-            "error" => {
-                return Err(AppError::new(
-                    "hy_mt_translate_failed",
-                    frame.message.unwrap_or_else(|| {
-                        "The offline Hy-MT2 engine rejected the probe.".to_string()
-                    }),
-                ));
-            }
-            _ => {}
-        }
-    }
+    let mut session = HyMtSession::start_with_spec(spec, model_root, device)?;
+    let device = session.device.clone();
+    let load_ms = session.load_ms;
+    let (translated_text, _wall_clock_ms) = session.translate("ja", "vi", SERVE_PROBE_TEXT)?;
+    Ok(HyMtEngineProbe {
+        device,
+        load_ms,
+        translated_text: Some(translated_text),
+        latency_ms: session.last_protocol_latency_ms(),
+        reachable: true,
+        accepted: true,
+        error: None,
+    })
 }
 
 fn parse_serve_frame(line: &str) -> AppResult<ServeFrame> {
@@ -774,9 +643,11 @@ fn parse_serve_frame(line: &str) -> AppResult<ServeFrame> {
     })
 }
 
-fn read_serve_line(
-    receiver: &std_mpsc::Receiver<String>,
-    guard: &mut ChildGuard,
+/// Reads one framed line from the runtime, with timeout. The caller owns the
+/// running [`Child`] and reaps it via its own drop path. Used by both the
+/// probe path and the long-lived [`HyMtSession`].
+fn read_serve_line_without_guard(
+    receiver: &std::sync::mpsc::Receiver<String>,
     timeout: Duration,
     timeout_code: &str,
     timeout_message: &str,
@@ -788,13 +659,252 @@ fn read_serve_line(
         Err(std_mpsc::RecvTimeoutError::Timeout) => {
             Err(AppError::new(timeout_code, timeout_message))
         }
-        Err(std_mpsc::RecvTimeoutError::Disconnected) => {
-            let _ = guard.child.wait();
-            Err(AppError::new(
-                "hy_mt_serve_early_exit",
-                "The Hy-MT2 runtime exited before answering. Retry the test.",
-            ))
+        Err(std_mpsc::RecvTimeoutError::Disconnected) => Err(AppError::new(
+            "hy_mt_serve_early_exit",
+            "The Hy-MT2 runtime exited before answering. Retry the live session.",
+        )),
+    }
+}
+
+/// Long-lived Hy-MT2 runtime handle for live translation sessions.
+///
+/// The runtime is started in `serve` mode and reused across many translate
+/// requests so the ~4 GB model is loaded only once. Drop kills the child
+/// after a short grace window.
+pub struct HyMtSession {
+    child: Child,
+    stdin: ChildStdin,
+    receiver: std_mpsc::Receiver<String>,
+    device: String,
+    load_ms: f64,
+    last_request_latency_ms: Option<f64>,
+}
+
+impl Drop for HyMtSession {
+    fn drop(&mut self) {
+        // Field drop order in Rust is reverse-of-declaration, so `stdin`
+        // (declared after `child`) is dropped first, sending EOF to the
+        // runtime and giving it a chance to flush and exit cleanly. Then
+        // we give the runtime a brief grace window before force-killing.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match self.child.try_wait() {
+                Ok(Some(_)) => return,
+                Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
+                _ => break,
+            }
         }
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+impl HyMtSession {
+    /// Resolve a fully-managed session using the bundled sidecar. The caller
+    /// owns the returned handle until drop.
+    pub fn start(app: &AppHandle) -> AppResult<Self> {
+        let paths = ManagedPaths::resolve()?;
+        if !paths.manifest_path().is_file() {
+            return Err(AppError::new(
+                "hy_mt_model_missing",
+                "The Hy-MT2 model is not installed yet. Install it from the model card before starting the engine.",
+            ));
+        }
+        let spec = resolve_command(app)?;
+        let device = preferred_serve_device();
+        match Self::start_with_spec(&spec, &paths.model_root, device) {
+            Ok(session) => Ok(session),
+            // Intel Macs and machines without a usable MPS build exit before
+            // the ready frame; retry once on CPU instead of failing outright.
+            Err(error) if device == "mps" && error.code == "hy_mt_serve_early_exit" => {
+                Self::start_with_spec(&spec, &paths.model_root, "cpu")
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Internal helper used directly by [`run_serve_probe`] with a synthetic
+    /// `CommandSpec` and by [`start`](Self::start) for the managed runtime.
+    pub(crate) fn start_with_spec(
+        spec: &CommandSpec,
+        model_root: &Path,
+        device: &str,
+    ) -> AppResult<Self> {
+        let mut command = command_from_spec(spec);
+        command
+            .arg("serve")
+            .arg("--model-root")
+            .arg(model_root)
+            .arg("--device")
+            .arg(device)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        hide_child_window(&mut command);
+        let mut child = command.spawn().map_err(|error| {
+            AppError::new(
+                "hy_mt_serve_spawn_error",
+                format!("Could not start the Hy-MT2 runtime: {error}"),
+            )
+        })?;
+        let stdout = child.stdout.take().ok_or_else(|| {
+            let _ = child.kill();
+            let _ = child.wait();
+            AppError::new("hy_mt_serve_io_error", "Hy-MT2 runtime has no output pipe.")
+        })?;
+        let stdin = child.stdin.take().ok_or_else(|| {
+            let _ = child.kill();
+            let _ = child.wait();
+            AppError::new("hy_mt_serve_io_error", "Hy-MT2 runtime has no input pipe.")
+        })?;
+        let receiver = spawn_line_reader(stdout);
+
+        let ready_line = read_serve_line_without_guard(
+            &receiver,
+            SERVE_READY_TIMEOUT,
+            "hy_mt_serve_ready_timeout",
+            "The offline Hy-MT2 engine did not finish loading within two minutes.",
+        );
+        let ready_line = match ready_line {
+            Ok(line) => line,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
+            }
+        };
+        let ready = match parse_serve_frame(&ready_line) {
+            Ok(frame) => frame,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
+            }
+        };
+        if ready.kind == "error" {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(AppError::new(
+                "hy_mt_serve_failed",
+                ready
+                    .message
+                    .unwrap_or_else(|| "The Hy-MT2 runtime failed to start.".to_string()),
+            ));
+        }
+        if ready.kind != "ready" {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(AppError::new(
+                "hy_mt_serve_protocol_error",
+                "The Hy-MT2 runtime sent an unexpected startup message.",
+            ));
+        }
+        if ready.protocol_version != Some(HY_MT_PROTOCOL_VERSION)
+            || ready.model_id.as_deref() != Some(HY_MT_MODEL_ID)
+            || ready.revision.as_deref() != Some(HY_MT_MODEL_REVISION)
+        {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(AppError::new(
+                "hy_mt_identity_mismatch",
+                "The Hy-MT2 runtime reported an unexpected model identity.",
+            ));
+        }
+
+        Ok(Self {
+            child,
+            stdin,
+            receiver,
+            device: ready.device.unwrap_or_else(|| device.to_string()),
+            load_ms: ready.load_ms.unwrap_or(0.0),
+            last_request_latency_ms: None,
+        })
+    }
+
+    /// Send one translate request to the running runtime and wait for the
+    /// matching result frame. Returns `(translated_text, wall_clock_ms)`.
+    pub fn translate(
+        &mut self,
+        source_language: &str,
+        target_language: &str,
+        text: &str,
+    ) -> AppResult<(String, u64)> {
+        let started = Instant::now();
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let request = TranslateRequest {
+            kind: "translate",
+            protocol_version: HY_MT_PROTOCOL_VERSION,
+            id: &request_id,
+            source_language,
+            target_language,
+            text,
+            max_new_tokens: SERVE_PROBE_MAX_NEW_TOKENS,
+        };
+        let mut request_line = serde_json::to_string(&request).map_err(|error| {
+            AppError::new(
+                "hy_mt_serve_protocol_error",
+                format!("Could not encode the translate request: {error}"),
+            )
+        })?;
+        request_line.push('\n');
+        self.stdin
+            .write_all(request_line.as_bytes())
+            .and_then(|_| self.stdin.flush())
+            .map_err(|error| {
+                AppError::new(
+                    "hy_mt_serve_io_error",
+                    format!("Could not send the translate request: {error}"),
+                )
+            })?;
+
+        loop {
+            let raw = read_serve_line_without_guard(
+                &self.receiver,
+                SERVE_TRANSLATE_TIMEOUT,
+                "hy_mt_serve_timeout",
+                "The offline Hy-MT2 engine did not answer the translate request in time.",
+            )?;
+            let frame = parse_serve_frame(&raw)?;
+            let frame_id = frame.id.as_deref();
+            match frame.kind.as_str() {
+                "result" if frame_id == Some(request_id.as_str()) => {
+                    let translated_text = frame.text.filter(|text| !text.trim().is_empty());
+                    let translated_text = match translated_text {
+                        Some(value) => value,
+                        None => {
+                            return Err(AppError::new(
+                                "hy_mt_translate_failed",
+                                "The offline Hy-MT2 engine returned an empty translation.",
+                            ));
+                        }
+                    };
+                    self.last_request_latency_ms = frame.latency_ms;
+                    let elapsed = started.elapsed().as_millis().min(86_400_000) as u64;
+                    return Ok((translated_text, elapsed));
+                }
+                "cancelled" if frame_id == Some(request_id.as_str()) => {
+                    return Err(AppError::new(
+                        "hy_mt_translate_cancelled",
+                        "The translation was cancelled before completing.",
+                    ));
+                }
+                "error" => {
+                    return Err(AppError::new(
+                        "hy_mt_translate_failed",
+                        frame.message.unwrap_or_else(|| {
+                            "The offline Hy-MT2 engine rejected the translate request.".to_string()
+                        }),
+                    ));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Cheap accessor used by callers that need the protocol-reported
+    /// translation latency (separate from wall-clock) for diagnostics.
+    pub fn last_protocol_latency_ms(&self) -> Option<f64> {
+        self.last_request_latency_ms
     }
 }
 
