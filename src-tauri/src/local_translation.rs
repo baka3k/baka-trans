@@ -17,7 +17,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::io::AsyncWriteExt;
 use whisper_rs::{get_lang_id, WhisperContext, WhisperContextParameters};
 
-const CONFIG_SCHEMA_VERSION: u32 = 3;
+const CONFIG_SCHEMA_VERSION: u32 = 4;
 const CONFIG_DIR_NAME: &str = "dev.baka3k.baka-trans";
 const CONFIG_FILE_NAME: &str = "local-translation-config.json";
 const MODEL_CACHE_DIR_NAME: &str = ".bakatrans";
@@ -322,7 +322,9 @@ impl Default for LocalTranslationConfig {
             model_path: String::new(),
             language: "ja".to_string(),
             threads: default_thread_count(),
-            use_gpu: false,
+            // GPU acceleration (Metal) is compiled in on macOS, so request it by
+            // default there. Other platforms build CPU-only and keep this false.
+            use_gpu: cfg!(target_os = "macos"),
             sample_rate_hz: 16_000,
             minimum_speech_ms: 300,
             silence_to_commit_ms: 700,
@@ -1030,8 +1032,11 @@ fn read_config_from_path(path: &Path) -> AppResult<LocalTranslationConfig> {
 
     let legacy_schema = detect_legacy_schema_version(&raw);
     if let Some(version) = legacy_schema {
-        if version < CONFIG_SCHEMA_VERSION {
+        if version < 3 {
             return migrate_legacy_config(path, &raw, version);
+        }
+        if version < CONFIG_SCHEMA_VERSION {
+            return migrate_gpu_default_config(path, &raw);
         }
     }
 
@@ -1060,6 +1065,22 @@ fn detect_legacy_schema_version(raw: &str) -> Option<u32> {
         .or_else(|| value.get("schema_version"))
         .and_then(serde_json::Value::as_u64)
         .map(|v| v as u32)
+}
+
+fn migrate_gpu_default_config(path: &Path, raw: &str) -> AppResult<LocalTranslationConfig> {
+    // v3 and earlier never shipped a working GPU backend (Metal/CUDA were not
+    // compiled in), so a stored `useGpu: false` was never an active choice.
+    // Re-apply the platform default and bump the schema version.
+    let mut config: LocalTranslationConfig = serde_json::from_str(raw).map_err(|err| {
+        AppError::new(
+            "local_config_parse_error",
+            format!("Could not parse {}: {err}", path.display()),
+        )
+    })?;
+    config.schema_version = CONFIG_SCHEMA_VERSION;
+    config.use_gpu = cfg!(target_os = "macos");
+    write_config_to_path(path, &config)?;
+    Ok(config)
 }
 
 fn migrate_legacy_config(
@@ -1097,9 +1118,9 @@ fn migrate_legacy_config(
     if let Some(threads) = legacy.get("threads").and_then(|v| v.as_u64()) {
         config.threads = threads as u32;
     }
-    if let Some(use_gpu) = legacy.get("useGpu").and_then(|v| v.as_bool()) {
-        config.use_gpu = use_gpu;
-    }
+    // Legacy `useGpu` values are ignored: no pre-v4 build had a working GPU
+    // backend, so the platform default from `LocalTranslationConfig::default`
+    // is applied instead.
     if let Some(rate) = legacy.get("sampleRateHz").and_then(|v| v.as_u64()) {
         config.sample_rate_hz = rate as u32;
     }
@@ -1280,6 +1301,50 @@ mod tests {
         assert_eq!(config.tts_provider, LocalTtsProvider::System);
         assert_eq!(config.vieneu_base_url, "http://127.0.0.1:23334");
         assert_eq!(config.vieneu_style, "tu_nhien");
+    }
+
+    #[test]
+    fn defaults_request_gpu_only_on_macos() {
+        assert_eq!(
+            LocalTranslationConfig::default().use_gpu,
+            cfg!(target_os = "macos")
+        );
+    }
+
+    #[test]
+    fn migrates_v3_config_losslessly_with_platform_gpu_default() {
+        let directory = std::env::temp_dir().join(format!("baka-trans-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join(CONFIG_FILE_NAME);
+
+        let v3_json = serde_json::json!({
+            "schemaVersion": 3,
+            "translationEngine": "huggingface_offline",
+            "modelPath": "/models/whisper.bin",
+            "language": "ja",
+            "threads": 4,
+            "useGpu": false,
+            "sampleRateHz": 16000,
+            "ttsProvider": "vieneu",
+            "voiceId": "Mai Anh"
+        });
+        std::fs::write(&path, serde_json::to_string_pretty(&v3_json).unwrap()).unwrap();
+
+        let migrated = read_config_from_path(&path).unwrap();
+
+        assert_eq!(migrated.schema_version, CONFIG_SCHEMA_VERSION);
+        assert_eq!(migrated.use_gpu, cfg!(target_os = "macos"));
+        assert_eq!(migrated.model_path, "/models/whisper.bin");
+        assert_eq!(migrated.tts_provider, LocalTtsProvider::Vieneu);
+        assert_eq!(migrated.voice_id, "Mai Anh");
+
+        let persisted: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(persisted["schemaVersion"], CONFIG_SCHEMA_VERSION);
+        assert_eq!(persisted["useGpu"], cfg!(target_os = "macos"));
+        assert_eq!(persisted["ttsProvider"], "vieneu");
+
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[test]

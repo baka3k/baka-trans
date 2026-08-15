@@ -11,6 +11,18 @@ import type {
   WhisperModelOption,
 } from "../../types";
 
+// Mirror of the Rust default (`cfg!(target_os = "macos")`): GPU acceleration
+// is compiled in on macOS, so request it there. This is only the pre-hydration
+// placeholder; the backend config remains the source of truth.
+const isMacOs = () => {
+  if (typeof navigator === "undefined") {
+    return false;
+  }
+  const platform = (navigator.platform ?? "").toLowerCase();
+  const userAgent = (navigator.userAgent ?? "").toLowerCase();
+  return platform.includes("mac") || userAgent.includes("mac os");
+};
+
 export const defaultLocalTranslationConfig: LocalTranslationConfigDraft = {
   translationEngine: "huggingface_offline",
   openaiBaseUrl: "",
@@ -21,7 +33,7 @@ export const defaultLocalTranslationConfig: LocalTranslationConfigDraft = {
   modelPath: "",
   language: "ja",
   threads: 4,
-  useGpu: false,
+  useGpu: isMacOs(),
   sampleRateHz: 16000,
   minimumSpeechMs: 300,
   silenceToCommitMs: 700,
