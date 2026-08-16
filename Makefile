@@ -23,13 +23,17 @@
 #     is set in tauri config (it isn't), so without the cargo config the
 #     value defaults to 10.13 and ggml fails to compile.
 #   - cargo's build-script hash does NOT include env vars, so changing
-#     `.cargo/config.toml` does not invalidate the cached whisper-rs-sys
-#     build (which holds `CMAKE_CXX_FLAGS` from the previous run). To
-#     pick up a new value, `make build` shell-checks mtimes and runs
+#     `MACOSX_DEPLOYMENT_TARGET` does not invalidate the cached whisper-rs-sys
+#     build (which holds `CMAKE_CXX_FLAGS` from the previous run). The
+#     `cmake` crate reuses `CMakeCache.txt` if it already exists and skips
+#     reconfigure, so the new env var never reaches cmake. To pick up a new
+#     value, `make build` shell-checks mtimes and runs
 #     `cargo clean -p whisper-rs-sys` (one-time cost ~15 s) when the
-#     config is newer than the stamp at `.cargo/wrs-cleared`. Override
-#     per-build with `make build MACOSX_DEPLOYMENT_TARGET=11.0` if your
-#     app needs a higher minimum.
+#     config is newer than the stamp at `.cargo/wrs-cleared`. It also
+#     greps the existing CMakeCache.txt and re-cleans when the cached
+#     `CMAKE_OSX_DEPLOYMENT_TARGET` disagrees with the current value.
+#     Override per-build with `make build MACOSX_DEPLOYMENT_TARGET=11.0`
+#     if your app needs a higher minimum.
 #   - Code signing is currently disabled in `tauri.macos.conf.json`
 #     (`signingIdentity: null`) so `make build` produces an unsigned `.app`
 #     for local smoke-testing. Re-enable when the Apple Development cert is
@@ -115,13 +119,19 @@ doctor:
 
 build: doctor
 	@if [ "$$(uname -s)" = "Darwin" ]; then \
-		if [ ! -f $(WRS_CLEAR_STAMP) ] || [ .cargo/config.toml -nt $(WRS_CLEAR_STAMP) ]; then \
-			printf '[pre] clearing stale whisper-rs-sys build cache (env-driven, not tracked by cargo)\n'; \
+		WRS_CACHE=src-tauri/target/release/build/whisper-rs-sys-*/out/build/CMakeCache.txt; \
+		CACHED_OSX=$$(grep -h '^CMAKE_OSX_DEPLOYMENT_TARGET:' $$WRS_CACHE 2>/dev/null | head -1 | cut -d= -f2); \
+		if [ ! -f $(WRS_CLEAR_STAMP) ] || [ .cargo/config.toml -nt $(WRS_CLEAR_STAMP) ] || [ "$$CACHED_OSX" != "$(MACOSX_DEPLOYMENT_TARGET)" ]; then \
+			if [ -n "$$CACHED_OSX" ] && [ "$$CACHED_OSX" != "$(MACOSX_DEPLOYMENT_TARGET)" ]; then \
+				printf '[pre] cached whisper-rs-sys CMakeCache has CMAKE_OSX_DEPLOYMENT_TARGET=%s, want %s — re-clearing\n' "$$CACHED_OSX" "$(MACOSX_DEPLOYMENT_TARGET)"; \
+			else \
+				printf '[pre] clearing stale whisper-rs-sys build cache (env-driven, not tracked by cargo)\n'; \
+			fi; \
 			cargo clean -p whisper-rs-sys --manifest-path src-tauri/Cargo.toml; \
 			mkdir -p $(@D); \
 			touch $(WRS_CLEAR_STAMP); \
 		else \
-			printf '[pre] whisper-rs-sys cache is fresh\n'; \
+			printf '[pre] whisper-rs-sys cache is fresh (CMAKE_OSX_DEPLOYMENT_TARGET=%s)\n' "$$CACHED_OSX"; \
 		fi \
 	fi
 	@printf '\n=== Baka Trans — building desktop app ===\n\n'

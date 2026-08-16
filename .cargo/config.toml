@@ -14,3 +14,11 @@
 # minimum where `<filesystem>` is fully usable on macOS.
 [env]
 MACOSX_DEPLOYMENT_TARGET = "10.15"
+# whisper-rs-sys's build script forwards anything matching CMAKE_* (see
+# whisper-rs-sys/build.rs:279-287) to cmake as `-D` defines. The `cmake` crate
+# reuses CMakeCache.txt if it already exists (`cmake-0.1.58/src/lib.rs:826`) and
+# only re-checks `MACOSX_DEPLOYMENT_TARGET` during fresh configure, so an
+# explicit `-DCMAKE_OSX_DEPLOYMENT_TARGET=10.15` is the only reliable way to
+# bake the right value into the cache. Without this, a stale cache from an
+# earlier run (10.13) is reused and ggml fails to compile.
+CMAKE_OSX_DEPLOYMENT_TARGET = "10.15"
