@@ -1,6 +1,6 @@
 [package]
 name = "baka-trans"
-version = "0.2.0"
+version = "0.3.0"
 description = "Real-time meeting translation for macOS and Windows"
 authors = ["baka-trans"]
 edition = "2021"
