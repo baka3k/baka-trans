@@ -7,8 +7,10 @@ Baka Trans captures live meeting audio, transcribes it, translates the speech in
 Built with **Tauri 2**, **React 18**, **TypeScript**, and **Rust**.
 
 
-<img src="img/screen.png" alt="isolated" width="700"/>
 
+<div style="text-align: center;">
+  <img src="img/screen.png" alt="isolated" style="width: 100%;height: auto;" />
+</div>
 
 ---
 
