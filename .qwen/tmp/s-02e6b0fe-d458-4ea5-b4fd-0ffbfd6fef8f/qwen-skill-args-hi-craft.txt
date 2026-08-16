@@ -1,1 +1,0 @@
---full plans/260716-2033-local-llm-audio-translation/phase-16-01-hy-mt2-gate-and-sidecar.md
