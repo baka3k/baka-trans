@@ -7,7 +7,7 @@ use crate::models::{
 use crate::session::AppState;
 use crate::tts;
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -18,6 +18,7 @@ use tokio::time::{timeout, Duration};
 use uuid::Uuid;
 use whisper_rs::{convert_integer_to_float_audio, FullParams, SamplingStrategy, WhisperContext};
 
+use super::speech_queue::{PushOutcome, SpeechQueue, TtsRequest, SPEECH_QUEUE_CAPACITY};
 use super::RealtimeControl;
 
 const UTTERANCE_QUEUE_CAPACITY: usize = 4;
@@ -27,7 +28,6 @@ const UTTERANCE_QUEUE_CAPACITY: usize = 4;
 /// Whisper worker awaits `send` instead of flooding memory, while still allowing the
 /// two streams to run independently.
 const TRANSLATION_QUEUE_CAPACITY: usize = 16;
-const TTS_QUEUE_CAPACITY: usize = 4;
 const STOP_DRAIN_TIMEOUT_SECONDS: u64 = 2;
 const CANCELLATION_GRACE_SECONDS: u64 = 2;
 
@@ -75,25 +75,28 @@ struct SentenceTranslator {
     active_generation: Arc<AtomicU64>,
     cancellation: Arc<AtomicBool>,
     activity: Arc<PipelineActivity>,
-    tts_tx: mpsc::Sender<TtsRequest>,
+    speech_queue: Arc<SpeechQueue>,
 }
 
+/// Overlapping pipeline activity for the status display. With pipelined
+/// playback, synthesis and playback run concurrently, so one speech flag can
+/// no longer represent both: `synthesizing` tracks the TTS worker inside
+/// `tts::synthesize`, and `playback_inflight` counts live pacer tasks (buffers
+/// playing or queued ahead).
 #[derive(Default)]
 struct PipelineActivity {
     translation_stage: AtomicU8,
-    speech_stage: AtomicU8,
+    synthesizing: AtomicBool,
+    playback_inflight: AtomicUsize,
 }
 
 const ACTIVITY_INACTIVE: u8 = 0;
 const TRANSLATION_TRANSCRIBING: u8 = 1;
 const TRANSLATION_TRANSLATING: u8 = 2;
-const SPEECH_SYNTHESIZING: u8 = 1;
-const SPEECH_PLAYING: u8 = 2;
-
-struct TtsRequest {
-    utterance_id: String,
-    translated_text: String,
-}
+/// Lookahead cap: the TTS worker stops synthesizing ahead once this many
+/// buffers are playing or queued for playback. Keeps the shared 24-slot cpal
+/// channel far from full and bounds stale-buffer memory.
+const MAX_BUFFERS_AHEAD: usize = 3;
 
 struct TtsWorker {
     app: AppHandle,
@@ -103,6 +106,21 @@ struct TtsWorker {
     active_generation: Arc<AtomicU64>,
     cancellation: Arc<AtomicBool>,
     activity: Arc<PipelineActivity>,
+}
+
+/// Closes the speech queue when `run_local_translation` exits without reaching
+/// one of the explicit drain sequences (error-propagation paths). Without it a
+/// detached TTS worker would park in `pop()` forever, because a shared queue —
+/// unlike an mpsc channel, which closes when its last sender drops — never
+/// closes implicitly while the worker itself still holds a queue handle.
+struct SpeechQueueCloseGuard {
+    queue: Arc<SpeechQueue>,
+}
+
+impl Drop for SpeechQueueCloseGuard {
+    fn drop(&mut self) {
+        self.queue.close();
+    }
 }
 
 pub struct LocalTranslationRuntime {
@@ -162,7 +180,12 @@ pub async fn run_local_translation(
     let (translation_tx, translation_rx) = mpsc::channel(TRANSLATION_QUEUE_CAPACITY);
     let cancellation = Arc::new(AtomicBool::new(false));
     let activity = Arc::new(PipelineActivity::default());
-    let (tts_tx, tts_rx) = mpsc::channel(TTS_QUEUE_CAPACITY);
+    let speech_queue = Arc::new(SpeechQueue::new(SPEECH_QUEUE_CAPACITY));
+    // Drop-only guard: closes the queue on early (error-path) returns so the
+    // detached TTS worker cannot park in `pop()` forever.
+    let _queue_close_guard = SpeechQueueCloseGuard {
+        queue: Arc::clone(&speech_queue),
+    };
     let tts_worker = spawn_tts_worker(
         TtsWorker {
             app: app.clone(),
@@ -173,7 +196,7 @@ pub async fn run_local_translation(
             cancellation: cancellation.clone(),
             activity: activity.clone(),
         },
-        tts_rx,
+        Arc::clone(&speech_queue),
     );
     let mut tts_worker = Some(tts_worker);
     let translator = spawn_translation_worker(
@@ -185,7 +208,7 @@ pub async fn run_local_translation(
             active_generation: active_generation.clone(),
             cancellation: cancellation.clone(),
             activity: activity.clone(),
-            tts_tx,
+            speech_queue: Arc::clone(&speech_queue),
         },
         translation_rx,
     );
@@ -239,6 +262,12 @@ pub async fn run_local_translation(
                         drop(translation_tx);
                         drain_worker(&mut worker, &cancellation).await?;
                         drain_worker(&mut translator, &cancellation).await?;
+                        // Mirrors mpsc ownership: `tts_tx` used to live inside
+                        // the translator, so the channel only closed after the
+                        // translator task exited. Closing here — between the
+                        // two drains — lets translation jobs that finished
+                        // during the translator's drain window still be spoken.
+                        speech_queue.close();
                         drain_worker(&mut tts_worker, &cancellation).await?;
                         return Ok(());
                     }
@@ -293,6 +322,12 @@ pub async fn run_local_translation(
                         drop(translation_tx);
                         drain_worker(&mut worker, &cancellation).await?;
                         drain_worker(&mut translator, &cancellation).await?;
+                        // Mirrors mpsc ownership: `tts_tx` used to live inside
+                        // the translator, so the channel only closed after the
+                        // translator task exited. Closing here — between the
+                        // two drains — lets translation jobs that finished
+                        // during the translator's drain window still be spoken.
+                        speech_queue.close();
                         drain_worker(&mut tts_worker, &cancellation).await?;
                         return Ok(());
                     }
@@ -302,6 +337,12 @@ pub async fn run_local_translation(
                         drop(translation_tx);
                         drain_worker(&mut worker, &cancellation).await?;
                         drain_worker(&mut translator, &cancellation).await?;
+                        // Mirrors mpsc ownership: `tts_tx` used to live inside
+                        // the translator, so the channel only closed after the
+                        // translator task exited. Closing here — between the
+                        // two drains — lets translation jobs that finished
+                        // during the translator's drain window still be spoken.
+                        speech_queue.close();
                         drain_worker(&mut tts_worker, &cancellation).await?;
                         return Ok(());
                     }
@@ -464,7 +505,7 @@ fn spawn_translation_worker(
             active_generation,
             cancellation,
             activity,
-            tts_tx,
+            speech_queue,
         } = translator;
         while let Some(job) = translation_rx.recv().await {
             if !is_worker_active(generation, &active_generation, &cancellation) {
@@ -501,27 +542,21 @@ fn spawn_translation_worker(
                             ..pending_item
                         },
                     )?;
-                    match tts_tx.try_send(TtsRequest {
-                        utterance_id,
-                        translated_text: speech_text,
-                    }) {
-                        Ok(()) => {}
-                        Err(mpsc::error::TrySendError::Full(_)) => {
-                            let _ = app.emit(
-                                "app-error",
-                                AppError::new(
-                                    "local_tts_backlog_full",
-                                    "Local speech is falling behind. The translated text was kept, but this sentence will not be spoken.",
-                                ),
-                            );
-                        }
-                        Err(mpsc::error::TrySendError::Closed(_)) => {
+                    match speech_queue.push(TtsRequest::new(utterance_id, speech_text)) {
+                        // Content fully preserved — no event, no log noise, so
+                        // the sticky frontend error banner never fires.
+                        PushOutcome::Queued | PushOutcome::Coalesced => {}
+                        // Shutdown race: a closed queue discards silently.
+                        PushOutcome::Closed => {}
+                        PushOutcome::DroppedOldest { dropped_id } => {
                             if is_worker_active(generation, &active_generation, &cancellation) {
                                 let _ = app.emit(
                                     "app-error",
                                     AppError::new(
-                                        "local_tts_worker_closed",
-                                        "The local speech worker stopped unexpectedly.",
+                                        "local_tts_backlog_full",
+                                        format!(
+                                            "Local speech cannot keep up. The oldest queued sentence was skipped to stay live; its translated text remains in the transcript. Utterance {dropped_id}."
+                                        ),
                                     ),
                                 );
                             }
@@ -558,7 +593,7 @@ fn spawn_translation_worker(
 
 fn spawn_tts_worker(
     worker: TtsWorker,
-    mut tts_rx: mpsc::Receiver<TtsRequest>,
+    speech_queue: Arc<SpeechQueue>,
 ) -> JoinHandle<AppResult<()>> {
     tokio::spawn(async move {
         let TtsWorker {
@@ -570,13 +605,18 @@ fn spawn_tts_worker(
             cancellation,
             activity,
         } = worker;
-        while let Some(request) = tts_rx.recv().await {
+        while let Some(request) = speech_queue.pop().await {
             if !is_worker_active(generation, &active_generation, &cancellation) {
                 break;
             }
-            activity
-                .speech_stage
-                .store(SPEECH_SYNTHESIZING, Ordering::SeqCst);
+            activity.synthesizing.store(true, Ordering::SeqCst);
+            // Abort-safe reset: if the drain ladder aborts this task while it
+            // is parked inside `tts::synthesize`, the future is dropped and
+            // the guard clears the shared flag — late pacers must never read
+            // a stale "synthesizing" from an aborted session.
+            let synthesizing_guard = SynthesizingGuard {
+                activity: Arc::clone(&activity),
+            };
             settle_pipeline_activity(&app, generation, &activity)?;
             let synthesis = tts::synthesize(
                 Some(&app),
@@ -585,6 +625,15 @@ fn spawn_tts_worker(
                 cancellation.clone(),
             )
             .await;
+            drop(synthesizing_guard);
+            settle_pipeline_activity(&app, generation, &activity)?;
+            if !is_worker_active(generation, &active_generation, &cancellation) {
+                break;
+            }
+            // Lookahead cap — replaces the old serialized playback sleep. A
+            // pacer finishing playback frees a slot; a deactivated worker
+            // exits so drain still terminates.
+            wait_for_playback_slot(&activity, generation, &active_generation, &cancellation).await;
             if !is_worker_active(generation, &active_generation, &cancellation) {
                 break;
             }
@@ -592,63 +641,148 @@ fn spawn_tts_worker(
                 Ok(audio) => {
                     let sample_count = audio.pcm16_mono.len();
                     let translated_level = translated_audio_level(&audio.pcm16_mono);
-                    if let Err(error) = playback_tx.try_send(audio.pcm16_mono) {
-                        let message = match error {
-                            std_mpsc::TrySendError::Full(_) => {
-                                "Translated audio output is overloaded. This sentence remains in the transcript but was not played."
+                    match register_playback_delivery(
+                        playback_tx.try_send(audio.pcm16_mono),
+                        &activity,
+                    ) {
+                        Ok(()) => {
+                            let playback_ms = (sample_count as u64 * 1_000)
+                                .saturating_div(u64::from(tts::LOCAL_TTS_SAMPLE_RATE));
+                            // Spawn first: every successful send must own
+                            // exactly one pacer, even if a fallible emit below
+                            // aborts this worker task mid-iteration.
+                            spawn_playback_pacer(
+                                playback_ms,
+                                generation,
+                                &active_generation,
+                                &app,
+                                &activity,
+                            );
+                            app.emit("translated-audio-level", translated_level)
+                                .map_err(|err| {
+                                    AppError::new("event_emit_error", err.to_string())
+                                })?;
+                            // The inflight counter now reports "speaking".
+                            settle_pipeline_activity(&app, generation, &activity)?;
+                        }
+                        Err(error) => {
+                            // Stop race: session teardown drops the playback
+                            // runtime before `RealtimeControl::Stop` arrives,
+                            // so failed sends here are teardown noise, not a
+                            // live failure worth the sticky error banner.
+                            if is_worker_active(generation, &active_generation, &cancellation)
+                                && !speech_queue.is_closed()
+                            {
+                                let message = match error {
+                                    std_mpsc::TrySendError::Full(_) => {
+                                        "Translated audio output is overloaded. This sentence remains in the transcript but was not played."
+                                    }
+                                    std_mpsc::TrySendError::Disconnected(_) => {
+                                        "The selected translated audio output disconnected."
+                                    }
+                                };
+                                let _ = app.emit(
+                                    "app-error",
+                                    AppError::new(
+                                        "local_tts_playback_error",
+                                        format!("{message} Utterance {}.", request.utterance_id),
+                                    ),
+                                );
                             }
-                            std_mpsc::TrySendError::Disconnected(_) => {
-                                "The selected translated audio output disconnected."
-                            }
-                        };
-                        let _ = app.emit(
-                            "app-error",
-                            AppError::new(
-                                "local_tts_playback_error",
-                                format!("{message} Utterance {}.", request.utterance_id),
-                            ),
-                        );
-                    } else {
-                        app.emit("translated-audio-level", translated_level)
-                            .map_err(|err| AppError::new("event_emit_error", err.to_string()))?;
-                        activity
-                            .speech_stage
-                            .store(SPEECH_PLAYING, Ordering::SeqCst);
-                        settle_pipeline_activity(&app, generation, &activity)?;
-                        let playback_ms = (sample_count as u64 * 1_000)
-                            .saturating_div(u64::from(tts::LOCAL_TTS_SAMPLE_RATE));
-                        tokio::time::sleep(Duration::from_millis(playback_ms)).await;
-                        app.emit(
-                            "translated-audio-level",
-                            TranslatedAudioLevelEvent {
-                                sample_count: 0,
-                                rms: 0.0,
-                                peak: 0.0,
-                            },
-                        )
-                        .map_err(|err| AppError::new("event_emit_error", err.to_string()))?;
+                        }
                     }
                 }
-                Err(error) if error.code == "local_tts_cancelled" => {
-                    activity
-                        .speech_stage
-                        .store(ACTIVITY_INACTIVE, Ordering::SeqCst);
-                    break;
-                }
+                Err(error) if error.code == "local_tts_cancelled" => break,
                 Err(error) => {
                     let _ = app.emit("app-error", error);
                 }
             }
-            activity
-                .speech_stage
-                .store(ACTIVITY_INACTIVE, Ordering::SeqCst);
-            settle_pipeline_activity(&app, generation, &activity)?;
         }
-        activity
-            .speech_stage
-            .store(ACTIVITY_INACTIVE, Ordering::SeqCst);
         Ok(())
     })
+}
+
+/// Clears `synthesizing` on every exit from the synthesis window — return,
+/// `?` propagation, or TTS worker task abort (an aborted future is dropped at
+/// its await point, running this guard). The flag lives in the shared
+/// `PipelineActivity`, so a stale `true` would mislabel later pacer settles.
+struct SynthesizingGuard {
+    activity: Arc<PipelineActivity>,
+}
+
+impl Drop for SynthesizingGuard {
+    fn drop(&mut self) {
+        self.activity.synthesizing.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Lookahead gate: blocks until a lookahead slot frees up (a pacer finished)
+/// or the worker deactivates. Replaces the old serialized playback sleep so
+/// synthesis overlaps playback while the shared 24-slot cpal channel stays
+/// far from full. The 20 ms poll matches the existing cancellation-poll idiom.
+async fn wait_for_playback_slot(
+    activity: &PipelineActivity,
+    generation: u64,
+    active_generation: &Arc<AtomicU64>,
+    cancellation: &Arc<AtomicBool>,
+) {
+    while activity.playback_inflight.load(Ordering::SeqCst) >= MAX_BUFFERS_AHEAD
+        && is_worker_active(generation, active_generation, cancellation)
+    {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// Bookkeeping for one playback send. The inflight increment is structurally
+/// tied to a successful send: a rejected buffer must never occupy a lookahead
+/// slot or spawn a pacer, or three failures would permanently wedge speech.
+fn register_playback_delivery(
+    delivery: Result<(), std_mpsc::TrySendError<Vec<i16>>>,
+    activity: &PipelineActivity,
+) -> Result<(), std_mpsc::TrySendError<Vec<i16>>> {
+    match delivery {
+        Ok(()) => {
+            activity.playback_inflight.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Owns one buffer's playback window: sleeps for the buffer's duration,
+/// releases its lookahead slot, and — only if this session is still the
+/// active generation — resets the level meter and re-publishes pipeline
+/// activity. Bookkeeping (the slot release) always runs; only the
+/// outward-facing emits are generation-gated, because a stopped session's
+/// pacer must never touch a newer session's meter or stage label.
+fn spawn_playback_pacer(
+    playback_ms: u64,
+    generation: u64,
+    active_generation: &Arc<AtomicU64>,
+    app: &AppHandle,
+    activity: &Arc<PipelineActivity>,
+) {
+    let pacer_activity = Arc::clone(activity);
+    let pacer_app = app.clone();
+    let pacer_active_generation = Arc::clone(active_generation);
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(playback_ms)).await;
+        pacer_activity
+            .playback_inflight
+            .fetch_sub(1, Ordering::SeqCst);
+        if !is_generation_active(generation, &pacer_active_generation) {
+            return;
+        }
+        let _ = pacer_app.emit(
+            "translated-audio-level",
+            TranslatedAudioLevelEvent {
+                sample_count: 0,
+                rms: 0.0,
+                peak: 0.0,
+            },
+        );
+        let _ = settle_pipeline_activity(&pacer_app, generation, &pacer_activity);
+    });
 }
 
 fn settle_pipeline_activity(
@@ -663,10 +797,11 @@ fn settle_pipeline_activity(
 }
 
 fn pipeline_activity_state(activity: &PipelineActivity) -> (SessionStatus, &'static str) {
-    match activity.speech_stage.load(Ordering::SeqCst) {
-        SPEECH_SYNTHESIZING => return (SessionStatus::Speaking, "synthesizing"),
-        SPEECH_PLAYING => return (SessionStatus::Speaking, "speaking"),
-        _ => {}
+    if activity.playback_inflight.load(Ordering::SeqCst) > 0 {
+        return (SessionStatus::Speaking, "speaking");
+    }
+    if activity.synthesizing.load(Ordering::SeqCst) {
+        return (SessionStatus::Speaking, "synthesizing");
     }
     match activity.translation_stage.load(Ordering::SeqCst) {
         TRANSLATION_TRANSCRIBING => (SessionStatus::Listening, "transcribing"),
@@ -1389,9 +1524,8 @@ mod tests {
             (SessionStatus::Listening, "transcribing")
         );
 
-        activity
-            .speech_stage
-            .store(SPEECH_PLAYING, Ordering::SeqCst);
+        // A live playback window outranks translation stages.
+        activity.playback_inflight.store(1, Ordering::SeqCst);
         assert_eq!(
             pipeline_activity_state(&activity),
             (SessionStatus::Speaking, "speaking")
@@ -1404,6 +1538,90 @@ mod tests {
             pipeline_activity_state(&activity),
             (SessionStatus::Speaking, "speaking")
         );
+
+        // Synthesis-only still surfaces as speech activity.
+        activity.playback_inflight.store(0, Ordering::SeqCst);
+        activity.synthesizing.store(true, Ordering::SeqCst);
+        assert_eq!(
+            pipeline_activity_state(&activity),
+            (SessionStatus::Speaking, "synthesizing")
+        );
+
+        // Overlapping synthesis and playback reports the audible state.
+        activity.playback_inflight.store(2, Ordering::SeqCst);
+        assert_eq!(
+            pipeline_activity_state(&activity),
+            (SessionStatus::Speaking, "speaking")
+        );
+
+        // Neither speech flag active: fall back to the translation mapping.
+        activity.playback_inflight.store(0, Ordering::SeqCst);
+        activity.synthesizing.store(false, Ordering::SeqCst);
+        assert_eq!(
+            pipeline_activity_state(&activity),
+            (SessionStatus::Translating, "translating")
+        );
+    }
+
+    #[tokio::test]
+    async fn lookahead_wait_exits_when_a_buffer_finishes_playing() {
+        let activity = Arc::new(PipelineActivity::default());
+        let generation = Arc::new(AtomicU64::new(1));
+        let cancellation = Arc::new(AtomicBool::new(false));
+        activity
+            .playback_inflight
+            .store(MAX_BUFFERS_AHEAD, Ordering::SeqCst);
+        let releaser = Arc::clone(&activity);
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            releaser.playback_inflight.fetch_sub(1, Ordering::SeqCst);
+        });
+        wait_for_playback_slot(&activity, 1, &generation, &cancellation).await;
+        assert!(activity.playback_inflight.load(Ordering::SeqCst) < MAX_BUFFERS_AHEAD);
+    }
+
+    #[tokio::test]
+    async fn lookahead_wait_exits_on_cancellation() {
+        let activity = Arc::new(PipelineActivity::default());
+        let generation = Arc::new(AtomicU64::new(1));
+        let cancellation = Arc::new(AtomicBool::new(false));
+        activity
+            .playback_inflight
+            .store(MAX_BUFFERS_AHEAD, Ordering::SeqCst);
+        let stop = cancellation.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            stop.store(true, Ordering::SeqCst);
+        });
+        wait_for_playback_slot(&activity, 1, &generation, &cancellation).await;
+        assert!(cancellation.load(Ordering::SeqCst));
+        // The slot was never freed; the wait exited via the active check.
+        assert_eq!(
+            activity.playback_inflight.load(Ordering::SeqCst),
+            MAX_BUFFERS_AHEAD
+        );
+    }
+
+    #[test]
+    fn failed_playback_sends_never_occupy_lookahead_slots() {
+        let activity = PipelineActivity::default();
+        let (tx, rx) = std_mpsc::sync_channel::<Vec<i16>>(2);
+        drop(rx); // every send fails, as when the stop race drops playback
+        for _ in 0..5 {
+            let delivery = tx.try_send(vec![0; 16]);
+            assert!(register_playback_delivery(delivery, &activity).is_err());
+        }
+        assert_eq!(activity.playback_inflight.load(Ordering::SeqCst), 0);
+
+        // A delivered buffer occupies exactly one slot until its pacer fires.
+        let (tx, rx) = std_mpsc::sync_channel::<Vec<i16>>(2);
+        let delivery = tx.try_send(vec![0; 16]);
+        assert!(register_playback_delivery(delivery, &activity).is_ok());
+        assert_eq!(activity.playback_inflight.load(Ordering::SeqCst), 1);
+        activity.playback_inflight.fetch_sub(1, Ordering::SeqCst);
+        assert_eq!(activity.playback_inflight.load(Ordering::SeqCst), 0);
+        drop(tx);
+        drop(rx);
     }
 
     #[test]

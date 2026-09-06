@@ -1,6 +1,6 @@
 ---
 title: "Local TTS Speech Backlog Optimization (Coalesce, Pipelined Playback, Cached Synthesizer)"
-status: pending
+status: implemented baseline (2026-09-07; macOS soak + Windows ignored-test run pending)
 priority: P2
 effort: 12h
 tags: [backend, refactor, tech-debt, audio]

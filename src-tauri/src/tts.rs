@@ -232,6 +232,23 @@ fn cancelled_error() -> AppError {
     )
 }
 
+/// Decides whether the platform voice configuration must be (re-)applied:
+/// on first use (nothing cached yet), whenever the requested voice differs
+/// from the cached one, or when nothing is requested and the cache is empty.
+/// Requested ids are compared trimmed so settings whitespace cannot force a
+/// redundant rescan on every sentence.
+///
+/// Compiled wherever the synthesizer cache is live (Windows) plus test builds,
+/// so the pure decision logic stays unit-testable on every platform.
+#[cfg(any(target_os = "windows", test))]
+fn voice_needs_reload(configured: &str, requested: &str) -> bool {
+    let requested = requested.trim();
+    if requested.is_empty() {
+        return configured.is_empty();
+    }
+    configured != requested
+}
+
 fn decode_wav_pcm16(bytes: &[u8]) -> AppResult<SynthesizedAudio> {
     if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
         return Err(AppError::new(
@@ -366,12 +383,72 @@ fn resample_linear(samples: &[i16], source_rate: u32, target_rate: u32) -> Vec<i
 #[cfg(target_os = "windows")]
 mod platform {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
     use windows::core::HSTRING;
-    use windows::Media::SpeechSynthesis::SpeechSynthesizer;
+    use windows::Media::SpeechSynthesis::{SpeechSynthesizer, VoiceInformation};
     use windows::Storage::Streams::DataReader;
 
     fn windows_error(code: &'static str, context: &str, error: windows::core::Error) -> AppError {
         AppError::new(code, format!("{context}: {error}"))
+    }
+
+    /// Configured Windows synthesizer cached across sentences so per-sentence
+    /// synthesis no longer pays WinRT activation plus a full `AllVoices()`
+    /// enumeration. `SpeechSynthesizer` is `Send + Sync` in windows 0.61, so
+    /// holding it inside a process-global std `Mutex` is sound.
+    struct CachedSynthesizer {
+        synthesizer: SpeechSynthesizer,
+        configured_voice_id: String,
+        /// Set while a synthesis runs on the cached instance. WinRT synthesis
+        /// operations cannot be cancelled, so an aborted worker can leave one
+        /// orphaned and still executing; a concurrent lease falls back to a
+        /// throwaway synthesizer instead of sharing the instance with it.
+        in_flight: Arc<AtomicBool>,
+    }
+
+    static CACHED_SYNTHESIZER: OnceLock<Mutex<Option<CachedSynthesizer>>> = OnceLock::new();
+
+    fn synthesizer_cache() -> &'static Mutex<Option<CachedSynthesizer>> {
+        CACHED_SYNTHESIZER.get_or_init(|| Mutex::new(None))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn cached_voice_id() -> Option<String> {
+        let cache = synthesizer_cache();
+        let guard = cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        guard
+            .as_ref()
+            .map(|entry| entry.configured_voice_id.clone())
+    }
+
+    /// One synthesizer borrowed for a single synthesis call: either the cached
+    /// instance (holding its `in_flight` guard) or a throwaway. Dropping the
+    /// lease clears the in-flight flag even on error paths.
+    enum SynthesizerLease {
+        Cached {
+            synthesizer: SpeechSynthesizer,
+            in_flight: Arc<AtomicBool>,
+        },
+        Throwaway(SpeechSynthesizer),
+    }
+
+    impl Drop for SynthesizerLease {
+        fn drop(&mut self) {
+            if let SynthesizerLease::Cached { in_flight, .. } = self {
+                in_flight.store(false, Ordering::Release);
+            }
+        }
+    }
+
+    impl SynthesizerLease {
+        fn synthesizer(&self) -> &SpeechSynthesizer {
+            match self {
+                SynthesizerLease::Cached { synthesizer, .. } => synthesizer,
+                SynthesizerLease::Throwaway(synthesizer) => synthesizer,
+            }
+        }
     }
 
     pub fn list_voices() -> AppResult<Vec<LocalVoice>> {
@@ -440,62 +517,51 @@ mod platform {
         Ok(voices)
     }
 
-    pub async fn synthesize(
-        text: &str,
-        config: &LocalTranslationConfig,
-        cancelled: Arc<AtomicBool>,
-    ) -> AppResult<SynthesizedAudio> {
-        let synthesizer = SpeechSynthesizer::new().map_err(|error| {
+    fn resolve_voice(voice_id: &str) -> AppResult<VoiceInformation> {
+        let installed = SpeechSynthesizer::AllVoices().map_err(|error| {
             windows_error(
-                "local_tts_start_error",
-                "Could not start Windows speech synthesis",
+                "local_tts_voice_list_error",
+                "Could not list Windows voices",
                 error,
             )
         })?;
-        let voice = {
-            let installed = SpeechSynthesizer::AllVoices().map_err(|error| {
+        let selected_id = HSTRING::from(voice_id);
+        let size = installed.Size().map_err(|error| {
+            windows_error(
+                "local_tts_voice_list_error",
+                "Could not read Windows voices",
+                error,
+            )
+        })?;
+        for index in 0..size {
+            let voice = installed.GetAt(index).map_err(|error| {
                 windows_error(
                     "local_tts_voice_list_error",
-                    "Could not list Windows voices",
+                    "Could not read a Windows voice",
                     error,
                 )
             })?;
-            let mut selected = None;
-            let selected_id = HSTRING::from(&config.voice_id);
-            let size = installed.Size().map_err(|error| {
+            if voice.Id().map_err(|error| {
                 windows_error(
                     "local_tts_voice_list_error",
-                    "Could not read Windows voices",
+                    "Could not read the voice id",
                     error,
                 )
-            })?;
-            for index in 0..size {
-                let voice = installed.GetAt(index).map_err(|error| {
-                    windows_error(
-                        "local_tts_voice_list_error",
-                        "Could not read a Windows voice",
-                        error,
-                    )
-                })?;
-                if voice.Id().map_err(|error| {
-                    windows_error(
-                        "local_tts_voice_list_error",
-                        "Could not read the voice id",
-                        error,
-                    )
-                })? == selected_id
-                {
-                    selected = Some(voice);
-                    break;
-                }
+            })? == selected_id
+            {
+                return Ok(voice);
             }
-            selected.ok_or_else(|| {
-                AppError::new(
-                    "local_tts_voice_missing",
-                    "The selected Windows voice is no longer installed.",
-                )
-            })?
-        };
+        }
+        Err(AppError::new(
+            "local_tts_voice_missing",
+            "The selected Windows voice is no longer installed.",
+        ))
+    }
+
+    /// Applies the requested voice and returns the id the cache should record.
+    fn apply_voice(synthesizer: &SpeechSynthesizer, voice_id: &str) -> AppResult<String> {
+        let requested = voice_id.trim();
+        let voice = resolve_voice(requested)?;
         synthesizer.SetVoice(&voice).map_err(|error| {
             windows_error(
                 "local_tts_voice_error",
@@ -503,6 +569,73 @@ mod platform {
                 error,
             )
         })?;
+        Ok(requested.to_string())
+    }
+
+    /// Returns a synthesizer configured for `config.voice_id`. The cache mutex
+    /// is a std `Mutex` and is never held across an `.await`: voice rescans
+    /// and property sets run inside a short critical section, then the
+    /// reference-counted interface handle is cloned out and the synthesis
+    /// awaits run lock-free on the cloned handle.
+    fn lease_synthesizer(config: &LocalTranslationConfig) -> AppResult<SynthesizerLease> {
+        let cache = synthesizer_cache();
+        let mut guard = cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if guard
+            .as_ref()
+            .is_some_and(|entry| entry.in_flight.load(Ordering::Acquire))
+        {
+            let synthesizer = SpeechSynthesizer::new().map_err(|error| {
+                windows_error(
+                    "local_tts_start_error",
+                    "Could not start Windows speech synthesis",
+                    error,
+                )
+            })?;
+            apply_voice(&synthesizer, &config.voice_id)?;
+            return Ok(SynthesizerLease::Throwaway(synthesizer));
+        }
+        let needs_reload = match guard.as_ref() {
+            Some(entry) => voice_needs_reload(&entry.configured_voice_id, &config.voice_id),
+            None => true,
+        };
+        if needs_reload {
+            let synthesizer = match guard.take() {
+                // Re-point the existing instance instead of re-activating WinRT.
+                Some(entry) => entry.synthesizer,
+                None => SpeechSynthesizer::new().map_err(|error| {
+                    windows_error(
+                        "local_tts_start_error",
+                        "Could not start Windows speech synthesis",
+                        error,
+                    )
+                })?,
+            };
+            let configured_voice_id = apply_voice(&synthesizer, &config.voice_id)?;
+            *guard = Some(CachedSynthesizer {
+                synthesizer,
+                configured_voice_id,
+                in_flight: Arc::new(AtomicBool::new(false)),
+            });
+        }
+        let entry = guard.as_mut().expect("cache entry exists after setup");
+        entry.in_flight.store(true, Ordering::Release);
+        Ok(SynthesizerLease::Cached {
+            synthesizer: entry.synthesizer.clone(),
+            in_flight: Arc::clone(&entry.in_flight),
+        })
+    }
+
+    pub async fn synthesize(
+        text: &str,
+        config: &LocalTranslationConfig,
+        cancelled: Arc<AtomicBool>,
+    ) -> AppResult<SynthesizedAudio> {
+        let lease = lease_synthesizer(config)?;
+        let synthesizer = lease.synthesizer();
+        // Cheap property sets, re-applied every call so `tts_rate` /
+        // `tts_volume` changes take effect on the next sentence.
         let options = synthesizer.Options().map_err(|error| {
             windows_error(
                 "local_tts_options_error",
@@ -799,6 +932,21 @@ mod tests {
         assert!(samples.iter().any(|sample| *sample != 0));
     }
 
+    #[test]
+    fn voice_reload_decision_covers_first_use_and_changes() {
+        // First use: nothing cached yet.
+        assert!(voice_needs_reload("", "Pham Tuyen"));
+        assert!(voice_needs_reload("", ""));
+        // Same voice: no rescan, with or without settings whitespace.
+        assert!(!voice_needs_reload("Pham Tuyen", "Pham Tuyen"));
+        assert!(!voice_needs_reload("Pham Tuyen", "  Pham Tuyen  "));
+        // A different voice always reloads.
+        assert!(voice_needs_reload("Pham Tuyen", "Minh"));
+        // Nothing requested: keep the cached voice instead of erroring.
+        assert!(!voice_needs_reload("Pham Tuyen", ""));
+        assert!(!voice_needs_reload("Pham Tuyen", "   "));
+    }
+
     #[tokio::test]
     async fn vieneu_adapter_lists_voices_and_decodes_audio() {
         let voices_url = serve_once(
@@ -884,5 +1032,41 @@ mod tests {
             .expect("Windows synthesis should return PCM");
         assert_eq!(audio.sample_rate_hz, LOCAL_TTS_SAMPLE_RATE);
         assert!(!audio.pcm16_mono.is_empty());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[tokio::test]
+    #[ignore = "requires an installed Windows system voice; run once on a Windows box to exercise cross-thread WinRT agility"]
+    async fn windows_cached_synthesizer_skips_voice_reload_on_second_call() {
+        let voice = platform::list_voices()
+            .expect("Windows voices should be readable")
+            .into_iter()
+            .find(|voice| voice.language.to_ascii_lowercase().starts_with("vi"))
+            .or_else(|| {
+                platform::list_voices()
+                    .ok()
+                    .and_then(|voices| voices.into_iter().next())
+            })
+            .expect("at least one Windows voice is required");
+        let config = LocalTranslationConfig {
+            voice_id: voice.id.clone(),
+            ..LocalTranslationConfig::default()
+        };
+        let cancelled = Arc::new(AtomicBool::new(false));
+        synthesize(None, "Xin chào.", &config, Arc::clone(&cancelled))
+            .await
+            .expect("first Windows synthesis should return PCM");
+        assert_eq!(
+            platform::cached_voice_id().as_deref(),
+            Some(voice.id.as_str())
+        );
+        let audio = synthesize(None, "Xin chào lần hai.", &config, Arc::clone(&cancelled))
+            .await
+            .expect("second Windows synthesis should reuse the cached synthesizer");
+        assert!(!audio.pcm16_mono.is_empty());
+        assert_eq!(
+            platform::cached_voice_id().as_deref(),
+            Some(voice.id.as_str())
+        );
     }
 }
