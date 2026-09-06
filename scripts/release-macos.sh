@@ -7,11 +7,13 @@ cd "$ROOT"
 MODE="${1:-help}"
 VERSION="${2:-}"
 ALLOW_UNNOTARIZED=0
+ALLOW_UNSIGNED=0
 RESUME=0
 
 for option in "${@:3}"; do
   case "$option" in
     --allow-unnotarized) ALLOW_UNNOTARIZED=1 ;;
+    --allow-unsigned) ALLOW_UNSIGNED=1 ;;
     --resume) RESUME=1 ;;
     *) echo "Unknown option: $option" >&2; exit 1 ;;
   esac
@@ -20,9 +22,9 @@ done
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/release-macos.sh check <version> [--allow-unnotarized]
-  scripts/release-macos.sh publish <version> [--allow-unnotarized] [--resume]
-  scripts/release-macos.sh all <version> [--allow-unnotarized]
+  scripts/release-macos.sh check <version> [--allow-unnotarized] [--allow-unsigned]
+  scripts/release-macos.sh publish <version> [--allow-unnotarized] [--allow-unsigned] [--resume]
+  scripts/release-macos.sh all <version> [--allow-unnotarized] [--allow-unsigned]
 
 Modes:
   check    Validate main, run tests, build, sign, and verify app/DMG artifacts.
@@ -31,6 +33,9 @@ Modes:
 
 Public releases require Apple notarization credentials by default. Use
 --allow-unnotarized only when you intentionally accept Gatekeeper warnings.
+Use --allow-unsigned to release without any Apple signing identity (implies
+--allow-unnotarized). Unsigned downloads are blocked by Gatekeeper; users must
+remove the quarantine attribute (xattr -cr) on first launch.
 EOF
 }
 
@@ -53,7 +58,16 @@ notarization_configured() {
   return 1
 }
 
+# Notarization needs a Developer ID signature, so it can never apply to an
+# intentionally unsigned build.
+notarization_active() {
+  [[ "$ALLOW_UNSIGNED" -eq 0 ]] && notarization_configured
+}
+
 ensure_notarization_policy() {
+  if [[ "$ALLOW_UNSIGNED" -eq 1 ]]; then
+    return
+  fi
   if notarization_configured; then
     return
   fi
@@ -87,6 +101,7 @@ ensure_clean_synced_main() {
 }
 
 ensure_signing_identity() {
+  [[ "$ALLOW_UNSIGNED" -ne 1 ]] || return 0
   local identity identity_line
   identity="${APPLE_SIGNING_IDENTITY:-$(node -p 'JSON.parse(require("fs").readFileSync("src-tauri/tauri.conf.json", "utf8")).bundle?.macOS?.signingIdentity || ""')}"
   [[ -n "$identity" && "$identity" != "-" ]] || fail "configure a stable Apple signing identity"
@@ -130,10 +145,12 @@ verify_artifacts() {
   artifact_paths
   [[ -d "$APP_PATH" ]] || fail "missing app bundle: $APP_PATH"
   [[ -f "$DMG_PATH" ]] || fail "missing DMG: $DMG_PATH"
-  codesign --verify --deep --strict --verbose=2 "$APP_PATH"
-  codesign --verify --verbose=2 "$DMG_PATH"
+  if [[ "$ALLOW_UNSIGNED" -ne 1 ]]; then
+    codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+    codesign --verify --verbose=2 "$DMG_PATH"
+  fi
   hdiutil verify "$DMG_PATH"
-  if notarization_configured; then
+  if notarization_active; then
     xcrun stapler validate "$DMG_PATH"
   fi
 }
@@ -143,7 +160,7 @@ common_preflight() {
   for command in git gh node npm cargo codesign hdiutil security shasum; do
     require_command "$command"
   done
-  if notarization_configured; then
+  if notarization_active; then
     require_command xcrun
   fi
   gh auth status
@@ -193,9 +210,13 @@ run_publish() {
 
   notes="## macOS download
 
-- Apple Silicon (aarch64) signed DMG
+- Apple Silicon (aarch64) DMG
 - SHA-256: \`${sha}\`"
-  if ! notarization_configured; then
+  if [[ "$ALLOW_UNSIGNED" -eq 1 ]]; then
+    notes="${notes}
+
+> This build is unsigned. macOS Gatekeeper blocks it on first launch; right-click → Open once, or remove the quarantine attribute with \`xattr -cr \"/Applications/Baka Trans.app\"\`."
+  elif ! notarization_configured; then
     notes="${notes}
 
 > This build is signed but not notarized. macOS may require approval in Privacy & Security on first launch."
