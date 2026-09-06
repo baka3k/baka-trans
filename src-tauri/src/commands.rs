@@ -3,12 +3,12 @@ use crate::error::{AppError, AppResult};
 use crate::models::{
     ApiKeyTestResult, AppStatus, AudioDevices, AudioOutputChannel, ExportRequest,
     ExportedTranscript, HyMtModelStatus, LlmProviderProfile, LlmProviderProfileDraft,
-    LlmProviderTestResult, LocalTranslationConfig, LocalTranslationConfigDraft,
-    LocalTranslationTestResult, LocalTtsProvider, LocalVoice, LookHelpConfig, LookHelpStatus,
-    ManualBoundaryRequest, MeetingSummaryConfig, MeetingSummaryResult, MeetingSummaryStatus,
-    MeetingSummaryStatusEvent, OverlayConfig, OverlayGeometry, OverlayStatus, SessionConfig,
-    TranscriptItem, TranslationCredentialStatus, TranslationEngineTestResult, TranslationProvider,
-    VieNeuRuntimeStatus, WhisperModelOption,
+    LlmProviderTestResult, LocalCredentialStatus, LocalTranslationConfig,
+    LocalTranslationConfigDraft, LocalTranslationTestResult, LocalTtsProvider, LocalVoice,
+    LookHelpConfig, LookHelpStatus, ManualBoundaryRequest, MeetingSummaryConfig,
+    MeetingSummaryResult, MeetingSummaryStatus, MeetingSummaryStatusEvent, OverlayConfig,
+    OverlayGeometry, OverlayStatus, SessionConfig, TranscriptItem, TranslationCredentialStatus,
+    TranslationEngineTestResult, TranslationProvider, VieNeuRuntimeStatus, WhisperModelOption,
 };
 use crate::session::AppState;
 use crate::{
@@ -182,6 +182,21 @@ pub async fn test_translation_engine(
     draft: LocalTranslationConfigDraft,
 ) -> AppResult<TranslationEngineTestResult> {
     local_translation::test_engine(&app, draft).await
+}
+
+#[tauri::command]
+pub async fn save_local_translation_api_key(api_key: String) -> AppResult<()> {
+    run_blocking(move || local_translation::api_key::save_local_translation_api_key(&api_key)).await
+}
+
+#[tauri::command]
+pub async fn delete_local_translation_api_key() -> AppResult<()> {
+    run_blocking(local_translation::api_key::delete_local_translation_api_key).await
+}
+
+#[tauri::command]
+pub async fn local_translation_credential_status() -> AppResult<LocalCredentialStatus> {
+    run_blocking(local_translation::api_key::local_translation_credential_status).await
 }
 
 #[tauri::command]

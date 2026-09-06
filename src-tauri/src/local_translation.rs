@@ -509,7 +509,35 @@ pub fn save_config(draft: LocalTranslationConfigDraft) -> AppResult<LocalTransla
 
 pub fn validated_runtime_config() -> AppResult<LocalTranslationConfig> {
     let config = get_config()?;
-    normalize_and_validate(config.into(), true)
+    let normalized = normalize_and_validate(config.into(), true)?;
+    enforce_runtime_key_gate(&normalized)?;
+    Ok(normalized)
+}
+
+/// Start-time gate for the OpenAI-compatible engine: hosted (non-loopback)
+/// endpoints fail before capture begins when no API key is reachable. The
+/// offline Hy-MT2 engine never reaches the gate.
+fn enforce_runtime_key_gate(config: &LocalTranslationConfig) -> AppResult<()> {
+    if config.translation_engine != LocalTranslationEngine::OpenaiCompatible {
+        return Ok(());
+    }
+    let key = api_key::load_local_translation_api_key()?.map(|info| info.key);
+    ensure_openai_key_available(&config.openai_base_url, key.as_deref())
+}
+
+/// Pure decision shared by session start and the engine-test probes: a
+/// non-loopback endpoint requires a key (empty or whitespace-only counts as
+/// missing), loopback servers may stay keyless. Keep the message actionable —
+/// it names both fixes.
+fn ensure_openai_key_available(endpoint: &str, key: Option<&str>) -> AppResult<()> {
+    let has_key = key.is_some_and(|key| !key.trim().is_empty());
+    if has_key || openai_compatible::is_loopback_url(endpoint)? {
+        return Ok(());
+    }
+    Err(AppError::new(
+        "local_openai_api_key_missing",
+        "This endpoint is hosted outside this computer, so an API key is required. Save a key under Local LLM settings or set the BAKA_TRANS_LOCAL_API_KEY environment variable.",
+    ))
 }
 
 pub async fn test_config(
@@ -775,8 +803,8 @@ async fn probe_openai_engine(
     temperature: f32,
     max_output_tokens: u32,
 ) -> EngineProbe {
-    let api_key_info = match api_key::load_local_translation_api_key() {
-        Ok(info) => info,
+    let api_key = match api_key::load_local_translation_api_key() {
+        Ok(info) => info.map(|info| info.key),
         Err(error) => {
             return EngineProbe {
                 endpoint: endpoint.to_string(),
@@ -787,13 +815,41 @@ async fn probe_openai_engine(
             };
         }
     };
+    probe_openai_engine_with_key(
+        endpoint,
+        model,
+        timeout_seconds,
+        temperature,
+        max_output_tokens,
+        api_key,
+    )
+    .await
+}
+
+async fn probe_openai_engine_with_key(
+    endpoint: &str,
+    model: &str,
+    timeout_seconds: u64,
+    temperature: f32,
+    max_output_tokens: u32,
+    api_key: Option<String>,
+) -> EngineProbe {
+    if let Err(error) = ensure_openai_key_available(endpoint, api_key.as_deref()) {
+        return EngineProbe {
+            endpoint: endpoint.to_string(),
+            error: Some(error),
+            reachable: false,
+            accepted: false,
+            probe_characters: 0,
+        };
+    }
     let client = match openai_compatible::OpenAiCompatibleClient::new(
         endpoint,
         model,
         timeout_seconds,
         temperature,
         max_output_tokens,
-        api_key_info.map(|info| info.key),
+        api_key,
         Language::Ja,
         Language::Vi,
     ) {
@@ -1105,9 +1161,11 @@ fn migrate_legacy_config(
         )
     })?;
 
-    let mut config = LocalTranslationConfig::default();
-    config.schema_version = CONFIG_SCHEMA_VERSION;
-    config.translation_engine = LocalTranslationEngine::HuggingfaceOffline;
+    let mut config = LocalTranslationConfig {
+        schema_version: CONFIG_SCHEMA_VERSION,
+        translation_engine: LocalTranslationEngine::HuggingfaceOffline,
+        ..LocalTranslationConfig::default()
+    };
 
     if let Some(model_path) = legacy.get("modelPath").and_then(|v| v.as_str()) {
         config.model_path = model_path.to_string();
@@ -1155,15 +1213,13 @@ fn migrate_legacy_config(
         config.vieneu_style = v.to_string();
     }
 
-    if from_version < 2 {
-        if let Some(engine) = legacy.get("translationEngine").and_then(|v| v.as_str()) {
-            match engine {
-                "ollama" | "local" => {
-                    config.translation_engine = LocalTranslationEngine::HuggingfaceOffline
-                }
-                _ => {}
-            }
-        }
+    if from_version < 2
+        && legacy
+            .get("translationEngine")
+            .and_then(|v| v.as_str())
+            .is_some_and(|engine| matches!(engine, "ollama" | "local"))
+    {
+        config.translation_engine = LocalTranslationEngine::HuggingfaceOffline;
     }
 
     write_config_to_path(path, &config)?;
@@ -1735,5 +1791,90 @@ mod tests {
         .await;
 
         assert_eq!(result.unwrap_err().code, "local_openai_base_url_missing");
+    }
+
+    #[test]
+    fn openai_key_gate_truth_table() {
+        let hosted = "https://api.deepseek.com/v1/chat/completions";
+        let missing = ensure_openai_key_available(hosted, None).unwrap_err();
+        assert_eq!(missing.code, "local_openai_api_key_missing");
+        assert!(
+            missing.message.contains("BAKA_TRANS_LOCAL_API_KEY")
+                && missing.message.contains("Local LLM"),
+            "the gate must name both fixes, got: {}",
+            missing.message
+        );
+
+        // A whitespace-only key counts as missing.
+        assert_eq!(
+            ensure_openai_key_available(hosted, Some("   "))
+                .unwrap_err()
+                .code,
+            "local_openai_api_key_missing"
+        );
+
+        assert!(ensure_openai_key_available(hosted, Some("sk-test")).is_ok());
+        assert!(
+            ensure_openai_key_available("http://127.0.0.1:11434/v1/chat/completions", None).is_ok()
+        );
+        assert!(
+            ensure_openai_key_available("http://[::1]:11434/v1/chat/completions", None).is_ok()
+        );
+    }
+
+    #[test]
+    fn deepseek_base_url_normalizes_to_chat_completions() {
+        assert_eq!(
+            openai_compatible::normalize_openai_chat_completions_url("https://api.deepseek.com")
+                .unwrap(),
+            "https://api.deepseek.com/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn runtime_key_gate_ignores_offline_engine() {
+        let config = LocalTranslationConfig::default();
+        assert_eq!(
+            config.translation_engine,
+            LocalTranslationEngine::HuggingfaceOffline
+        );
+        assert!(enforce_runtime_key_gate(&config).is_ok());
+    }
+
+    #[tokio::test]
+    async fn engine_test_reports_missing_key_before_any_network_round_trip() {
+        let probe = probe_openai_engine_with_key(
+            "https://api.deepseek.com",
+            "deepseek-v4-flash",
+            30,
+            0.0,
+            256,
+            None,
+        )
+        .await;
+
+        assert!(!probe.reachable);
+        assert!(!probe.accepted);
+        assert_eq!(probe.probe_characters, 0);
+        let error = probe.error.expect("missing key must surface an error");
+        assert!(
+            error.message.contains("BAKA_TRANS_LOCAL_API_KEY"),
+            "engine test must carry the actionable message, got: {}",
+            error.message
+        );
+    }
+
+    #[tokio::test]
+    async fn engine_test_skips_the_key_gate_for_loopback_endpoints() {
+        let probe =
+            probe_openai_engine_with_key("http://127.0.0.1:11434", "gemma3:4b", 30, 0.0, 256, None)
+                .await;
+
+        // The gate passes; the probe then fails on the network call against the
+        // unreachable local server — never with the key-missing error.
+        assert_ne!(
+            probe.error.map(|error| error.code),
+            Some("local_openai_api_key_missing".to_string())
+        );
     }
 }

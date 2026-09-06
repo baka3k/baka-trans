@@ -1,5 +1,6 @@
 # Engineering Logs
 
+- [2026-09-06 — OpenAI-compatible provider completion (DeepSeek-ready)](2026-09-06-openai-compatible-provider-completion.md)
 - [2026-08-15 — Hy-MT2 Phase 16.1: runtime identity and sidecar verification](2026-08-15-hy-mt2-phase-16-identity.md)
 - [2026-08-15 — Managed HY-MT sidecar under limited CAUTION](2026-08-15-hy-mt-phase-10-sidecar.md)
 - [2026-08-15 — HY-MT M5 feasibility gate stopped](2026-08-15-hy-mt-m5-stop-gate.md)

@@ -10,6 +10,7 @@ import type {
   LookHelpStatus,
   LocalTranslationConfig,
   LocalTranslationConfigDraft,
+  LocalTranslationCredentialStatus,
   LocalTranslationTestResult,
   LocalTtsProvider,
   LocalVoice,
@@ -94,6 +95,18 @@ export function translationCredentialStatus(provider: TranslationProvider) {
 
 export function testTranslationApiKey(provider: TranslationProvider) {
   return invoke<ApiKeyTestResult>("test_translation_api_key", { provider });
+}
+
+export function saveLocalTranslationApiKey(apiKey: string) {
+  return invoke<void>("save_local_translation_api_key", { apiKey });
+}
+
+export function deleteLocalTranslationApiKey() {
+  return invoke<void>("delete_local_translation_api_key");
+}
+
+export function getLocalTranslationCredentialStatus() {
+  return invoke<LocalTranslationCredentialStatus>("local_translation_credential_status");
 }
 
 export function getLocalTranslationConfig() {

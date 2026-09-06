@@ -1,7 +1,9 @@
+import { useState } from "react";
 import type {
   HyMtModelProgress,
   HyMtModelStatus,
   LocalTranslationConfigDraft,
+  LocalTranslationCredentialStatus,
   LocalTranslationTestResult,
   LocalVoice,
   TranslationEngineTestResult,
@@ -49,6 +51,70 @@ export const defaultLocalTranslationConfig: LocalTranslationConfigDraft = {
   ttsOutputSampleRateHz: 24000,
 };
 
+// Frontend-only convenience presets: choosing one fills the editable draft
+// URL/model fields below. Nothing is persisted about the preset itself — the
+// saved config keeps only the resulting base URL and model.
+export const TRANSLATION_PROVIDER_PRESETS = [
+  { id: "custom", label: "Custom", baseUrl: "", model: "" },
+  {
+    id: "deepseek",
+    label: "DeepSeek",
+    baseUrl: "https://api.deepseek.com",
+    model: "deepseek-v4-flash",
+  },
+  { id: "ollama", label: "Ollama", baseUrl: "http://127.0.0.1:11434", model: "" },
+  { id: "lmstudio", label: "LM Studio", baseUrl: "http://127.0.0.1:1234", model: "" },
+] as const;
+
+export type ProviderPresetId = (typeof TRANSLATION_PROVIDER_PRESETS)[number]["id"];
+
+export function detectProviderPresetId(baseUrl: string): ProviderPresetId {
+  const trimmed = (baseUrl ?? "").trim().replace(/\/+$/, "");
+  const match = TRANSLATION_PROVIDER_PRESETS.find(
+    (preset) => preset.baseUrl !== "" && preset.baseUrl === trimmed,
+  );
+  return match?.id ?? "custom";
+}
+
+// Advisory-only mirror of the Rust loopback rule (backend gate is
+// authoritative): the JS check may differ at the edges such as 127.0.0.2, but
+// covers the common local-server hosts.
+export function hostLooksNonLoopback(baseUrl: string): boolean {
+  const trimmed = (baseUrl ?? "").trim();
+  if (!trimmed) {
+    return false;
+  }
+  try {
+    const host = new URL(trimmed).hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    return !(
+      host === "localhost" ||
+      host === "::1" ||
+      host === "0.0.0.0" ||
+      /^127\./.test(host)
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function credentialStatusLabel(
+  status: LocalTranslationCredentialStatus | null | undefined,
+): string {
+  if (!status?.hasKey) {
+    return "Not set";
+  }
+  switch (status.source) {
+    case "environment":
+      return "Environment variable";
+    case "keychain":
+      return "OS keychain";
+    case "memory":
+      return "In-memory cache";
+    default:
+      return "Unknown source";
+  }
+}
+
 interface LocalLlmSettingsProps {
   draft: LocalTranslationConfigDraft;
   dirty: boolean;
@@ -57,6 +123,7 @@ interface LocalLlmSettingsProps {
   testResult: LocalTranslationTestResult | null;
   engineTesting?: boolean;
   engineTest?: TranslationEngineTestResult | null;
+  credentialStatus?: LocalTranslationCredentialStatus | null;
   voices: LocalVoice[];
   voicesLoading?: boolean;
   previewing: boolean;
@@ -75,6 +142,8 @@ interface LocalLlmSettingsProps {
   onSave: () => void;
   onTest: () => void;
   onTestEngine?: () => void;
+  onSaveKey?: (key: string) => Promise<void>;
+  onClearKey?: () => Promise<void>;
   onPreview: () => void;
   onRefreshVoices?: () => void;
   onWhisperModelSelect: (modelId: string) => void;
@@ -140,6 +209,7 @@ export function LocalLlmSettings({
   testResult,
   engineTesting = false,
   engineTest = null,
+  credentialStatus = null,
   voices,
   voicesLoading = false,
   previewing,
@@ -158,6 +228,8 @@ export function LocalLlmSettings({
   onSave,
   onTest,
   onTestEngine = () => undefined,
+  onSaveKey,
+  onClearKey,
   onPreview,
   onRefreshVoices = () => undefined,
   onWhisperModelSelect,
@@ -221,6 +293,29 @@ export function LocalLlmSettings({
           </>
         ) : <>
         <label className="field">
+          <span>Provider preset</span>
+          <select
+            aria-label="Provider preset"
+            value={detectProviderPresetId(draft.openaiBaseUrl)}
+            onChange={(event) => {
+              const preset = TRANSLATION_PROVIDER_PRESETS.find(
+                (item) => item.id === event.currentTarget.value,
+              );
+              if (!preset) {
+                return;
+              }
+              update({ openaiBaseUrl: preset.baseUrl, openaiModel: preset.model });
+            }}
+          >
+            {TRANSLATION_PROVIDER_PRESETS.map((preset) => (
+              <option key={preset.id} value={preset.id}>
+                {preset.label}
+              </option>
+            ))}
+          </select>
+          <small>Presets fill the URL and model below; every field stays editable.</small>
+        </label>
+        <label className="field">
           <span>Server URL</span>
           <input
             value={draft.openaiBaseUrl}
@@ -229,6 +324,11 @@ export function LocalLlmSettings({
           />
           <small>Meeting text is sent to this endpoint. Non-local endpoints should use HTTPS.</small>
         </label>
+        {hostLooksNonLoopback(draft.openaiBaseUrl) ? (
+          <p className="local-text-only-note" role="note">
+            Sentences from your meeting transcript will be sent to this endpoint for translation.
+          </p>
+        ) : null}
         <label className="field">
           <span>Model</span>
           <input
@@ -237,6 +337,7 @@ export function LocalLlmSettings({
             onChange={(event) => update({ openaiModel: event.currentTarget.value })}
           />
         </label>
+        <ApiKeyRow status={credentialStatus} onSaveKey={onSaveKey} onClearKey={onClearKey} />
         <div className="field-grid two">
           <NumberField
             label="Timeout (seconds)"
@@ -667,6 +768,93 @@ function HyMtModelCard({
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+// Presentational key row for the OpenAI-compatible engine. The typed key
+// lives only in this local state; saving and clearing go through the parent
+// callbacks (api.ts invokes) and the refreshed presence/source status arrives
+// as a prop. The key itself is never rendered back.
+function ApiKeyRow({
+  status,
+  onSaveKey,
+  onClearKey,
+}: {
+  status: LocalTranslationCredentialStatus | null;
+  onSaveKey?: (key: string) => Promise<void>;
+  onClearKey?: () => Promise<void>;
+}) {
+  const [keyDraft, setKeyDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    const key = keyDraft.trim();
+    if (!key || !onSaveKey) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await onSaveKey(key);
+      setKeyDraft("");
+    } catch {
+      // The parent surfaces the error; keep the draft so it can be retried.
+    } finally {
+      setBusy(false);
+    }
+  };
+  const clear = async () => {
+    if (!onClearKey) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await onClearKey();
+    } catch {
+      // The parent surfaces the error.
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="field api-key-row">
+      <label className="field">
+        <span>API key</span>
+        <input
+          type="password"
+          autoComplete="new-password"
+          aria-label="API key"
+          value={keyDraft}
+          placeholder={status?.hasKey ? "Key saved — paste a new key to replace it" : "Paste an API key"}
+          onChange={(event) => setKeyDraft(event.currentTarget.value)}
+        />
+        <small>Stored in the OS keychain; never written to the config file or shown again.</small>
+      </label>
+      <div className="button-row">
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={busy || !keyDraft.trim()}
+        >
+          {busy ? "Working" : "Save key"}
+        </button>
+        <button
+          type="button"
+          onClick={() => void clear()}
+          disabled={busy || !status?.hasKey}
+        >
+          Clear key
+        </button>
+      </div>
+      <p className="key-test-row" aria-live="polite">
+        Key: {credentialStatusLabel(status)}
+      </p>
+      {status?.source === "environment" ? (
+        <p className="local-text-only-note" role="note">
+          A BAKA_TRANS_LOCAL_API_KEY environment variable currently overrides the keychain entry.
+          Clearing the key here will not change the key in use until that variable is removed.
+        </p>
+      ) : null}
     </div>
   );
 }

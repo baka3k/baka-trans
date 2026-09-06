@@ -22,6 +22,7 @@ pub struct OpenAiCompatibleClient {
 }
 
 impl OpenAiCompatibleClient {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         base_url: &str,
         model: &str,
@@ -53,7 +54,7 @@ impl OpenAiCompatibleClient {
             ));
         }
         let client = Client::builder()
-            .timeout(Duration::from_secs(timeout_seconds.max(5).min(300)))
+            .timeout(Duration::from_secs(timeout_seconds.clamp(5, 300)))
             .redirect(Policy::none())
             .build()
             .map_err(|err| AppError::new("local_openai_client_error", err.to_string()))?;
@@ -191,7 +192,7 @@ pub fn normalize_openai_chat_completions_url(base_url: &str) -> AppResult<String
     Ok(url.to_string().trim_end_matches('/').to_string())
 }
 
-fn is_loopback_url(url_str: &str) -> AppResult<bool> {
+pub(crate) fn is_loopback_url(url_str: &str) -> AppResult<bool> {
     let url = Url::parse(url_str).map_err(|err| {
         AppError::new(
             "local_openai_base_url_invalid",

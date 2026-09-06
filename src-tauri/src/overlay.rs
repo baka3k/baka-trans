@@ -451,11 +451,11 @@ pub(crate) async fn capture_and_ocr_text(
             screen_recording_permission_granted() || request_screen_recording_permission_once();
         require_screen_recording_permission(permission_granted)?;
         let geometry = geometry.clone();
-        return tauri::async_runtime::spawn_blocking(move || {
+        tauri::async_runtime::spawn_blocking(move || {
             capture_and_ocr_text_blocking(&geometry, minimum_confidence, window_id)
         })
         .await
-        .map_err(|err| AppError::new("overlay_ocr_join_error", err.to_string()))?;
+        .map_err(|err| AppError::new("overlay_ocr_join_error", err.to_string()))?
     }
 
     #[cfg(target_os = "windows")]

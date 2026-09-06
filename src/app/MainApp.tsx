@@ -51,7 +51,9 @@ import {
   closeOverlayWindow,
   closeLookHelpWindow,
   deleteLlmProfile,
+  deleteLocalTranslationApiKey,
   downloadWhisperModel,
+  getLocalTranslationCredentialStatus,
   listAudioDevices,
   listLocalTtsVoices,
   listWhisperModels,
@@ -72,6 +74,7 @@ import {
   resumeSession,
   runMeetingSummaryAgent,
   saveLlmProfile,
+  saveLocalTranslationApiKey,
   saveLocalTranslationConfig,
   saveTranslationApiKey,
   startLocalMonitor,
@@ -126,6 +129,7 @@ import type {
   LlmProviderProfileDraft,
   LocalTranslationConfigDraft,
   LocalPipelineStage,
+  LocalTranslationCredentialStatus,
   LocalTranslationTestResult,
   TranslationEngineTestResult,
   LocalVoice,
@@ -366,6 +370,8 @@ export default function MainApp({
   const [localConfigSaving, setLocalConfigSaving] = useState(false);
   const [localConfigTesting, setLocalConfigTesting] = useState(false);
   const [localConfigTest, setLocalConfigTest] = useState<LocalTranslationTestResult | null>(null);
+  const [localCredentialStatus, setLocalCredentialStatus] =
+    useState<LocalTranslationCredentialStatus | null>(null);
   const [engineTesting, setEngineTesting] = useState(false);
   const [engineTest, setEngineTest] = useState<TranslationEngineTestResult | null>(null);
   const [localVoices, setLocalVoices] = useState<LocalVoice[]>([]);
@@ -789,13 +795,14 @@ export default function MainApp({
   async function hydrate() {
     setBusy(true);
     try {
-      const [deviceList, appStatus, transcriptSnapshot, profiles, localConfig, models, runtime, whisperModelDir, hyMtStatus] =
+      const [deviceList, appStatus, transcriptSnapshot, profiles, localConfig, credentialStatus, models, runtime, whisperModelDir, hyMtStatus] =
         await Promise.all([
         listAudioDevices(),
         getAppStatus(),
         getTranscriptSnapshot(),
         listLlmProfiles(),
         getLocalTranslationConfig(),
+        getLocalTranslationCredentialStatus().catch(() => null),
         experience === "local" ? listWhisperModels() : Promise.resolve([]),
         experience === "local" ? getVieNeuRuntimeStatus() : Promise.resolve(null),
         experience === "local" ? safeGetWhisperModelDir() : Promise.resolve(""),
@@ -844,6 +851,7 @@ export default function MainApp({
       setLocalConfigDirty(migratedLocalDraft !== localDraft);
       setLocalConfigTest(null);
       setEngineTest(null);
+      setLocalCredentialStatus(credentialStatus ?? null);
       setKeyTestMessage("");
       const storedRouting = readRoutingProfile();
       applyRoutingProfile(resolveRoutingProfile(deviceList, storedRouting), true);
@@ -981,6 +989,28 @@ export default function MainApp({
       setError(normalizeError(cause));
     } finally {
       setLocalConfigSaving(false);
+    }
+  }
+
+  async function saveLocalApiKey(key: string) {
+    setError(null);
+    try {
+      await saveLocalTranslationApiKey(key);
+      setLocalCredentialStatus((await getLocalTranslationCredentialStatus()) ?? null);
+    } catch (cause) {
+      setError(normalizeError(cause));
+      throw cause;
+    }
+  }
+
+  async function clearLocalApiKey() {
+    setError(null);
+    try {
+      await deleteLocalTranslationApiKey();
+      setLocalCredentialStatus((await getLocalTranslationCredentialStatus()) ?? null);
+    } catch (cause) {
+      setError(normalizeError(cause));
+      throw cause;
     }
   }
 
@@ -2002,6 +2032,7 @@ export default function MainApp({
               testResult={localConfigTest}
               engineTesting={engineTesting}
               engineTest={engineTest}
+              credentialStatus={localCredentialStatus}
               voices={localVoices}
               voicesLoading={localVoicesLoading}
               previewing={localVoicePreviewing}
@@ -2030,6 +2061,8 @@ export default function MainApp({
               onSave={() => void saveLocalConfig()}
               onTest={() => void testLocalConfig()}
               onTestEngine={() => void testLocalEngine()}
+              onSaveKey={(key) => saveLocalApiKey(key)}
+              onClearKey={() => clearLocalApiKey()}
               onPreview={() => void previewLocalVoice()}
               onRefreshVoices={() => void refreshLocalVoices()}
               onWhisperModelSelect={setSelectedWhisperModelId}

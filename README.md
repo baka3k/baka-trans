@@ -381,7 +381,10 @@ Runs whisper.cpp locally for Japanese transcription, then translates via Hy-MT2 
 1. Choose **Local Whisper** → open **Local LLM**.
 2. Select a translation engine:
    - **Hy-MT2** — offline, no network required (quality gate: CAUTION for live sessions).
-   - **OpenAI-compatible API** — configure base URL, model name, and API key (e.g. Ollama at `http://localhost:11434/v1`).
+   - **OpenAI-compatible API** — pick a provider preset (**DeepSeek**, Ollama, LM Studio, or Custom), then adjust the base URL and model (e.g. DeepSeek at `https://api.deepseek.com` with `deepseek-v4-flash`).
+     - Paste the provider's API key → **Save key**. The key is stored in the OS keychain (service `dev.baka3k.baka-trans`), never in the config file; only its presence and source are shown. **Clear key** removes it.
+     - Hosted endpoints (anything outside this computer, e.g. DeepSeek) require a key: starting a session and **Test translation engine** fail fast with `local_openai_api_key_missing` until one is saved. Loopback servers (Ollama, LM Studio) work without a key.
+     - `BAKA_TRANS_LOCAL_API_KEY` overrides the keychain entry while it is set.
 3. Select a Whisper model → **Download model** (stored in app data folder).
 4. Choose a speech engine:
    - **System TTS** — install a Vietnamese voice in system settings.
@@ -399,6 +402,8 @@ Runs whisper.cpp locally for Japanese transcription, then translates via Hy-MT2 
 | `local_whisper_model_load_error` | Verify the file is a compatible, non-empty whisper.cpp model. |
 | `local_openai_request_error` | Check the OpenAI-compatible endpoint URL and network. |
 | `local_openai_provider_error` | Verify model name and API key, then retry. |
+| `local_openai_api_key_missing` | Save the provider key under Local LLM → **API key**, or set `BAKA_TRANS_LOCAL_API_KEY`. Required for non-local endpoints. |
+| `credential_input_invalid` | The key field was empty or longer than 4096 characters; paste a valid API key. |
 | `local_hy_mt2_not_available` | Hy-MT2 not enabled for live sessions yet; use OpenAI-compatible engine. |
 | `local_translation_backlog_full` | Use shorter utterances, a smaller model, or more capable hardware. |
 | `vieneu_model_not_installed` | Open Local LLM → **Install VieNeu-TTS**. |

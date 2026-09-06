@@ -584,6 +584,13 @@ pub struct TranslationCredentialStatus {
     pub api_key_fingerprint: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalCredentialStatus {
+    pub has_key: bool,
+    pub source: Option<ApiKeySource>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApiKeyTestResult {

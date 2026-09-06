@@ -235,9 +235,16 @@ CPAL capture 16 kHz
 | 16.2 | [phase-16-02-engine-config-and-api-client.md](phase-16-02-engine-config-and-api-client.md) | blocked by 16.1 | Schema-v3 migration, keychain secrets, and secure OpenAI-compatible client |
 | 16.3 | [phase-16-03-rust-dispatcher-and-session.md](phase-16-03-rust-dispatcher-and-session.md) | blocked by 16.1-16.2 | Managed sidecar process and ordered local-worker dispatcher |
 | 16.4 | [phase-16-04-settings-and-cutover.md](phase-16-04-settings-and-cutover.md) | blocked by 16.2-16.3 | Accessible settings UX, retirement of Ollama, and regression/cutover evidence |
+| 16.5 | [../../260906-2137-openai-compatible-provider-completion/plan.md](../260906-2137-openai-compatible-provider-completion/plan.md) | delegated plan (completed 2026-09-06, [log](../../docs/logs/2026-09-06-openai-compatible-provider-completion.md)) | Residual phase-16.2 promise: in-app keychain save/delete/status for the local translation key, DeepSeek provider preset, start-time `local_openai_api_key_missing` gate, egress warning (advisory text; the acknowledged-egress prerequisite is intentionally deferred), docs |
 
 ## Dependencies and Cross-Plan Coordination
 
+- `plans/260906-2137-openai-compatible-provider-completion` (phase 16.5 above)
+  completes the residual of this plan's phase 16: the 16.2 log claimed keychain
+  save/delete commands for the local translation key, but current code is
+  load-only. That plan owns the in-app API key management, provider presets
+  (DeepSeek), and the missing-key start gate; it changes no cloud or Hy-MT2
+  runtime code owned here.
 - Coordinates with `plans/realtime-meeting-translation-macos`, which owns shared capture, playback, session lifecycle, and Google/OpenAI behavior.
 - Coordinates with `plans/260712-2234-application-ui-modernization`, which owns the Fluent shell and accessibility conventions.
 - Uses `plans/260718-2348-managed-vieneu-runtime` as an implemented lifecycle, authenticated/private-process, model-install, and one-folder packaging precedent; HY-MT remains a separate manager and model store.

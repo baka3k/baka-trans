@@ -187,6 +187,11 @@ export interface TranslationCredentialStatus {
   apiKeyFingerprint?: string;
 }
 
+export interface LocalTranslationCredentialStatus {
+  hasKey: boolean;
+  source: ApiKeySource | null;
+}
+
 export interface LocalTranslationConfig {
   schemaVersion: number;
   translationEngine: LocalTranslationEngine;

@@ -403,4 +403,260 @@ describe("LocalLlmSettings", () => {
       screen.queryByRole("button", { name: "Install Hy-MT2 model" }),
     ).not.toBeInTheDocument();
   });
+
+  describe("OpenAI-compatible API key management", () => {
+    const openAiBase = {
+      draft: {
+        ...defaultLocalTranslationConfig,
+        translationEngine: "openai_compatible" as const,
+        openaiBaseUrl: "https://api.deepseek.com",
+        openaiModel: "deepseek-v4-flash",
+        modelPath: "C:\\models\\ggml-small.bin",
+        voiceId: "vi-voice",
+      },
+      dirty: false,
+      saving: false,
+      testing: false,
+      testResult: null,
+      voices: [{ id: "vi-voice", name: "Vietnamese", language: "vi-VN" }],
+      previewing: false,
+      onPreview: () => undefined,
+      whisperModels,
+      selectedWhisperModelId: "small-q5_1",
+      whisperDownload: null,
+      whisperDownloading: false,
+      onChange: () => undefined,
+      onSave: () => undefined,
+      onTest: () => undefined,
+      onWhisperModelSelect: () => undefined,
+      onWhisperDownload: () => undefined,
+      onSaveKey: () => Promise.resolve(),
+      onClearKey: () => Promise.resolve(),
+    };
+
+    it("renders the API key row only for the OpenAI-compatible engine", async () => {
+      const { container, unmount } = render(
+        <LocalLlmSettings {...openAiBase} credentialStatus={{ hasKey: false, source: null }} />,
+      );
+      expect(screen.getByLabelText("API key")).toBeInTheDocument();
+      expect((await axe(container)).violations).toEqual([]);
+      unmount();
+
+      render(
+        <LocalLlmSettings
+          {...openAiBase}
+          draft={{ ...openAiBase.draft, translationEngine: "huggingface_offline" }}
+          credentialStatus={{ hasKey: false, source: null }}
+        />,
+      );
+      expect(screen.queryByLabelText("API key")).not.toBeInTheDocument();
+    });
+
+    it("leaves the password input empty after mount even when a key exists", () => {
+      render(
+        <LocalLlmSettings {...openAiBase} credentialStatus={{ hasKey: true, source: "keychain" }} />,
+      );
+      expect(screen.getByLabelText("API key")).toHaveValue("");
+      expect(screen.getByText(/Key: OS keychain/)).toBeInTheDocument();
+    });
+
+    it("saves the typed key, clears the input, and reflects the refreshed status", async () => {
+      const user = userEvent.setup();
+      const onSaveKey = vi.fn(() => Promise.resolve());
+      const { rerender } = render(
+        <LocalLlmSettings
+          {...openAiBase}
+          credentialStatus={{ hasKey: false, source: null }}
+          onSaveKey={onSaveKey}
+        />,
+      );
+
+      await user.type(screen.getByLabelText("API key"), "sk-test-123");
+      await user.click(screen.getByRole("button", { name: "Save key" }));
+      expect(onSaveKey).toHaveBeenCalledWith("sk-test-123");
+
+      rerender(
+        <LocalLlmSettings
+          {...openAiBase}
+          credentialStatus={{ hasKey: true, source: "keychain" }}
+          onSaveKey={onSaveKey}
+        />,
+      );
+      expect(screen.getByLabelText("API key")).toHaveValue("");
+      expect(screen.getByText(/Key: OS keychain/)).toBeInTheDocument();
+    });
+
+    it("keeps the typed key when saving fails", async () => {
+      const user = userEvent.setup();
+      const onSaveKey = vi.fn(() => Promise.reject(new Error("keychain locked")));
+      render(
+        <LocalLlmSettings
+          {...openAiBase}
+          credentialStatus={{ hasKey: false, source: null }}
+          onSaveKey={onSaveKey}
+        />,
+      );
+
+      await user.type(screen.getByLabelText("API key"), "sk-test-123");
+      await user.click(screen.getByRole("button", { name: "Save key" }));
+      expect(onSaveKey).toHaveBeenCalledTimes(1);
+      expect(screen.getByLabelText("API key")).toHaveValue("sk-test-123");
+    });
+
+    it("disables Clear key until a key exists and reports Not set after clearing", async () => {
+      const user = userEvent.setup();
+      const onClearKey = vi.fn(() => Promise.resolve());
+      const { rerender } = render(
+        <LocalLlmSettings
+          {...openAiBase}
+          credentialStatus={{ hasKey: false, source: null }}
+          onClearKey={onClearKey}
+        />,
+      );
+      expect(screen.getByRole("button", { name: "Clear key" })).toBeDisabled();
+
+      rerender(
+        <LocalLlmSettings
+          {...openAiBase}
+          credentialStatus={{ hasKey: true, source: "keychain" }}
+          onClearKey={onClearKey}
+        />,
+      );
+      await user.click(screen.getByRole("button", { name: "Clear key" }));
+      expect(onClearKey).toHaveBeenCalledTimes(1);
+
+      rerender(
+        <LocalLlmSettings
+          {...openAiBase}
+          credentialStatus={{ hasKey: false, source: null }}
+          onClearKey={onClearKey}
+        />,
+      );
+      expect(screen.getByText(/Key: Not set/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Clear key" })).toBeDisabled();
+    });
+
+    it("explains when an environment variable overrides the keychain", () => {
+      render(
+        <LocalLlmSettings
+          {...openAiBase}
+          credentialStatus={{ hasKey: true, source: "environment" }}
+        />,
+      );
+      expect(screen.getByText(/Key: Environment variable/)).toBeInTheDocument();
+      expect(
+        screen.getByText(/BAKA_TRANS_LOCAL_API_KEY environment variable currently overrides/),
+      ).toBeInTheDocument();
+    });
+
+    it("reports no key when the status is missing entirely", () => {
+      render(<LocalLlmSettings {...openAiBase} />);
+      expect(screen.getByText(/Key: Not set/)).toBeInTheDocument();
+    });
+  });
+
+  describe("provider presets and egress note", () => {
+    const base = {
+      draft: {
+        ...defaultLocalTranslationConfig,
+        translationEngine: "openai_compatible" as const,
+        modelPath: "C:\\models\\ggml-small.bin",
+        voiceId: "vi-voice",
+      },
+      dirty: false,
+      saving: false,
+      testing: false,
+      testResult: null,
+      voices: [],
+      previewing: false,
+      onPreview: () => undefined,
+      whisperModels,
+      selectedWhisperModelId: "small-q5_1",
+      whisperDownload: null,
+      whisperDownloading: false,
+      onChange: () => undefined,
+      onSave: () => undefined,
+      onTest: () => undefined,
+      onWhisperModelSelect: () => undefined,
+      onWhisperDownload: () => undefined,
+      onSaveKey: () => Promise.resolve(),
+      onClearKey: () => Promise.resolve(),
+    };
+
+    it("fills the draft URL and model from a preset and marks the form dirty", async () => {
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      render(<LocalLlmSettings {...base} onChange={onChange} />);
+
+      await user.selectOptions(screen.getByLabelText("Provider preset"), "deepseek");
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          openaiBaseUrl: "https://api.deepseek.com",
+          openaiModel: "deepseek-v4-flash",
+        }),
+      );
+    });
+
+    it("shows Custom when the draft matches no preset and allows switching to Ollama", async () => {
+      const user = userEvent.setup();
+      const setDraft = vi.fn();
+      function Harness() {
+        const [current, setCurrent] = useState<LocalTranslationConfigDraft>(base.draft);
+        return (
+          <LocalLlmSettings
+            {...base}
+            draft={current}
+            onChange={(next) => {
+              setDraft(next);
+              setCurrent(next);
+            }}
+          />
+        );
+      }
+      render(<Harness />);
+
+      expect(screen.getByLabelText("Provider preset")).toHaveValue("custom");
+      await user.type(screen.getByLabelText("Model"), "gemma3:4b");
+      await user.selectOptions(screen.getByLabelText("Provider preset"), "ollama");
+      expect(setDraft).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          openaiBaseUrl: "http://127.0.0.1:11434",
+          openaiModel: "",
+        }),
+      );
+    });
+
+    it("derives the selected preset from the current draft URL", () => {
+      render(
+        <LocalLlmSettings
+          {...base}
+          draft={{ ...base.draft, openaiBaseUrl: "https://api.deepseek.com" }}
+        />,
+      );
+      expect(screen.getByLabelText("Provider preset")).toHaveValue("deepseek");
+    });
+
+    it("warns about transcript egress only for hosted endpoints", () => {
+      const { unmount } = render(
+        <LocalLlmSettings
+          {...base}
+          draft={{ ...base.draft, openaiBaseUrl: "https://api.deepseek.com" }}
+        />,
+      );
+      expect(
+        screen.getByText(/Sentences from your meeting transcript will be sent to this endpoint/),
+      ).toBeInTheDocument();
+      unmount();
+
+      render(
+        <LocalLlmSettings
+          {...base}
+          draft={{ ...base.draft, openaiBaseUrl: "http://127.0.0.1:11434" }}
+        />,
+      );
+      expect(
+        screen.queryByText(/Sentences from your meeting transcript will be sent to this endpoint/),
+      ).not.toBeInTheDocument();
+    });
+  });
 });

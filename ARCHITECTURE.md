@@ -15,4 +15,6 @@ CPAL capture at 16 kHz
   -> selected output device and all/left/right channel
 ```
 
+The OpenAI-compatible engine keeps its API key in the OS keychain (or `BAKA_TRANS_LOCAL_API_KEY`), and a start-time gate fails the session and engine test with `local_openai_api_key_missing` when a non-loopback endpoint has no key; loopback servers may stay keyless.
+
 Windows synthesis uses `Windows.Media.SpeechSynthesis` stream output. macOS synthesis uses the platform `say` speech service to create a local WAV buffer. Neither path plays directly to the default speaker. Stop drops the shared playback runtime immediately; generation and cancellation checks prevent late local output. A TTS failure emits an app error without replacing the already-final translated text.
