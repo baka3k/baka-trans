@@ -22,3 +22,5 @@ sidecars/hy-mt/__pycache__/
 sidecars/hy-mt/**/*.pyc
 .qwen/tmp
 .qwen/tmp/**
+.cortext-harness/config/dev.json
+.cortext-harness/sync-state/sync-code.lock

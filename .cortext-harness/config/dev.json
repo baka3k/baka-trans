@@ -4,6 +4,7 @@
     "code": "bakatrans",
     "name": "bakatrans"
   },
+  "storage_backend": "local",
   "code": {
     "env": {
       "CORTEX_STORAGE_INSTANCE": "bakatrans",
