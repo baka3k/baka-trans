@@ -245,18 +245,6 @@ CPAL capture 16 kHz
   load-only. That plan owns the in-app API key management, provider presets
   (DeepSeek), and the missing-key start gate; it changes no cloud or Hy-MT2
   runtime code owned here.
-- 2026-09-06 TTS backlog optimization: `plans/260906-2338-local-tts-backlog-optimization`
-  hardens the implemented phase 06/07 spoken pipeline against the recurring
-  `local_tts_backlog_full` drop: the 4-slot TTS mpsc becomes a bounded
-  `SpeechQueue` (capacity 12) that coalesces on overflow and drops oldest only
-  when the coalesce bound or a 10 s queue-age bound is exceeded, playback
-  pacing is decoupled from synthesis (pipelined, lookahead-capped), and the
-  Windows synthesizer is cached. Both invariants above are preserved — the
-  queue stays bounded (`SPEECH_QUEUE_CAPACITY` + `MAX_COALESCED_CHARS` +
-  `MAX_QUEUE_AGE_MS`) and speech order stays serialized (FIFO pops +
-  tail-merge coalescing). One accepted contract amendment: pause lets the
-  current sentence plus up to `MAX_BUFFERS_AHEAD` (3) already-synthesized
-  sentences finish. It changes no engine, session, or cloud code owned here.
 - Coordinates with `plans/realtime-meeting-translation-macos`, which owns shared capture, playback, session lifecycle, and Google/OpenAI behavior.
 - Coordinates with `plans/260712-2234-application-ui-modernization`, which owns the Fluent shell and accessibility conventions.
 - Uses `plans/260718-2348-managed-vieneu-runtime` as an implemented lifecycle, authenticated/private-process, model-install, and one-folder packaging precedent; HY-MT remains a separate manager and model store.
