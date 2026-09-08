@@ -410,7 +410,7 @@ Runs whisper.cpp locally for Japanese transcription, then translates via Hy-MT2 
 | `vieneu_install_failed` | **Resume setup** — existing verified data is reused. |
 | `vieneu_start_failed` | **Repair** or **Restart VieNeu-TTS** in Local LLM. |
 | `local_tts_voice_missing` | Refresh and reselect the voice, save, and retest. |
-| `local_tts_backlog_full` | Speech ran past the live window, so the oldest queued sentence was skipped (its text stays in the transcript). Reduce model latency, raise the speech rate, or pause to let speech catch up. |
+| `local_tts_backlog_full` | Reduce model latency or pause until speech catches up. |
 | `local_tts_playback_error` | Reconnect and reselect the output device. |
 
 ---

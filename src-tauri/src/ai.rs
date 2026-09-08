@@ -1,7 +1,6 @@
 mod google_live;
 mod local_worker;
 mod openai_realtime;
-mod speech_queue;
 
 pub use google_live::run_live_translation as run_google_live_translation;
 pub use google_live::test_live_translation_connection as test_google_live_translation_connection;
