@@ -6,12 +6,110 @@ use std::sync::{Mutex, OnceLock};
 const SERVICE: &str = "dev.baka3k.baka-trans";
 const LOCAL_TRANSLATION_KEY_USER: &str = "local-translation-api-key";
 const ENV_VAR_NAME: &str = "BAKA_TRANS_LOCAL_API_KEY";
+const HUGGINGFACE_TOKEN_USER: &str = "huggingface-token";
+const HF_ENV_VAR_NAME: &str = "BAKA_TRANS_HF_TOKEN";
 const MAX_KEY_CHARS: usize = 4096;
 
 static CACHED_KEY: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+static CACHED_HF_TOKEN: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 
 fn key_cache() -> &'static Mutex<Option<String>> {
     CACHED_KEY.get_or_init(|| Mutex::new(None))
+}
+
+fn hf_token_cache() -> &'static Mutex<Option<String>> {
+    CACHED_HF_TOKEN.get_or_init(|| Mutex::new(None))
+}
+
+/// Save a Hugging Face token used only to download gated model repositories
+/// (TranslateGemma) during the one-shot managed install. The token is never
+/// forwarded to serve mode.
+pub fn save_huggingface_token(token: &str) -> AppResult<()> {
+    let trimmed = validate_key_input(token)?;
+    huggingface_entry()?
+        .set_password(&trimmed)
+        .map_err(keychain_error)?;
+    *hf_token_cache()
+        .lock()
+        .map_err(|err| credential_cache_error(err.to_string()))? = Some(trimmed);
+    Ok(())
+}
+
+pub fn delete_huggingface_token() -> AppResult<()> {
+    match huggingface_entry()?.delete_credential() {
+        Ok(()) => {}
+        Err(keyring::Error::NoEntry) => {}
+        Err(err) => return Err(keychain_error(err)),
+    }
+    *hf_token_cache()
+        .lock()
+        .map_err(|err| credential_cache_error(err.to_string()))? = None;
+    Ok(())
+}
+
+pub fn huggingface_token_status() -> AppResult<LocalCredentialStatus> {
+    let env_present = hf_env_token().is_some();
+    let cached_present = if env_present {
+        false
+    } else {
+        hf_token_cache()
+            .lock()
+            .map_err(|err| credential_cache_error(err.to_string()))?
+            .is_some()
+    };
+    let keychain_present = if env_present || cached_present {
+        false
+    } else {
+        match huggingface_entry()?.get_password() {
+            Ok(secret) => !secret.trim().is_empty(),
+            Err(keyring::Error::NoEntry) => false,
+            Err(err) => return Err(keychain_error(err)),
+        }
+    };
+    Ok(credential_status_from_parts(env_present, cached_present, keychain_present))
+}
+
+/// Resolve the token handed to gated installs: the environment variable wins,
+/// then the keychain-backed cache.
+pub fn load_huggingface_token() -> AppResult<Option<String>> {
+    if let Some(token) = hf_env_token() {
+        return Ok(Some(token));
+    }
+    if let Some(cached) = hf_token_cache()
+        .lock()
+        .map_err(|err| crate::error::AppError::new("credential_cache_error", err.to_string()))?
+        .clone()
+    {
+        if !cached.is_empty() {
+            return Ok(Some(cached));
+        }
+    }
+    let entry = huggingface_entry()?;
+    match entry.get_password() {
+        Ok(secret) => {
+            let secret = secret.trim().to_string();
+            if secret.is_empty() {
+                return Ok(None);
+            }
+            *hf_token_cache().lock().map_err(|err| {
+                crate::error::AppError::new("credential_cache_error", err.to_string())
+            })? = Some(secret.clone());
+            Ok(Some(secret))
+        }
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(err) => Err(crate::error::AppError::new("keychain_error", err.to_string())),
+    }
+}
+
+fn huggingface_entry() -> AppResult<Entry> {
+    Entry::new(SERVICE, HUGGINGFACE_TOKEN_USER).map_err(keychain_error)
+}
+
+fn hf_env_token() -> Option<String> {
+    std::env::var(HF_ENV_VAR_NAME)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 pub fn save_local_translation_api_key(key: &str) -> AppResult<()> {

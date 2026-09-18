@@ -71,6 +71,9 @@ import {
   getHyMtModelStatus,
   installHyMtModel,
   cancelHyMtModelInstall,
+  getHuggingFaceTokenStatus,
+  saveHuggingFaceToken,
+  clearHuggingFaceToken,
   resumeSession,
   runMeetingSummaryAgent,
   saveLlmProfile,
@@ -131,6 +134,7 @@ import type {
   LocalPipelineStage,
   LocalTranslationCredentialStatus,
   LocalTranslationTestResult,
+  OfflineTranslationModel,
   TranslationEngineTestResult,
   LocalVoice,
   HyMtModelProgress,
@@ -388,6 +392,9 @@ export default function MainApp({
   const [hyMtModel, setHyMtModel] = useState<HyMtModelStatus | null>(null);
   const [hyMtProgress, setHyMtProgress] = useState<HyMtModelProgress | null>(null);
   const [hyMtBusy, setHyMtBusy] = useState(false);
+  const [hfTokenStatus, setHfTokenStatus] = useState<LocalTranslationCredentialStatus | null>(null);
+  const selectedOfflineModelRef = useRef<OfflineTranslationModel>("hy_mt2");
+  const fetchedOfflineStatusRef = useRef<OfflineTranslationModel | null>(null);
   const [localPipelineStage, setLocalPipelineStage] =
     useState<LocalPipelineStage>("listening");
   const conversationFeedRef = useRef<HTMLDivElement | null>(null);
@@ -682,9 +689,14 @@ export default function MainApp({
         );
       }),
       listen<HyMtModelProgress>("hy-mt-model-progress", (event) => {
+        // Ignore progress for an offline model the user is not currently
+        // looking at (e.g. a download started before switching models).
+        if (event.payload.model !== selectedOfflineModelRef.current) {
+          return;
+        }
         setHyMtProgress(event.payload);
         setHyMtModel((current) =>
-          current
+          current && current.model === event.payload.model
             ? {
                 ...current,
                 phase: event.payload.phase,
@@ -710,6 +722,25 @@ export default function MainApp({
       void unlisten.then((callbacks) => callbacks.forEach((callback) => callback()));
     };
   }, []);
+
+  // Track the offline model the settings card should reflect and load its
+  // managed-model status whenever the selection changes.
+  useEffect(() => {
+    selectedOfflineModelRef.current = localConfigDraft.offlineModel;
+    if (experience !== "local") {
+      return;
+    }
+    if (fetchedOfflineStatusRef.current === localConfigDraft.offlineModel) {
+      return;
+    }
+    fetchedOfflineStatusRef.current = localConfigDraft.offlineModel;
+    getHyMtModelStatus(localConfigDraft.offlineModel)
+      .then((status) => {
+        setHyMtModel(status);
+        setHyMtProgress(null);
+      })
+      .catch(() => undefined);
+  }, [experience, localConfigDraft.offlineModel]);
 
   useEffect(() => {
     if (!targetLanguageOptions.some((option) => option.value === targetLanguage)) {
@@ -795,7 +826,7 @@ export default function MainApp({
   async function hydrate() {
     setBusy(true);
     try {
-      const [deviceList, appStatus, transcriptSnapshot, profiles, localConfig, credentialStatus, models, runtime, whisperModelDir, hyMtStatus] =
+      const [deviceList, appStatus, transcriptSnapshot, profiles, localConfig, credentialStatus, hfToken, models, runtime, whisperModelDir] =
         await Promise.all([
         listAudioDevices(),
         getAppStatus(),
@@ -803,11 +834,16 @@ export default function MainApp({
         listLlmProfiles(),
         getLocalTranslationConfig(),
         getLocalTranslationCredentialStatus().catch(() => null),
+        experience === "local" ? getHuggingFaceTokenStatus().catch(() => null) : Promise.resolve(null),
         experience === "local" ? listWhisperModels() : Promise.resolve([]),
         experience === "local" ? getVieNeuRuntimeStatus() : Promise.resolve(null),
         experience === "local" ? safeGetWhisperModelDir() : Promise.resolve(""),
-        experience === "local" ? getHyMtModelStatus() : Promise.resolve(null),
       ]);
+      // The managed offline model status depends on which model the saved
+      // config selects, so it resolves after the config itself.
+      const hyMtStatus = experience === "local"
+        ? await getHyMtModelStatus(localConfig.offlineModel).catch(() => null)
+        : null;
       let voices: LocalVoice[] = [];
       let voiceLoadError: AppErrorPayload | null = null;
       if (
@@ -852,6 +888,7 @@ export default function MainApp({
       setLocalConfigTest(null);
       setEngineTest(null);
       setLocalCredentialStatus(credentialStatus ?? null);
+      setHfTokenStatus(hfToken ?? null);
       setKeyTestMessage("");
       const storedRouting = readRoutingProfile();
       applyRoutingProfile(resolveRoutingProfile(deviceList, storedRouting), true);
@@ -1014,6 +1051,28 @@ export default function MainApp({
     }
   }
 
+  async function saveHfToken(token: string) {
+    setError(null);
+    try {
+      await saveHuggingFaceToken(token);
+      setHfTokenStatus((await getHuggingFaceTokenStatus()) ?? null);
+    } catch (cause) {
+      setError(normalizeError(cause));
+      throw cause;
+    }
+  }
+
+  async function clearHfToken() {
+    setError(null);
+    try {
+      await clearHuggingFaceToken();
+      setHfTokenStatus((await getHuggingFaceTokenStatus()) ?? null);
+    } catch (cause) {
+      setError(normalizeError(cause));
+      throw cause;
+    }
+  }
+
   async function testLocalConfig() {
     setLocalConfigTesting(true);
     setError(null);
@@ -1102,16 +1161,17 @@ export default function MainApp({
 
   async function installHyMt() {
     if (hyMtBusy) return;
+    const model = localConfigDraft.offlineModel;
     setHyMtBusy(true);
     setError(null);
     try {
-      const status = await installHyMtModel();
+      const status = await installHyMtModel(model);
       setHyMtModel(status);
       setHyMtProgress(null);
     } catch (cause) {
       setError(normalizeError(cause));
       setHyMtProgress(null);
-      setHyMtModel(await getHyMtModelStatus().catch(() => hyMtModel));
+      setHyMtModel(await getHyMtModelStatus(model).catch(() => hyMtModel));
     } finally {
       setHyMtBusy(false);
     }
@@ -2046,6 +2106,9 @@ export default function MainApp({
               hyMtModel={hyMtModel}
               hyMtProgress={hyMtProgress}
               hyMtBusy={hyMtBusy}
+              hfTokenStatus={hfTokenStatus}
+              onSaveHfToken={saveHfToken}
+              onClearHfToken={clearHfToken}
               previewDisabled={
                 !outputDeviceId || status !== "idle" || testingTone !== null || localMonitorActive
               }

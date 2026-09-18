@@ -1,4 +1,4 @@
-"""Verified, app-owned HY-MT model installation and activation."""
+"""Verified, app-owned offline translation model installation and activation."""
 
 from __future__ import annotations
 
@@ -8,11 +8,11 @@ import os
 import shutil
 import time
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from .constants import MODEL_ARTIFACTS, MODEL_ID, MODEL_REVISION, RUNTIME_VERSION, TOTAL_MODEL_BYTES, TRUST_REMOTE_CODE
+from .constants import HY_MT2_SPEC, RUNTIME_VERSION, TRUST_REMOTE_CODE, ModelArtifact, ModelSpec
 
 MANIFEST_NAME = "install-manifest.json"
 ACTIVE_NAME = "active"
@@ -23,10 +23,8 @@ STAGING_NAME = ".staging"
 class Artifact:
     path: str
     size_bytes: int
-    sha256: str
-
-
-ARTIFACTS = tuple(Artifact(*artifact) for artifact in MODEL_ARTIFACTS)
+    sha256: str | None = None
+    git_blob_sha1: str | None = None
 
 
 class LifecycleError(RuntimeError):
@@ -49,6 +47,22 @@ def _managed_root(root: Path) -> Path:
     return candidate.resolve()
 
 
+def model_base(root: Path, spec: ModelSpec) -> Path:
+    """Per-model directory under the shared cache root.
+
+    The Hy-MT2 model keeps the original unscoped layout so existing verified
+    installs stay valid without migration; every later model nests under its
+    registry key.
+    """
+    if spec.key == HY_MT2_SPEC.key:
+        return _managed_root(root)
+    base = root.expanduser().absolute() / spec.key
+    if base.exists() and base.is_symlink():
+        raise LifecycleError("Managed model directory cannot be a symbolic link.")
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
 def _contained(root: Path, relative: str) -> Path:
     candidate = root / relative
     resolved_parent = candidate.parent.resolve(strict=False)
@@ -65,99 +79,117 @@ def _assert_safe_tree(root: Path) -> None:
             raise LifecycleError("Managed model directory contains a symbolic link.")
 
 
-def active_path(root: Path) -> Path:
-    return _managed_root(root) / ACTIVE_NAME
+def active_path(root: Path, spec: ModelSpec = HY_MT2_SPEC) -> Path:
+    return model_base(root, spec) / ACTIVE_NAME
 
 
-def required_free_bytes(root: Path) -> int:
+def required_free_bytes(root: Path, spec: ModelSpec = HY_MT2_SPEC) -> int:
     # Updating retains the last verified active model until the new staging copy
     # activates. Reserve both full copies plus a small filesystem overhead.
-    active = active_path(root)
+    active = active_path(root, spec)
     copies = 2 if active.exists() else 1
-    return TOTAL_MODEL_BYTES * copies + max(512 * 1024 * 1024, TOTAL_MODEL_BYTES // 10)
+    return spec.total_bytes * copies + max(512 * 1024 * 1024, spec.total_bytes // 10)
 
 
-def check_free_space(root: Path) -> None:
-    available = shutil.disk_usage(_managed_root(root)).free
-    required = required_free_bytes(root)
+def check_free_space(root: Path, spec: ModelSpec) -> None:
+    available = shutil.disk_usage(model_base(root, spec)).free
+    required = required_free_bytes(root, spec)
     if available < required:
         raise LifecycleError(f"Insufficient disk space: need {required} bytes, have {available} bytes.")
 
 
-def validate_model(model_dir: Path) -> dict[str, Any]:
+def _verify_artifact(path: Path, artifact: ModelArtifact) -> None:
+    if not path.is_file() or path.is_symlink() or path.stat().st_size != artifact.size_bytes:
+        raise LifecycleError(f"Model artifact is invalid: {artifact.path}")
+    if artifact.sha256 is not None:
+        if sha256_file(path) != artifact.sha256:
+            raise LifecycleError(f"Model artifact failed verification: {artifact.path}")
+    elif artifact.git_blob_sha1 is not None:
+        digest = hashlib.sha1()
+        digest.update(b"blob %d\0" % artifact.size_bytes)
+        with path.open("rb") as stream:
+            while chunk := stream.read(1024 * 1024):
+                digest.update(chunk)
+        if digest.hexdigest() != artifact.git_blob_sha1:
+            raise LifecycleError(f"Model artifact failed verification: {artifact.path}")
+
+
+def validate_model(model_dir: Path, spec: ModelSpec = HY_MT2_SPEC) -> dict[str, Any]:
     # Do not resolve the final component before checking it: resolving first
     # would hide an active-model symlink and make it look like a normal dir.
     model_dir = model_dir.expanduser().absolute()
     if not model_dir.is_dir() or model_dir.is_symlink():
-        raise LifecycleError("HY-MT model installation is incomplete.")
+        raise LifecycleError("Offline model installation is incomplete.")
     _assert_safe_tree(model_dir)
     manifest_path = model_dir / MANIFEST_NAME
     if not manifest_path.is_file() or manifest_path.is_symlink():
-        raise LifecycleError("HY-MT model manifest is missing.")
+        raise LifecycleError("Offline model manifest is missing.")
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise LifecycleError("HY-MT model manifest is invalid.") from exc
-    if manifest.get("modelId") != MODEL_ID or manifest.get("revision") != MODEL_REVISION:
-        raise LifecycleError("HY-MT model manifest does not match the pinned model.")
-    for artifact in ARTIFACTS:
-        path = _contained(model_dir, artifact.path)
-        if not path.is_file() or path.is_symlink() or path.stat().st_size != artifact.size_bytes:
-            raise LifecycleError(f"HY-MT model artifact is invalid: {artifact.path}")
-        if sha256_file(path) != artifact.sha256:
-            raise LifecycleError(f"HY-MT model artifact failed verification: {artifact.path}")
+        raise LifecycleError("Offline model manifest is invalid.") from exc
+    if manifest.get("modelId") != spec.model_id or manifest.get("revision") != spec.revision:
+        raise LifecycleError("Model manifest does not match the pinned model.")
+    for artifact in spec.artifacts:
+        _verify_artifact(_contained(model_dir, artifact.path), artifact)
     return manifest
 
 
-def status(root: Path) -> dict[str, Any]:
+def status(root: Path, spec: ModelSpec = HY_MT2_SPEC) -> dict[str, Any]:
     try:
-        manifest = validate_model(active_path(root))
+        manifest = validate_model(active_path(root, spec), spec)
     except LifecycleError as exc:
-        return {"state": "not_installed", "message": str(exc), "totalBytes": TOTAL_MODEL_BYTES}
-    return {"state": "installed", "totalBytes": TOTAL_MODEL_BYTES, "manifest": manifest}
+        return {"state": "not_installed", "message": str(exc), "totalBytes": spec.total_bytes}
+    return {"state": "installed", "totalBytes": spec.total_bytes, "manifest": manifest}
 
 
-def _manifest() -> dict[str, Any]:
+def _manifest(spec: ModelSpec) -> dict[str, Any]:
     return {
-        "modelId": MODEL_ID,
-        "revision": MODEL_REVISION,
+        "modelKey": spec.key,
+        "modelId": spec.model_id,
+        "revision": spec.revision,
         "runtimeVersion": RUNTIME_VERSION,
         "trustRemoteCode": TRUST_REMOTE_CODE,
         "verifiedAt": int(time.time()),
-        "totalBytes": TOTAL_MODEL_BYTES,
-        "artifacts": [asdict(artifact) for artifact in ARTIFACTS],
+        "totalBytes": spec.total_bytes,
+        "artifacts": [
+            {"path": artifact.path, "size_bytes": artifact.size_bytes, "sha256": artifact.sha256}
+            for artifact in spec.artifacts
+        ],
     }
 
 
-def install(root: Path, progress: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
+def install(root: Path, progress: Callable[[dict[str, Any]], None] | None = None, spec: ModelSpec = HY_MT2_SPEC) -> dict[str, Any]:
     """Download to a versioned staging directory, verify, then atomically activate."""
     # The Hub client snapshots offline mode from the environment at import
     # time; clear it before the lazy import below so the pinned download can
-    # reach the network no matter which process invoked the installer.
+    # reach the network no matter which process invoked the installer. A
+    # Hugging Face token (needed for gated repositories) is consumed from the
+    # environment by the Hub client and is never accepted in serve mode.
     for name in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE"):
         os.environ.pop(name, None)
     from huggingface_hub import snapshot_download
 
-    managed = _managed_root(root)
-    check_free_space(managed)
+    managed = model_base(root, spec)
+    check_free_space(root, spec)
     staging_parent = managed / STAGING_NAME
     staging_parent.mkdir(exist_ok=True)
     if staging_parent.is_symlink():
         raise LifecycleError("Model staging root cannot be a symbolic link.")
     # A failed download remains in this version-scoped directory. The Hub
     # downloader can resume it, but it can never be selected by serve mode.
-    staging = staging_parent / MODEL_REVISION
+    staging = staging_parent / spec.revision
     if staging.exists() and (not staging.is_dir() or staging.is_symlink()):
         raise LifecycleError("Model staging directory is not safe to resume.")
     staging.mkdir(exist_ok=True)
     if progress:
-        progress({"type": "progress", "state": "downloading", "downloadedBytes": 0, "totalBytes": TOTAL_MODEL_BYTES})
+        progress({"type": "progress", "state": "downloading", "downloadedBytes": 0, "totalBytes": spec.total_bytes})
     try:
         snapshot_download(
-            MODEL_ID,
-            revision=MODEL_REVISION,
+            spec.model_id,
+            revision=spec.revision,
             local_dir=staging,
-            allow_patterns=[artifact.path for artifact in ARTIFACTS],
+            allow_patterns=list(spec.paths),
             max_workers=2,
         )
         # Hub bookkeeping is not an executable model input and must not become
@@ -167,12 +199,12 @@ def install(root: Path, progress: Callable[[dict[str, Any]], None] | None = None
             shutil.rmtree(cache)
         _assert_safe_tree(staging)
         manifest_path = staging / MANIFEST_NAME
-        manifest_path.write_text(json.dumps(_manifest(), ensure_ascii=False, sort_keys=True), encoding="utf-8")
-        validate_model(staging)
+        manifest_path.write_text(json.dumps(_manifest(spec), ensure_ascii=False, sort_keys=True), encoding="utf-8")
+        validate_model(staging, spec)
         if progress:
-            progress({"type": "progress", "state": "verifying", "downloadedBytes": TOTAL_MODEL_BYTES, "totalBytes": TOTAL_MODEL_BYTES})
+            progress({"type": "progress", "state": "verifying", "downloadedBytes": spec.total_bytes, "totalBytes": spec.total_bytes})
         active = managed / ACTIVE_NAME
-        backup = managed / f".previous-{MODEL_REVISION}-{uuid.uuid4().hex}"
+        backup = managed / f".previous-{spec.revision}-{uuid.uuid4().hex}"
         if active.exists():
             os.replace(active, backup)
         try:
@@ -183,9 +215,9 @@ def install(root: Path, progress: Callable[[dict[str, Any]], None] | None = None
             raise
         if backup.exists():
             shutil.rmtree(backup)
-        manifest = validate_model(active)
+        manifest = validate_model(active, spec)
         if progress:
-            progress({"type": "complete", "state": "installed", "downloadedBytes": TOTAL_MODEL_BYTES, "totalBytes": TOTAL_MODEL_BYTES})
+            progress({"type": "complete", "state": "installed", "downloadedBytes": spec.total_bytes, "totalBytes": spec.total_bytes})
         return manifest
     except Exception:
         # Keep failed staging data for an explicit repair/resume attempt; it is

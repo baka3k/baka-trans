@@ -47,47 +47,58 @@ def test_runtime_identity_constant_matches_pinned_model() -> None:
     assert constants.RUNTIME_IDENTITY["protocolVersion"] == constants.PROTOCOL_VERSION
 
 
-def test_install_manifest_declares_trust_remote_code_false(monkeypatch: pytest.MonkeyPatch) -> None:
-    manifest = lifecycle._manifest()
+def test_install_manifest_declares_trust_remote_code_false() -> None:
+    manifest = lifecycle._manifest(constants.HY_MT2_SPEC)
     assert manifest["trustRemoteCode"] is False
     assert manifest["modelId"] == constants.MODEL_ID
     assert manifest["revision"] == constants.MODEL_REVISION
+    assert manifest["modelKey"] == "hy-mt2"
 
 
-def test_validate_model_rejects_wrong_model_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _synthetic_spec() -> constants.ModelSpec:
     content = b"trusted model input"
-    artifact = lifecycle.Artifact("config.json", len(content), hashlib.sha256(content).hexdigest())
-    monkeypatch.setattr(lifecycle, "ARTIFACTS", (artifact,))
+    artifact = constants.ModelArtifact("config.json", len(content), hashlib.sha256(content).hexdigest())
+    return constants.ModelSpec(
+        key="synthetic",
+        model_id="example/synthetic",
+        revision="a" * 40,
+        prompt_style="hy_mt",
+        artifacts=(artifact,),
+    )
+
+
+def test_validate_model_rejects_wrong_model_id(tmp_path: Path) -> None:
+    spec = _synthetic_spec()
+    content = b"trusted model input"
     model = tmp_path / "active"
     model.mkdir()
     (model / "config.json").write_bytes(content)
     (model / lifecycle.MANIFEST_NAME).write_text(
         json.dumps({
             "modelId": "wrong-org/wrong-model",
-            "revision": constants.MODEL_REVISION,
+            "revision": spec.revision,
         }),
         encoding="utf-8",
     )
     with pytest.raises(lifecycle.LifecycleError, match="does not match"):
-        lifecycle.validate_model(model)
+        lifecycle.validate_model(model, spec)
 
 
-def test_validate_model_rejects_wrong_revision(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_validate_model_rejects_wrong_revision(tmp_path: Path) -> None:
+    spec = _synthetic_spec()
     content = b"trusted model input"
-    artifact = lifecycle.Artifact("config.json", len(content), hashlib.sha256(content).hexdigest())
-    monkeypatch.setattr(lifecycle, "ARTIFACTS", (artifact,))
     model = tmp_path / "active"
     model.mkdir()
     (model / "config.json").write_bytes(content)
     (model / lifecycle.MANIFEST_NAME).write_text(
         json.dumps({
-            "modelId": constants.MODEL_ID,
+            "modelId": spec.model_id,
             "revision": "0000000000000000000000000000000000000000",
         }),
         encoding="utf-8",
     )
     with pytest.raises(lifecycle.LifecycleError, match="does not match"):
-        lifecycle.validate_model(model)
+        lifecycle.validate_model(model, spec)
 
 
 def test_runner_uses_trust_remote_code_false() -> None:

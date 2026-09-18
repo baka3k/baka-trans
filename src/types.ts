@@ -192,9 +192,12 @@ export interface LocalTranslationCredentialStatus {
   source: ApiKeySource | null;
 }
 
+export type OfflineTranslationModel = "hy_mt2" | "translategemma_4b";
+
 export interface LocalTranslationConfig {
   schemaVersion: number;
   translationEngine: LocalTranslationEngine;
+  offlineModel: OfflineTranslationModel;
   openaiBaseUrl: string;
   openaiModel: string;
   openaiTimeoutSeconds: number;
@@ -267,6 +270,7 @@ export type HyMtModelPhase =
   | "unsupported";
 
 export interface HyMtModelStatus {
+  model: OfflineTranslationModel;
   phase: HyMtModelPhase;
   runtimeAvailable: boolean;
   modelInstalled: boolean;
@@ -277,6 +281,7 @@ export interface HyMtModelStatus {
 }
 
 export interface HyMtModelProgress {
+  model: OfflineTranslationModel;
   phase: HyMtModelPhase;
   downloadedBytes: number;
   totalBytes: number;

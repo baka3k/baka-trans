@@ -6,6 +6,7 @@ import type {
   LocalTranslationCredentialStatus,
   LocalTranslationTestResult,
   LocalVoice,
+  OfflineTranslationModel,
   TranslationEngineTestResult,
   VieNeuRuntimeProgress,
   VieNeuRuntimeStatus,
@@ -25,8 +26,38 @@ const isMacOs = () => {
   return platform.includes("mac") || userAgent.includes("mac os");
 };
 
+// Static metadata for the managed offline translation models. Sizes mirror
+// the Rust registry; the gated flag drives the Hugging Face token row.
+export const OFFLINE_TRANSLATION_MODELS: Record<
+  OfflineTranslationModel,
+  {
+    label: string;
+    cardName: string;
+    cardTagline: string;
+    selectHint: string;
+    gated: boolean;
+  }
+> = {
+  hy_mt2: {
+    label: "Hy-MT2 1.8B (Tencent)",
+    cardName: "Managed Hy-MT2 1.8B",
+    cardTagline: "Download the pinned, SHA-256 verified offline translation model (~3.8 GiB).",
+    selectHint: "Fast and compact; fully verified offline translation model.",
+    gated: false,
+  },
+  translategemma_4b: {
+    label: "TranslateGemma 4B (Google)",
+    cardName: "Managed TranslateGemma 4B",
+    cardTagline:
+      "Download the pinned TranslateGemma 4B model (~8.0 GiB). Google gates this download, so a Hugging Face token is required once.",
+    selectHint: "Larger Google translation model; requires accepting the Gemma license on Hugging Face.",
+    gated: true,
+  },
+};
+
 export const defaultLocalTranslationConfig: LocalTranslationConfigDraft = {
   translationEngine: "huggingface_offline",
+  offlineModel: "hy_mt2",
   openaiBaseUrl: "",
   openaiModel: "",
   openaiTimeoutSeconds: 30,
@@ -138,6 +169,9 @@ interface LocalLlmSettingsProps {
   hyMtModel?: HyMtModelStatus | null;
   hyMtProgress?: HyMtModelProgress | null;
   hyMtBusy?: boolean;
+  hfTokenStatus?: LocalTranslationCredentialStatus | null;
+  onSaveHfToken?: (token: string) => Promise<void>;
+  onClearHfToken?: () => Promise<void>;
   onChange: (draft: LocalTranslationConfigDraft) => void;
   onSave: () => void;
   onTest: () => void;
@@ -224,6 +258,9 @@ export function LocalLlmSettings({
   hyMtModel = null,
   hyMtProgress = null,
   hyMtBusy = false,
+  hfTokenStatus = null,
+  onSaveHfToken,
+  onClearHfToken,
   onChange,
   onSave,
   onTest,
@@ -276,20 +313,41 @@ export function LocalLlmSettings({
             value={draft.translationEngine}
             onChange={(event) => update({ translationEngine: event.currentTarget.value as LocalTranslationConfigDraft["translationEngine"] })}
           >
-            <option value="huggingface_offline">Offline Hy-MT2 1.8B</option>
+            <option value="huggingface_offline">Offline model (managed)</option>
             <option value="openai_compatible">OpenAI-compatible API</option>
           </select>
         </label>
         {draft.translationEngine === "huggingface_offline" ? (
           <>
+            <label className="field">
+              <span>Offline translation model</span>
+              <select
+                aria-label="Offline translation model"
+                value={draft.offlineModel}
+                onChange={(event) =>
+                  update({ offlineModel: event.currentTarget.value as LocalTranslationConfigDraft["offlineModel"] })
+                }
+              >
+                {(Object.keys(OFFLINE_TRANSLATION_MODELS) as OfflineTranslationModel[]).map((model) => (
+                  <option value={model} key={model}>
+                    {OFFLINE_TRANSLATION_MODELS[model].label}
+                  </option>
+                ))}
+              </select>
+              <small>{OFFLINE_TRANSLATION_MODELS[draft.offlineModel].selectHint}</small>
+            </label>
             <HyMtModelCard
+              model={draft.offlineModel}
               status={hyMtModel}
               progress={hyMtProgress}
               busy={hyMtBusy}
+              hfTokenStatus={hfTokenStatus}
+              onSaveHfToken={onSaveHfToken}
+              onClearHfToken={onClearHfToken}
               onInstall={onHyMtInstall}
               onCancel={onHyMtCancel}
             />
-            <p className="local-text-only-note">Managed Hy-MT2 runs from verified local files. Live translation uses the same engine once “Test translation engine” reports reachable + accepted.</p>
+            <p className="local-text-only-note">Managed offline models run from verified local files. Live translation uses the same engine once “Test translation engine” reports reachable + accepted.</p>
           </>
         ) : <>
         <label className="field">
@@ -717,18 +775,27 @@ function VieNeuRuntimeCard({
 }
 
 function HyMtModelCard({
+  model,
   status,
   progress,
   busy,
+  hfTokenStatus = null,
+  onSaveHfToken,
+  onClearHfToken,
   onInstall,
   onCancel,
 }: {
+  model: OfflineTranslationModel;
   status: HyMtModelStatus | null;
   progress: HyMtModelProgress | null;
   busy: boolean;
+  hfTokenStatus?: LocalTranslationCredentialStatus | null;
+  onSaveHfToken?: (token: string) => Promise<void>;
+  onClearHfToken?: () => Promise<void>;
   onInstall: () => void;
   onCancel: () => void;
 }) {
+  const meta = OFFLINE_TRANSLATION_MODELS[model];
   const phase = progress?.phase ?? status?.phase ?? "not_installed";
   const active = phase === "downloading" || phase === "verifying";
   const installed = Boolean(status?.modelInstalled);
@@ -736,26 +803,29 @@ function HyMtModelCard({
   const totalBytes = progress?.totalBytes ?? status?.totalBytes ?? 0;
   const percent = progress?.percent ??
     (totalBytes > 0 ? Math.round((downloadedBytes / totalBytes) * 100) : 0);
-  const message = progress?.message ?? status?.message ?? "Checking the managed Hy-MT2 model…";
+  const message = progress?.message ?? status?.message ?? `Checking the managed ${meta.cardName}…`;
   const actionLabel = phase === "paused"
     ? "Resume download"
-    : phase === "error" ? "Retry install" : "Install Hy-MT2 model";
+    : phase === "error" ? "Retry install" : `Install ${meta.cardName.replace("Managed ", "")}`;
 
   return (
     <div className={`vieneu-runtime-card ${installed ? "installed" : ""}`} aria-live="polite">
       <div className="vieneu-runtime-heading">
         <div>
-          <strong>Managed Hy-MT2 1.8B</strong>
-          <span>Download the pinned, SHA-256 verified offline translation model (~3.8 GiB).</span>
+          <strong>{meta.cardName}</strong>
+          <span>{meta.cardTagline}</span>
         </div>
         <span className="vieneu-runtime-badge">{phase.replace(/_/g, " ")}</span>
       </div>
       <p>{message}</p>
       {(active || phase === "paused" || installed) && totalBytes ? (
         <div className="vieneu-runtime-progress">
-          <progress max={100} value={percent} aria-label="Hy-MT2 model setup progress" />
+          <progress max={100} value={percent} aria-label="Offline model setup progress" />
           <span>{percent}% · {formatMib(downloadedBytes)} / {formatMib(totalBytes)}</span>
         </div>
+      ) : null}
+      {meta.gated && !installed ? (
+        <HfTokenRow status={hfTokenStatus} onSaveHfToken={onSaveHfToken} onClearHfToken={onClearHfToken} />
       ) : null}
       <div className="button-row vieneu-runtime-actions">
         {active ? (
@@ -768,6 +838,90 @@ function HyMtModelCard({
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+// Presentational token row for gated offline models (TranslateGemma). The
+// token lives only in local state; saving and clearing go through the parent
+// callbacks and it is forwarded only to the one-shot download process.
+function HfTokenRow({
+  status,
+  onSaveHfToken,
+  onClearHfToken,
+}: {
+  status: LocalTranslationCredentialStatus | null;
+  onSaveHfToken?: (token: string) => Promise<void>;
+  onClearHfToken?: () => Promise<void>;
+}) {
+  const [tokenDraft, setTokenDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    const token = tokenDraft.trim();
+    if (!token || !onSaveHfToken) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await onSaveHfToken(token);
+      setTokenDraft("");
+    } catch {
+      // The parent surfaces the error; keep the draft so it can be retried.
+    } finally {
+      setBusy(false);
+    }
+  };
+  const clear = async () => {
+    if (!onClearHfToken) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await onClearHfToken();
+    } catch {
+      // The parent surfaces the error.
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="field api-key-row">
+      <label className="field">
+        <span>Hugging Face token</span>
+        <input
+          type="password"
+          autoComplete="new-password"
+          aria-label="Hugging Face token"
+          value={tokenDraft}
+          placeholder={status?.hasKey ? "Token saved — paste a new token to replace it" : "Paste a Hugging Face token"}
+          onChange={(event) => setTokenDraft(event.currentTarget.value)}
+        />
+        <small>
+          Google gates TranslateGemma. Accept the Gemma license at
+          huggingface.co/google/translategemma-4b-it, then paste a read token. Stored in the OS keychain and used
+          only for this download; translation itself runs offline.
+        </small>
+      </label>
+      <div className="button-row">
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={busy || !tokenDraft.trim()}
+        >
+          {busy ? "Working" : "Save token"}
+        </button>
+        <button
+          type="button"
+          onClick={() => void clear()}
+          disabled={busy || !status?.hasKey}
+        >
+          Clear token
+        </button>
+      </div>
+      <p className="key-test-row" aria-live="polite">
+        Token: {credentialStatusLabel(status)}
+      </p>
     </div>
   );
 }

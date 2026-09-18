@@ -605,6 +605,7 @@ pub struct ApiKeyTestResult {
 pub struct LocalTranslationConfig {
     pub schema_version: u32,
     pub translation_engine: LocalTranslationEngine,
+    pub offline_model: OfflineTranslationModel,
     pub openai_base_url: String,
     pub openai_model: String,
     pub openai_timeout_seconds: u64,
@@ -633,6 +634,7 @@ pub struct LocalTranslationConfig {
 #[serde(default, rename_all = "camelCase")]
 pub struct LocalTranslationConfigDraft {
     pub translation_engine: LocalTranslationEngine,
+    pub offline_model: OfflineTranslationModel,
     pub openai_base_url: String,
     pub openai_model: String,
     pub openai_timeout_seconds: u64,
@@ -661,6 +663,7 @@ impl From<LocalTranslationConfig> for LocalTranslationConfigDraft {
     fn from(value: LocalTranslationConfig) -> Self {
         Self {
             translation_engine: value.translation_engine,
+            offline_model: value.offline_model,
             openai_base_url: value.openai_base_url,
             openai_model: value.openai_model,
             openai_timeout_seconds: value.openai_timeout_seconds,
@@ -685,6 +688,14 @@ impl From<LocalTranslationConfig> for LocalTranslationConfigDraft {
             tts_output_sample_rate_hz: value.tts_output_sample_rate_hz,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OfflineTranslationModel {
+    #[default]
+    HyMt2,
+    TranslateGemma4B,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -808,6 +819,7 @@ pub enum HyMtModelPhase {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct HyMtModelStatus {
+    pub model: OfflineTranslationModel,
     pub phase: HyMtModelPhase,
     pub runtime_available: bool,
     pub model_installed: bool,
@@ -820,6 +832,7 @@ pub struct HyMtModelStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct HyMtModelProgress {
+    pub model: OfflineTranslationModel,
     pub phase: HyMtModelPhase,
     pub downloaded_bytes: u64,
     pub total_bytes: u64,

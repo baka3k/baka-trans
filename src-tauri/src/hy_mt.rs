@@ -1,5 +1,5 @@
 use crate::error::{AppError, AppResult};
-use crate::models::{HyMtModelPhase, HyMtModelProgress, HyMtModelStatus};
+use crate::models::{HyMtModelPhase, HyMtModelProgress, HyMtModelStatus, OfflineTranslationModel};
 use crate::vieneu::model_cache_dir;
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Write};
@@ -14,6 +14,53 @@ use tauri::{AppHandle, Emitter, Manager};
 pub const HY_MT_MODEL_ID: &str = "tencent/Hy-MT2-1.8B";
 pub const HY_MT_MODEL_REVISION: &str = "9a341cd1b679d3efd23b46e847b01745a71ed792";
 pub const HY_MT_TOTAL_BYTES: u64 = 4_086_796_766;
+
+/// Static registry entry for one managed offline translation model. The
+/// `key` matches the sidecar CLI `--model` choices and the per-model cache
+/// directory name (Hy-MT2 keeps the legacy unscoped cache layout).
+pub struct OfflineModelSpec {
+    pub model: OfflineTranslationModel,
+    pub key: &'static str,
+    pub display_name: &'static str,
+    pub model_id: &'static str,
+    pub revision: &'static str,
+    pub total_bytes: u64,
+    /// Gated repositories refuse anonymous downloads; installing them needs a
+    /// Hugging Face token from an account that accepted the upstream license.
+    pub gated: bool,
+}
+
+pub const HY_MT2_SPEC: OfflineModelSpec = OfflineModelSpec {
+    model: OfflineTranslationModel::HyMt2,
+    key: "hy-mt2",
+    display_name: "Hy-MT2 1.8B",
+    model_id: HY_MT_MODEL_ID,
+    revision: HY_MT_MODEL_REVISION,
+    total_bytes: HY_MT_TOTAL_BYTES,
+    gated: false,
+};
+
+// Pinned to the public commit of google/translategemma-4b-it. The repository
+// is manually gated on Hugging Face: installs require the user's HF token and
+// the LFS sha256 digests are not public, so the sidecar verifies the small
+// files against git blob ids and the weights against exact sizes.
+pub const TRANSLATEGEMMA_4B_SPEC: OfflineModelSpec = OfflineModelSpec {
+    model: OfflineTranslationModel::TranslateGemma4B,
+    key: "translategemma-4b",
+    display_name: "TranslateGemma 4B",
+    model_id: "google/translategemma-4b-it",
+    revision: "10042cb0e6e7fdce748996a71dc3dc432a4e0c89",
+    total_bytes: 8_639_637_704,
+    gated: true,
+};
+
+pub fn offline_model_spec(model: OfflineTranslationModel) -> &'static OfflineModelSpec {
+    match model {
+        OfflineTranslationModel::HyMt2 => &HY_MT2_SPEC,
+        OfflineTranslationModel::TranslateGemma4B => &TRANSLATEGEMMA_4B_SPEC,
+    }
+}
+
 const HY_MT_PROTOCOL_VERSION: u32 = 1;
 const HY_MT_CACHE_SUBDIR: &str = "hy-mt";
 const ACTIVE_DIR_NAME: &str = "active";
@@ -49,8 +96,9 @@ impl HyMtManager {
         }
     }
 
-    pub async fn status(&self, app: &AppHandle) -> AppResult<HyMtModelStatus> {
-        let paths = ManagedPaths::resolve()?;
+    pub async fn status(&self, app: &AppHandle, model: OfflineTranslationModel) -> AppResult<HyMtModelStatus> {
+        let spec = offline_model_spec(model);
+        let paths = ManagedPaths::resolve_for(spec)?;
         let runtime_available = resolve_command(app).is_ok();
         let installing = self.install_active.load(Ordering::Acquire);
         let last_error = self.last_error.lock().map_err(lock_error)?.clone();
@@ -60,61 +108,66 @@ impl HyMtManager {
         let (phase, message) = if !runtime_available {
             (
                 HyMtModelPhase::Unsupported,
-                "This build does not include the managed Hy-MT2 runtime.".to_string(),
+                format!("This build does not include the managed {} runtime.", spec.display_name),
             )
         } else if installing {
             (
                 HyMtModelPhase::Downloading,
-                "Downloading the Hy-MT2 model…".to_string(),
+                format!("Downloading the {} model…", spec.display_name),
             )
         } else if let Some(error) = last_error {
             (HyMtModelPhase::Error, error)
         } else if manifest_installed {
             (
                 HyMtModelPhase::Installed,
-                "Hy-MT2 model is installed and verified.".to_string(),
+                format!("{} model is installed and verified.", spec.display_name),
             )
         } else if partial_bytes > 0 {
             (
                 HyMtModelPhase::Paused,
-                "Hy-MT2 setup can be resumed.".to_string(),
+                format!("{} setup can be resumed.", spec.display_name),
             )
         } else {
             (
                 HyMtModelPhase::NotInstalled,
-                "Install Hy-MT2 to download the pinned offline translation model.".to_string(),
+                format!(
+                    "Install {} to download the pinned offline translation model.",
+                    spec.display_name
+                ),
             )
         };
 
         Ok(HyMtModelStatus {
+            model,
             phase,
             runtime_available,
             model_installed: manifest_installed,
-            model_id: HY_MT_MODEL_ID.to_string(),
-            model_revision: HY_MT_MODEL_REVISION.to_string(),
-            total_bytes: HY_MT_TOTAL_BYTES,
+            model_id: spec.model_id.to_string(),
+            model_revision: spec.revision.to_string(),
+            total_bytes: spec.total_bytes,
             message,
         })
     }
 
-    pub async fn install(&self, app: AppHandle) -> AppResult<HyMtModelStatus> {
+    pub async fn install(&self, app: AppHandle, model: OfflineTranslationModel) -> AppResult<HyMtModelStatus> {
+        let spec = offline_model_spec(model);
         let guard = InstallGuard::acquire(self)?;
         self.install_cancelled.store(false, Ordering::Release);
         let repair_requested = self.last_error.lock().map_err(lock_error)?.is_some();
         *self.last_error.lock().map_err(lock_error)? = None;
 
-        let paths = ManagedPaths::resolve()?;
+        let paths = ManagedPaths::resolve_for(spec)?;
         if paths.manifest_path().is_file() && !repair_requested {
             drop(guard);
-            return self.status(&app).await;
+            return self.status(&app, model).await;
         }
-        let spec = resolve_command(&app)?;
+        let command_spec = resolve_command(&app)?;
         let cancelled = self.install_cancelled.clone();
         let staging_dir = paths.staging_dir.clone();
         let model_root = paths.model_root.clone();
         let progress_app = app.clone();
         let exit_status = match tauri::async_runtime::spawn_blocking(move || {
-            run_install_process(spec, model_root, staging_dir, progress_app, cancelled)
+            run_install_process(command_spec, spec, model_root, staging_dir, progress_app, cancelled)
         })
         .await
         {
@@ -135,26 +188,30 @@ impl HyMtManager {
 
         if exit_status == InstallExit::Paused {
             drop(guard);
-            return self.status(&app).await;
+            return self.status(&app, model).await;
         }
         if !paths.manifest_path().is_file() {
             let error = AppError::new(
                 "hy_mt_model_activation_error",
-                "Hy-MT2 finished setup without an active verified model. Retry the install.",
+                format!(
+                    "{} finished setup without an active verified model. Retry the install.",
+                    spec.display_name
+                ),
             );
             self.remember_error(&error);
             return Err(error);
         }
         emit_progress(
             &app,
+            spec,
             HyMtModelPhase::Installed,
-            HY_MT_TOTAL_BYTES,
-            HY_MT_TOTAL_BYTES,
+            spec.total_bytes,
+            spec.total_bytes,
             Some(100),
-            "Hy-MT2 model is installed and verified.",
+            &format!("{} model is installed and verified.", spec.display_name),
         );
         drop(guard);
-        self.status(&app).await
+        self.status(&app, model).await
     }
 
     pub fn cancel_install(&self) {
@@ -180,10 +237,17 @@ struct ManagedPaths {
 }
 
 impl ManagedPaths {
-    fn resolve() -> AppResult<Self> {
-        let model_root = model_cache_dir()?.join(HY_MT_CACHE_SUBDIR);
+    /// Hy-MT2 keeps the legacy unscoped cache directory so existing verified
+    /// installs stay valid; every later model nests under its registry key.
+    fn resolve_for(spec: &OfflineModelSpec) -> AppResult<Self> {
+        let hy_mt_root = model_cache_dir()?.join(HY_MT_CACHE_SUBDIR);
+        let model_root = if spec.key == HY_MT2_SPEC.key {
+            hy_mt_root
+        } else {
+            hy_mt_root.join(spec.key)
+        };
         Ok(Self {
-            staging_dir: model_root.join(STAGING_DIR_NAME).join(HY_MT_MODEL_REVISION),
+            staging_dir: model_root.join(STAGING_DIR_NAME).join(spec.revision),
             model_root,
         })
     }
@@ -241,25 +305,39 @@ fn map_state_to_phase(state: Option<&str>) -> Option<HyMtModelPhase> {
 }
 
 fn run_install_process(
-    spec: CommandSpec,
+    command_spec: CommandSpec,
+    offline: &'static OfflineModelSpec,
     model_root: PathBuf,
     staging_dir: PathBuf,
     app: AppHandle,
     cancelled: Arc<AtomicBool>,
 ) -> AppResult<InstallExit> {
-    let mut command = command_from_spec(&spec);
+    let mut command = command_from_spec(&command_spec);
     command
         .arg("install")
+        .arg("--model")
+        .arg(offline.key)
         .arg("--model-root")
         .arg(&model_root)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
+    // Gated repositories (TranslateGemma) refuse anonymous downloads. The
+    // token is passed only to this one-shot install child; serve mode rejects
+    // hub credentials inside the sidecar itself.
+    if offline.gated {
+        if let Ok(Some(token)) = crate::local_translation::api_key::load_huggingface_token() {
+            command.env("HF_TOKEN", token);
+        }
+    }
     hide_child_window(&mut command);
     let mut child = command.spawn().map_err(|error| {
         AppError::new(
             "hy_mt_runtime_missing",
-            format!("Could not start the bundled Hy-MT2 installer: {error}"),
+            format!(
+                "Could not start the bundled {} installer: {error}",
+                offline.display_name
+            ),
         )
     })?;
     let receiver = spawn_line_reader(child.stdout.take().ok_or_else(|| {
@@ -274,11 +352,12 @@ fn run_install_process(
     let mut last_byte_poll = Instant::now() - BYTE_PROGRESS_INTERVAL;
     emit_progress(
         &app,
+        offline,
         phase,
         0,
-        HY_MT_TOTAL_BYTES,
+        offline.total_bytes,
         Some(0),
-        "Preparing the verified Hy-MT2 download…",
+        &format!("Preparing the verified {} download…", offline.display_name),
     );
 
     loop {
@@ -287,13 +366,14 @@ fn run_install_process(
             let _ = child.wait();
             emit_progress(
                 &app,
+                offline,
                 HyMtModelPhase::Paused,
                 directory_size(&staging_dir)
                     .unwrap_or(0)
-                    .min(HY_MT_TOTAL_BYTES),
-                HY_MT_TOTAL_BYTES,
+                    .min(offline.total_bytes),
+                offline.total_bytes,
                 None,
-                "Hy-MT2 setup was paused. Resume when ready.",
+                &format!("{} setup was paused. Resume when ready.", offline.display_name),
             );
             return Ok(InstallExit::Paused);
         }
@@ -306,24 +386,27 @@ fn run_install_process(
                             phase = mapped;
                         }
                         downloaded_bytes = frame.downloaded_bytes.unwrap_or(downloaded_bytes);
-                        let total_bytes = frame.total_bytes.unwrap_or(HY_MT_TOTAL_BYTES);
+                        let total_bytes = frame.total_bytes.unwrap_or(offline.total_bytes);
                         if frame.kind == "complete" {
                             phase = HyMtModelPhase::Installed;
                             downloaded_bytes = total_bytes.max(downloaded_bytes);
                         }
                         emit_progress(
                             &app,
+                            offline,
                             phase,
-                            downloaded_bytes.min(total_bytes.max(HY_MT_TOTAL_BYTES)),
-                            HY_MT_TOTAL_BYTES,
+                            downloaded_bytes.min(total_bytes.max(offline.total_bytes)),
+                            offline.total_bytes,
                             progress_percent(downloaded_bytes, total_bytes),
-                            default_progress_message(phase),
+                            &default_progress_message(offline, phase),
                         );
                     }
                     "error" => {
                         frame_error = Some(frame.message.unwrap_or_else(|| {
-                            "Hy-MT2 setup failed. Resume to retry the verified download."
-                                .to_string()
+                            format!(
+                                "{} setup failed. Resume to retry the verified download.",
+                                offline.display_name
+                            )
                         }));
                     }
                     _ => {}
@@ -339,16 +422,17 @@ fn run_install_process(
             last_byte_poll = Instant::now();
             let staged = directory_size(&staging_dir)
                 .unwrap_or(0)
-                .min(HY_MT_TOTAL_BYTES);
+                .min(offline.total_bytes);
             if staged > downloaded_bytes {
                 downloaded_bytes = staged;
                 emit_progress(
                     &app,
+                    offline,
                     phase,
                     downloaded_bytes,
-                    HY_MT_TOTAL_BYTES,
-                    progress_percent(downloaded_bytes, HY_MT_TOTAL_BYTES),
-                    default_progress_message(phase),
+                    offline.total_bytes,
+                    progress_percent(downloaded_bytes, offline.total_bytes),
+                    &default_progress_message(offline, phase),
                 );
             }
         }
@@ -361,19 +445,22 @@ fn run_install_process(
             }
             return Err(AppError::new(
                 "hy_mt_install_failed",
-                "Hy-MT2 setup failed. Resume to retry the verified download.",
+                format!(
+                    "{} setup failed. Resume to retry the verified download.",
+                    offline.display_name
+                ),
             ));
         }
         thread::sleep(PROCESS_POLL_INTERVAL);
     }
 }
 
-fn default_progress_message(phase: HyMtModelPhase) -> &'static str {
+fn default_progress_message(spec: &OfflineModelSpec, phase: HyMtModelPhase) -> String {
     match phase {
-        HyMtModelPhase::Downloading => "Downloading the verified Hy-MT2 model…",
-        HyMtModelPhase::Verifying => "Verifying Hy-MT2 model files…",
-        HyMtModelPhase::Installed => "Hy-MT2 model is installed and verified.",
-        _ => "Hy-MT2 setup is running…",
+        HyMtModelPhase::Downloading => format!("Downloading the verified {} model…", spec.display_name),
+        HyMtModelPhase::Verifying => format!("Verifying {} model files…", spec.display_name),
+        HyMtModelPhase::Installed => format!("{} model is installed and verified.", spec.display_name),
+        _ => format!("{} setup is running…", spec.display_name),
     }
 }
 
@@ -386,6 +473,7 @@ fn progress_percent(downloaded_bytes: u64, total_bytes: u64) -> Option<u8> {
 
 fn emit_progress(
     app: &AppHandle,
+    spec: &OfflineModelSpec,
     phase: HyMtModelPhase,
     downloaded_bytes: u64,
     total_bytes: u64,
@@ -395,6 +483,7 @@ fn emit_progress(
     let _ = app.emit(
         EVENT_NAME,
         HyMtModelProgress {
+            model: spec.model,
             phase,
             downloaded_bytes,
             total_bytes,
@@ -535,40 +624,47 @@ impl HyMtEngineProbe {
 /// The engine is started in `serve` mode, answers a single probe request,
 /// and is shut down again. Live-session routing stays gated in
 /// `local_translation::TranslationClient`.
-pub async fn probe_translation_engine(app: &AppHandle) -> HyMtEngineProbe {
+pub async fn probe_translation_engine(
+    app: &AppHandle,
+    model: OfflineTranslationModel,
+) -> HyMtEngineProbe {
     let app = app.clone();
-    match tauri::async_runtime::spawn_blocking(move || probe_offline_engine(&app)).await {
+    match tauri::async_runtime::spawn_blocking(move || probe_offline_engine(&app, model)).await {
         Ok(probe) => probe,
         Err(error) => HyMtEngineProbe::failed(AppError::new(
             "hy_mt_probe_join_error",
-            format!("The offline Hy-MT2 engine test could not run: {error}"),
+            format!("The offline engine test could not run: {error}"),
         )),
     }
 }
 
-fn probe_offline_engine(app: &AppHandle) -> HyMtEngineProbe {
-    let paths = match ManagedPaths::resolve() {
+fn probe_offline_engine(app: &AppHandle, model: OfflineTranslationModel) -> HyMtEngineProbe {
+    let spec = offline_model_spec(model);
+    let paths = match ManagedPaths::resolve_for(spec) {
         Ok(paths) => paths,
         Err(error) => return HyMtEngineProbe::failed(error),
     };
     if !paths.manifest_path().is_file() {
         return HyMtEngineProbe::failed(AppError::new(
             "hy_mt_model_missing",
-            "The Hy-MT2 model is not installed yet. Install it from the model card before testing the engine.",
+            format!(
+                "The {} model is not installed yet. Install it from the model card before testing the engine.",
+                spec.display_name
+            ),
         ));
     }
-    let spec = match resolve_command(app) {
-        Ok(spec) => spec,
+    let command_spec = match resolve_command(app) {
+        Ok(command_spec) => command_spec,
         Err(error) => return HyMtEngineProbe::failed(error),
     };
     let device = preferred_serve_device();
-    match run_serve_probe(&spec, &paths.model_root, device) {
+    match run_serve_probe(&command_spec, &paths.model_root, device, spec) {
         Ok(probe) => probe,
         Err(error) => {
             // An Intel Mac or a machine without a usable MPS build exits before
             // the ready frame; retry once on CPU instead of failing the test.
             if device == "mps" && error.code == "hy_mt_serve_early_exit" {
-                run_serve_probe(&spec, &paths.model_root, "cpu")
+                run_serve_probe(&command_spec, &paths.model_root, "cpu", spec)
                     .unwrap_or_else(HyMtEngineProbe::failed)
             } else {
                 HyMtEngineProbe::failed(error)
@@ -615,11 +711,12 @@ struct ServeFrame {
 }
 
 fn run_serve_probe(
-    spec: &CommandSpec,
+    command_spec: &CommandSpec,
     model_root: &Path,
     device: &str,
+    offline: &'static OfflineModelSpec,
 ) -> AppResult<HyMtEngineProbe> {
-    let mut session = HyMtSession::start_with_spec(spec, model_root, device)?;
+    let mut session = HyMtSession::start_with_spec(command_spec, model_root, device, offline)?;
     let device = session.device.clone();
     let load_ms = session.load_ms;
     let (translated_text, _wall_clock_ms) = session.translate("ja", "vi", SERVE_PROBE_TEXT)?;
@@ -702,22 +799,26 @@ impl Drop for HyMtSession {
 impl HyMtSession {
     /// Resolve a fully-managed session using the bundled sidecar. The caller
     /// owns the returned handle until drop.
-    pub fn start(app: &AppHandle) -> AppResult<Self> {
-        let paths = ManagedPaths::resolve()?;
+    pub fn start(app: &AppHandle, model: OfflineTranslationModel) -> AppResult<Self> {
+        let offline = offline_model_spec(model);
+        let paths = ManagedPaths::resolve_for(offline)?;
         if !paths.manifest_path().is_file() {
             return Err(AppError::new(
                 "hy_mt_model_missing",
-                "The Hy-MT2 model is not installed yet. Install it from the model card before starting the engine.",
+                format!(
+                    "The {} model is not installed yet. Install it from the model card before starting the engine.",
+                    offline.display_name
+                ),
             ));
         }
-        let spec = resolve_command(app)?;
+        let command_spec = resolve_command(app)?;
         let device = preferred_serve_device();
-        match Self::start_with_spec(&spec, &paths.model_root, device) {
+        match Self::start_with_spec(&command_spec, &paths.model_root, device, offline) {
             Ok(session) => Ok(session),
             // Intel Macs and machines without a usable MPS build exit before
             // the ready frame; retry once on CPU instead of failing outright.
             Err(error) if device == "mps" && error.code == "hy_mt_serve_early_exit" => {
-                Self::start_with_spec(&spec, &paths.model_root, "cpu")
+                Self::start_with_spec(&command_spec, &paths.model_root, "cpu", offline)
             }
             Err(error) => Err(error),
         }
@@ -726,13 +827,16 @@ impl HyMtSession {
     /// Internal helper used directly by [`run_serve_probe`] with a synthetic
     /// `CommandSpec` and by [`start`](Self::start) for the managed runtime.
     pub(crate) fn start_with_spec(
-        spec: &CommandSpec,
+        command_spec: &CommandSpec,
         model_root: &Path,
         device: &str,
+        offline: &'static OfflineModelSpec,
     ) -> AppResult<Self> {
-        let mut command = command_from_spec(spec);
+        let mut command = command_from_spec(command_spec);
         command
             .arg("serve")
+            .arg("--model")
+            .arg(offline.key)
             .arg("--model-root")
             .arg(model_root)
             .arg("--device")
@@ -800,14 +904,14 @@ impl HyMtSession {
             ));
         }
         if ready.protocol_version != Some(HY_MT_PROTOCOL_VERSION)
-            || ready.model_id.as_deref() != Some(HY_MT_MODEL_ID)
-            || ready.revision.as_deref() != Some(HY_MT_MODEL_REVISION)
+            || ready.model_id.as_deref() != Some(offline.model_id)
+            || ready.revision.as_deref() != Some(offline.revision)
         {
             let _ = child.kill();
             let _ = child.wait();
             return Err(AppError::new(
                 "hy_mt_identity_mismatch",
-                "The Hy-MT2 runtime reported an unexpected model identity.",
+                "The offline runtime reported an unexpected model identity.",
             ));
         }
 
@@ -953,6 +1057,20 @@ mod tests {
             HY_MT_TOTAL_BYTES,
             1777 + 11629 + 14763 + 654 + 1348 + 221 + 4077072784 + 488 + 9527287 + 165815
         );
+        assert_eq!(offline_model_spec(OfflineTranslationModel::HyMt2).key, "hy-mt2");
+    }
+
+    #[test]
+    fn translategemma_spec_is_pinned_and_gated() {
+        let spec = offline_model_spec(OfflineTranslationModel::TranslateGemma4B);
+        assert_eq!(spec.key, "translategemma-4b");
+        assert_eq!(spec.model_id, "google/translategemma-4b-it");
+        assert_eq!(spec.revision, "10042cb0e6e7fdce748996a71dc3dc432a4e0c89");
+        assert_eq!(spec.revision.len(), 40);
+        assert_eq!(spec.total_bytes, 8_639_637_704);
+        assert!(spec.gated);
+        assert!(!HY_MT2_SPEC.gated);
+        assert_ne!(HY_MT2_SPEC.revision, spec.revision);
     }
 
     #[test]
@@ -1085,7 +1203,7 @@ mod tests {
             prefix_args: Vec::new(),
             working_dir: directory.clone(),
         };
-        let probe = run_serve_probe(&spec, &directory, "cpu").unwrap();
+        let probe = run_serve_probe(&spec, &directory, "cpu", &HY_MT2_SPEC).unwrap();
 
         assert!(probe.reachable);
         assert!(probe.accepted);
@@ -1120,7 +1238,7 @@ mod tests {
             prefix_args: Vec::new(),
             working_dir: directory.clone(),
         };
-        let error = run_serve_probe(&spec, &directory, "cpu").unwrap_err();
+        let error = run_serve_probe(&spec, &directory, "cpu", &HY_MT2_SPEC).unwrap_err();
         assert_eq!(error.code, "hy_mt_identity_mismatch");
         let _ = std::fs::remove_dir_all(directory);
     }
@@ -1139,7 +1257,7 @@ mod tests {
             eprintln!("packaged sidecar not found; nothing to probe");
             return;
         }
-        let paths = ManagedPaths::resolve().unwrap();
+        let paths = ManagedPaths::resolve_for(&HY_MT2_SPEC).unwrap();
         if !paths.manifest_path().is_file() {
             eprintln!("verified model not installed; nothing to probe");
             return;
@@ -1149,7 +1267,7 @@ mod tests {
             program: sidecar,
             prefix_args: Vec::new(),
         };
-        let probe = run_serve_probe(&spec, &paths.model_root, preferred_serve_device()).unwrap();
+        let probe = run_serve_probe(&spec, &paths.model_root, preferred_serve_device(), &HY_MT2_SPEC).unwrap();
         assert!(probe.reachable);
         assert!(probe.accepted);
         assert!(probe.error.is_none());
@@ -1161,7 +1279,7 @@ mod tests {
 
     #[test]
     fn managed_paths_stay_inside_shared_cache() {
-        let paths = ManagedPaths::resolve().unwrap();
+        let paths = ManagedPaths::resolve_for(&HY_MT2_SPEC).unwrap();
         assert!(paths
             .model_root
             .ends_with(Path::new(".bakatrans").join("hy-mt")));
@@ -1169,5 +1287,20 @@ mod tests {
         assert!(paths
             .manifest_path()
             .ends_with(Path::new("active").join("install-manifest.json")));
+        // Hy-MT2 keeps the legacy unscoped layout: the revision staging dir
+        // hangs directly off the hy-mt cache root.
+        assert!(paths
+            .staging_dir
+            .ends_with(Path::new(".staging").join(HY_MT_MODEL_REVISION)));
+
+        let gemma = ManagedPaths::resolve_for(&TRANSLATEGEMMA_4B_SPEC).unwrap();
+        assert!(gemma
+            .model_root
+            .ends_with(Path::new(".bakatrans").join("hy-mt").join("translategemma-4b")));
+        assert!(gemma
+            .staging_dir
+            .ends_with(Path::new(".staging").join(TRANSLATEGEMMA_4B_SPEC.revision)));
+        assert_ne!(paths.model_root, gemma.model_root);
+        assert_ne!(paths.manifest_path(), gemma.manifest_path());
     }
 }

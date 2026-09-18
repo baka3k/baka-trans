@@ -14,6 +14,7 @@ import type {
   LocalTranslationTestResult,
   LocalTtsProvider,
   LocalVoice,
+  OfflineTranslationModel,
   VieNeuRuntimeStatus,
   WhisperModelOption,
   LlmProviderProfile,
@@ -157,16 +158,28 @@ export function restartVieNeuRuntime() {
   return invoke<VieNeuRuntimeStatus>("restart_vieneu_runtime");
 }
 
-export function getHyMtModelStatus() {
-  return invoke<HyMtModelStatus>("get_hy_mt_model_status");
+export function getHyMtModelStatus(model: OfflineTranslationModel) {
+  return invoke<HyMtModelStatus>("get_hy_mt_model_status", { model });
 }
 
-export function installHyMtModel() {
-  return invoke<HyMtModelStatus>("install_hy_mt_model");
+export function installHyMtModel(model: OfflineTranslationModel) {
+  return invoke<HyMtModelStatus>("install_hy_mt_model", { model });
 }
 
 export function cancelHyMtModelInstall() {
   return invoke<void>("cancel_hy_mt_model_install");
+}
+
+export function getHuggingFaceTokenStatus() {
+  return invoke<LocalTranslationCredentialStatus>("get_huggingface_token_status");
+}
+
+export function saveHuggingFaceToken(token: string) {
+  return invoke<void>("save_huggingface_token", { token });
+}
+
+export function clearHuggingFaceToken() {
+  return invoke<void>("clear_huggingface_token");
 }
 
 export function previewLocalTts(

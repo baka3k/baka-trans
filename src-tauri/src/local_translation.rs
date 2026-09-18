@@ -5,8 +5,8 @@ use crate::error::{AppError, AppResult};
 use crate::local_translation::openai_compatible::normalize_openai_chat_completions_url;
 use crate::models::{
     Language, LocalTranslationConfig, LocalTranslationConfigDraft, LocalTranslationEngine,
-    LocalTranslationTestResult, LocalTtsProvider, TranslationEngineTestResult,
-    WhisperModelDownloadProgress, WhisperModelOption,
+    LocalTranslationTestResult, LocalTtsProvider, OfflineTranslationModel,
+    TranslationEngineTestResult, WhisperModelDownloadProgress, WhisperModelOption,
 };
 use futures_util::StreamExt;
 use reqwest::Client;
@@ -314,6 +314,7 @@ impl Default for LocalTranslationConfig {
         Self {
             schema_version: CONFIG_SCHEMA_VERSION,
             translation_engine: LocalTranslationEngine::HuggingfaceOffline,
+            offline_model: OfflineTranslationModel::default(),
             openai_base_url: String::new(),
             openai_model: String::new(),
             openai_timeout_seconds: 30,
@@ -370,7 +371,7 @@ impl std::fmt::Debug for TranslationClient {
     }
 }
 
-/// Live-session handle for the offline Hy-MT2 runtime.
+/// Live-session handle for the managed offline translation runtime.
 #[derive(Clone)]
 pub struct HyMtClient {
     session: std::sync::Arc<std::sync::Mutex<crate::hy_mt::HyMtSession>>,
@@ -381,6 +382,7 @@ pub struct HyMtClient {
 impl HyMtClient {
     async fn start(
         app: &tauri::AppHandle,
+        offline_model: OfflineTranslationModel,
         source_language: Language,
         target_language: Language,
     ) -> AppResult<Self> {
@@ -388,7 +390,7 @@ impl HyMtClient {
         let target = target_language.realtime_code().to_string();
         let join_result = tauri::async_runtime::spawn_blocking({
             let app = app.clone();
-            move || crate::hy_mt::HyMtSession::start(&app)
+            move || crate::hy_mt::HyMtSession::start(&app, offline_model)
         })
         .await
         .map_err(|error| {
@@ -411,13 +413,15 @@ impl HyMtClient {
     #[cfg(test)]
     pub(crate) async fn start_with_spec(
         spec: crate::hy_mt::CommandSpec,
+        offline_model: OfflineTranslationModel,
         source_language: Language,
         target_language: Language,
     ) -> AppResult<Self> {
+        let offline_spec = crate::hy_mt::offline_model_spec(offline_model);
         let source = source_language.realtime_code().to_string();
         let target = target_language.realtime_code().to_string();
         let join_result = tauri::async_runtime::spawn_blocking(move || {
-            crate::hy_mt::HyMtSession::start_with_spec(&spec, std::path::Path::new("."), "cpu")
+            crate::hy_mt::HyMtSession::start_with_spec(&spec, std::path::Path::new("."), "cpu", offline_spec)
         })
         .await
         .map_err(|error| {
@@ -467,7 +471,7 @@ impl TranslationClient {
     ) -> AppResult<Self> {
         match config.translation_engine {
             LocalTranslationEngine::HuggingfaceOffline => {
-                HyMtClient::start(app, source_language, target_language)
+                HyMtClient::start(app, config.offline_model, source_language, target_language)
                     .await
                     .map(Self::HyMt)
             }
@@ -601,13 +605,14 @@ pub async fn test_config(
 
     match engine {
         LocalTranslationEngine::HuggingfaceOffline => {
+            let offline_spec = crate::hy_mt::offline_model_spec(config.offline_model);
             let Some(handle) = app else {
                 return Ok(failed_test_result(
-                    crate::hy_mt::HY_MT_MODEL_ID.to_string(),
+                    offline_spec.model_id.to_string(),
                     "managed offline runtime".to_string(),
                     AppError::new(
                         "local_hy_mt2_no_app_handle",
-                        "Cannot probe the offline Hy-MT2 engine without an app handle.",
+                        "Cannot probe the offline engine without an app handle.",
                     ),
                     LocalTestHealth {
                         whisper_model_readable: true,
@@ -617,10 +622,10 @@ pub async fn test_config(
                     },
                 ));
             };
-            let probe = crate::hy_mt::probe_translation_engine(handle).await;
+            let probe = crate::hy_mt::probe_translation_engine(handle, config.offline_model).await;
             if let Some(error) = probe.error {
                 return Ok(failed_test_result(
-                    crate::hy_mt::HY_MT_MODEL_ID.to_string(),
+                    offline_spec.model_id.to_string(),
                     "managed offline runtime".to_string(),
                     error,
                     LocalTestHealth {
@@ -635,10 +640,11 @@ pub async fn test_config(
             Ok(LocalTranslationTestResult {
                 ok: true,
                 message: format!(
-                    "Whisper, the offline Hy-MT2 engine, and the selected voice are ready. Probe translation: {}",
+                    "Whisper, the offline {} engine, and the selected voice are ready. Probe translation: {}",
+                    offline_spec.display_name,
                     truncate_probe_message(probe.translated_text.as_deref().unwrap_or_default())
                 ),
-                model: crate::hy_mt::HY_MT_MODEL_ID.to_string(),
+                model: offline_spec.model_id.to_string(),
                 endpoint: "managed offline runtime".to_string(),
                 whisper_model_readable: true,
                 whisper_model_loaded: true,
@@ -723,18 +729,23 @@ pub async fn test_engine(
 ) -> AppResult<TranslationEngineTestResult> {
     match draft.translation_engine {
         LocalTranslationEngine::HuggingfaceOffline => {
-            let probe = crate::hy_mt::probe_translation_engine(app).await;
-            Ok(offline_engine_test_result(probe))
+            let probe = crate::hy_mt::probe_translation_engine(app, draft.offline_model).await;
+            Ok(offline_engine_test_result(probe, draft.offline_model))
         }
         LocalTranslationEngine::OpenaiCompatible => test_engine_openai_compatible(draft).await,
     }
 }
 
-fn offline_engine_test_result(probe: crate::hy_mt::HyMtEngineProbe) -> TranslationEngineTestResult {
+fn offline_engine_test_result(
+    probe: crate::hy_mt::HyMtEngineProbe,
+    offline_model: OfflineTranslationModel,
+) -> TranslationEngineTestResult {
+    let spec = crate::hy_mt::offline_model_spec(offline_model);
     let message = match &probe.error {
         Some(error) => error.message.clone(),
         None => format!(
-            "The offline Hy-MT2 engine loaded in {:.0} ms on {} and translated the probe in {:.0} ms: {}",
+            "The offline {} engine loaded in {:.0} ms on {} and translated the probe in {:.0} ms: {}",
+            spec.display_name,
             probe.load_ms,
             probe.device,
             probe.latency_ms.unwrap_or(0.0),
@@ -743,7 +754,7 @@ fn offline_engine_test_result(probe: crate::hy_mt::HyMtEngineProbe) -> Translati
     };
     TranslationEngineTestResult {
         engine: "huggingface_offline".to_string(),
-        model: crate::hy_mt::HY_MT_MODEL_ID.to_string(),
+        model: spec.model_id.to_string(),
         endpoint: "managed offline runtime".to_string(),
         reachable: probe.reachable,
         accepted: probe.accepted,
@@ -984,6 +995,7 @@ pub fn normalize_and_validate(
     Ok(LocalTranslationConfig {
         schema_version: CONFIG_SCHEMA_VERSION,
         translation_engine: draft.translation_engine,
+        offline_model: draft.offline_model,
         openai_base_url: openai_endpoint,
         openai_model,
         openai_timeout_seconds: draft.openai_timeout_seconds.clamp(5, 300),
@@ -1430,6 +1442,17 @@ mod tests {
     }
 
     #[test]
+    fn config_without_offline_model_defaults_to_hy_mt2() {
+        let mut value = serde_json::to_value(LocalTranslationConfig::default()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("offlineModel");
+
+        let migrated: LocalTranslationConfig = serde_json::from_value(value).unwrap();
+
+        assert_eq!(migrated.offline_model, OfflineTranslationModel::HyMt2);
+    }
+
+    #[test]
     fn old_config_json_migrates_tts_defaults_without_losing_existing_values() {
         let mut value = serde_json::to_value(LocalTranslationConfig::default()).unwrap();
         let object = value.as_object_mut().unwrap();
@@ -1471,6 +1494,7 @@ mod tests {
 
         assert_eq!(loaded.schema_version, config.schema_version);
         assert_eq!(loaded.translation_engine, config.translation_engine);
+        assert_eq!(loaded.offline_model, config.offline_model);
         assert_eq!(loaded.openai_base_url, config.openai_base_url);
         assert_eq!(loaded.openai_model, config.openai_model);
         assert_eq!(loaded.openai_timeout_seconds, config.openai_timeout_seconds);
@@ -1710,7 +1734,7 @@ mod tests {
             prefix_args: Vec::new(),
             working_dir: directory.clone(),
         };
-        let client = HyMtClient::start_with_spec(spec, Language::Ja, Language::Vi)
+        let client = HyMtClient::start_with_spec(spec, OfflineTranslationModel::HyMt2, Language::Ja, Language::Vi)
             .await
             .unwrap();
         let (text, _latency) = client.translate("こんにちは").await.unwrap();
@@ -1735,7 +1759,8 @@ mod tests {
 
     #[test]
     fn offline_engine_test_result_reports_probe_translation() {
-        let result = offline_engine_test_result(crate::hy_mt::HyMtEngineProbe {
+        let result = offline_engine_test_result(
+            crate::hy_mt::HyMtEngineProbe {
             device: "mps".to_string(),
             load_ms: 1234.5,
             translated_text: Some("Xin chào".to_string()),
@@ -1743,7 +1768,9 @@ mod tests {
             reachable: true,
             accepted: true,
             error: None,
-        });
+        },
+            OfflineTranslationModel::HyMt2,
+        );
 
         assert_eq!(result.engine, "huggingface_offline");
         assert_eq!(result.model, "tencent/Hy-MT2-1.8B");
@@ -1755,7 +1782,8 @@ mod tests {
 
     #[test]
     fn offline_engine_test_result_surfaces_probe_errors() {
-        let result = offline_engine_test_result(crate::hy_mt::HyMtEngineProbe {
+        let result = offline_engine_test_result(
+            crate::hy_mt::HyMtEngineProbe {
             device: String::new(),
             load_ms: 0.0,
             translated_text: None,
@@ -1766,7 +1794,9 @@ mod tests {
                 "hy_mt_model_missing",
                 "The Hy-MT2 model is not installed yet.",
             )),
-        });
+        },
+            OfflineTranslationModel::HyMt2,
+        );
 
         assert!(!result.reachable);
         assert!(!result.accepted);

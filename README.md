@@ -47,7 +47,7 @@ Capture live meeting audio, transcribe speech, translate it, synthesize translat
 | Mode | Description |
 |---|---|
 | **Cloud API** | Uses Google Gemini Live or OpenAI Realtime APIs for transcription, translation, and text-to-speech. High quality, requires API key and internet. |
-| **Local Whisper** | Runs whisper.cpp on-device for Japanese transcription, then translates via offline Hy-MT2 engine or an OpenAI-compatible API (e.g. Ollama). No cloud translation key required. |
+| **Local Whisper** | Runs whisper.cpp on-device for Japanese transcription, then translates via a managed offline model (Hy-MT2 1.8B or Google TranslateGemma 4B) or an OpenAI-compatible API (e.g. Ollama). No cloud translation key required. |
 
 ### Speech Engines
 
@@ -97,7 +97,7 @@ Meeting Audio (Teams, Zoom, etc.)
   → Virtual Audio Device (BlackHole 2ch / WASAPI loopback)
   → CPAL Audio Capture (PCM16 mono, 16 kHz)
   → Speech Recognition (whisper.cpp / Google Live / OpenAI Realtime)
-  → Translation Engine (Hy-MT2 offline / OpenAI-compatible API / Google / OpenAI)
+  → Translation Engine (Hy-MT2 offline / TranslateGemma 4B offline / OpenAI-compatible API / Google / OpenAI)
   → Text-to-Speech (Cloud TTS / System TTS / VieNeu-TTS)
   → PCM16 mono, 24 kHz
   → CPAL PlaybackRuntime
@@ -114,7 +114,7 @@ Meeting Audio (Teams, Zoom, etc.)
 | Backend | Rust, Tokio async runtime |
 | Audio capture & playback | CPAL (Cross-Platform Audio Library) |
 | Local speech recognition | whisper-rs (whisper.cpp bindings, Metal on macOS) |
-| Translation | Google Gemini, OpenAI, Hy-MT2 offline, OpenAI-compatible APIs |
+| Translation | Google Gemini, OpenAI, Hy-MT2 offline, TranslateGemma 4B offline, OpenAI-compatible APIs |
 | TTS | Google TTS, OpenAI TTS, macOS `say`, Windows SpeechSynthesis, VieNeu-TTS |
 | Sidecar runtimes | PyInstaller bundles (VieNeu-TTS bridge, Hy-MT runtime) |
 | Credential storage | macOS Keychain / Windows Credential Manager via `keyring` |
@@ -133,7 +133,7 @@ Frontend (React + TypeScript)
 Backend (Rust)
   ├── Audio Pipeline — CPAL capture, buffering, playback runtime
   ├── Transcription — whisper-rs local, Google Live WebSocket, OpenAI Realtime
-  ├── Translation — provider abstraction (Google, OpenAI, Hy-MT2, OpenAI-compatible)
+  ├── Translation — provider abstraction (Google, OpenAI, Hy-MT2, TranslateGemma 4B, OpenAI-compatible)
   ├── TTS — cloud APIs, platform TTS, VieNeu-TTS sidecar
   ├── Device Manager — enumeration, hot-plug detection
   └── Session State — lifecycle, pause/resume, error recovery
@@ -376,11 +376,12 @@ Uses Google Gemini Live or OpenAI Realtime APIs for the full pipeline (transcrip
 
 ### Local Whisper Mode
 
-Runs whisper.cpp locally for Japanese transcription, then translates via Hy-MT2 (offline) or an OpenAI-compatible API. Does **not** require a cloud translation key.
+Runs whisper.cpp locally for Japanese transcription, then translates via a managed offline model — Hy-MT2 1.8B or Google TranslateGemma 4B (both offline) — or an OpenAI-compatible API. Does **not** require a cloud translation key.
 
 1. Choose **Local Whisper** → open **Local LLM**.
 2. Select a translation engine:
    - **Hy-MT2** — offline, no network required (quality gate: CAUTION for live sessions).
+   - **TranslateGemma 4B** — offline, no network required at runtime. Google gates the download: accept the Gemma license at huggingface.co/google/translategemma-4b-it and save a Hugging Face token (used only for the one-time model download).
    - **OpenAI-compatible API** — pick a provider preset (**DeepSeek**, Ollama, LM Studio, or Custom), then adjust the base URL and model (e.g. DeepSeek at `https://api.deepseek.com` with `deepseek-v4-flash`).
      - Paste the provider's API key → **Save key**. The key is stored in the OS keychain (service `dev.baka3k.baka-trans`), never in the config file; only its presence and source are shown. **Clear key** removes it.
      - Hosted endpoints (anything outside this computer, e.g. DeepSeek) require a key: starting a session and **Test translation engine** fail fast with `local_openai_api_key_missing` until one is saved. Loopback servers (Ollama, LM Studio) work without a key.

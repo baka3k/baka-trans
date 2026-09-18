@@ -7,7 +7,7 @@ Cloud API preserves the Google Live and OpenAI Realtime pipelines. Local Whisper
 ```text
 CPAL capture at 16 kHz
   -> whisper-rs Japanese transcription
-  -> selected translation engine (Hy-MT2 offline or OpenAI-compatible API)
+  -> selected translation engine (Hy-MT2 / TranslateGemma 4B offline, or OpenAI-compatible API)
   -> final transcript snapshot
   -> bounded platform TTS queue
   -> PCM16 mono at 24 kHz

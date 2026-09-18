@@ -1,4 +1,4 @@
-"""Single-load local-only HY-MT inference runner."""
+"""Single-load local-only inference runners for the managed offline models."""
 
 from __future__ import annotations
 
@@ -53,6 +53,71 @@ class TranslationResult:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def _validate_generate_args(
+    generation_mode: str,
+    max_new_tokens: int,
+) -> None:
+    if generation_mode not in {"greedy", "recommended"}:
+        raise ValueError("generation mode must be 'greedy' or 'recommended'")
+    if max_new_tokens <= 0 or max_new_tokens > MAX_NEW_TOKENS:
+        raise ValueError(f"max new tokens must be between 1 and {MAX_NEW_TOKENS}")
+
+
+def _generation_kwargs(
+    pad_token_id: int | None,
+    generation_mode: str,
+    max_new_tokens: int,
+    timeout_seconds: float | None,
+    cancellation: Event | None,
+) -> dict[str, Any]:
+    deadline = None if timeout_seconds is None else time.monotonic() + timeout_seconds
+    deadline_criteria = DeadlineCriteria(deadline, cancellation)
+    generation: dict[str, Any] = {
+        "max_new_tokens": max_new_tokens,
+        "stopping_criteria": StoppingCriteriaList([deadline_criteria]),
+        "pad_token_id": pad_token_id,
+    }
+    if generation_mode == "greedy":
+        generation.update(
+            do_sample=False,
+            repetition_penalty=1.0,
+            temperature=None,
+            top_k=None,
+            top_p=None,
+        )
+    else:
+        generation.update(
+            do_sample=True,
+            repetition_penalty=1.05,
+            temperature=0.7,
+            top_k=20,
+            top_p=0.6,
+        )
+    return generation, deadline_criteria
+
+
+def _result(
+    generated: Any,
+    input_tokens: int,
+    tokenizer: Any,
+    latency_ms: float,
+    generation_mode: str,
+    deadline_criteria: DeadlineCriteria,
+) -> TranslationResult:
+    output_tokens = int(generated.shape[1] - input_tokens)
+    text = decode_generated_suffix(tokenizer, generated, input_tokens)
+    return TranslationResult(
+        text=text,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        latency_ms=round(latency_ms, 3),
+        tokens_per_second=round(output_tokens / max(latency_ms / 1_000, 0.001), 3),
+        generation_mode=generation_mode,
+        cancelled=deadline_criteria.triggered,
+        memory=memory_snapshot(torch),
+    )
 
 
 class HyMtRunner:
@@ -125,10 +190,7 @@ class HyMtRunner:
         seed: int = 0,
         cancellation: Event | None = None,
     ) -> TranslationResult:
-        if generation_mode not in {"greedy", "recommended"}:
-            raise ValueError("generation mode must be 'greedy' or 'recommended'")
-        if max_new_tokens <= 0 or max_new_tokens > MAX_NEW_TOKENS:
-            raise ValueError(f"max new tokens must be between 1 and {MAX_NEW_TOKENS}")
+        _validate_generate_args(generation_mode, max_new_tokens)
 
         input_ids = tokenize_chat(
             self.tokenizer,
@@ -138,29 +200,13 @@ class HyMtRunner:
             target_language=target_language,
         ).to(self.device.selected)
         input_tokens = int(input_ids.shape[1])
-        deadline = None if timeout_seconds is None else time.monotonic() + timeout_seconds
-        deadline_criteria = DeadlineCriteria(deadline, cancellation)
-        generation: dict[str, Any] = {
-            "max_new_tokens": max_new_tokens,
-            "stopping_criteria": StoppingCriteriaList([deadline_criteria]),
-            "pad_token_id": self.tokenizer.pad_token_id,
-        }
-        if generation_mode == "greedy":
-            generation.update(
-                do_sample=False,
-                repetition_penalty=1.0,
-                temperature=None,
-                top_k=None,
-                top_p=None,
-            )
-        else:
-            generation.update(
-                do_sample=True,
-                repetition_penalty=1.05,
-                temperature=0.7,
-                top_k=20,
-                top_p=0.6,
-            )
+        generation, deadline_criteria = _generation_kwargs(
+            self.tokenizer.pad_token_id,
+            generation_mode,
+            max_new_tokens,
+            timeout_seconds,
+            cancellation,
+        )
 
         torch.manual_seed(seed)
         started = time.monotonic()
@@ -169,15 +215,133 @@ class HyMtRunner:
         if self.device.selected == "mps":
             torch.mps.synchronize()
         latency_ms = (time.monotonic() - started) * 1_000
-        output_tokens = int(generated.shape[1] - input_tokens)
-        text = decode_generated_suffix(self.tokenizer, generated, input_tokens)
-        return TranslationResult(
-            text=text,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            latency_ms=round(latency_ms, 3),
-            tokens_per_second=round(output_tokens / max(latency_ms / 1_000, 0.001), 3),
-            generation_mode=generation_mode,
-            cancelled=deadline_criteria.triggered,
-            memory=memory_snapshot(torch),
+        return _result(
+            generated,
+            input_tokens,
+            self.tokenizer,
+            latency_ms,
+            generation_mode,
+            deadline_criteria,
         )
+
+
+class TranslateGemmaRunner:
+    """Runner for Google's TranslateGemma models (Gemma3 image-text-to-text).
+
+    Text-only translation goes through the repo chat template with typed
+    user content; the processor owns both the template and the tokenizer.
+    """
+
+    def __init__(self, model_dir: Path, *, requested_device: str = "mps") -> None:
+        from transformers import AutoModelForImageTextToText, AutoProcessor
+
+        self.model_dir = model_dir.resolve()
+        if not self.model_dir.is_dir():
+            raise RuntimeError(f"model directory does not exist: {self.model_dir}")
+        self.device: DeviceDecision = select_device(torch, requested_device)
+        started = time.monotonic()
+        self.processor = AutoProcessor.from_pretrained(
+            self.model_dir,
+            local_files_only=True,
+            trust_remote_code=False,
+        )
+        self.model = AutoModelForImageTextToText.from_pretrained(
+            self.model_dir,
+            local_files_only=True,
+            trust_remote_code=False,
+            use_safetensors=True,
+            dtype=torch_dtype(torch, self.device.dtype),
+        )
+        self.model.to(self.device.selected)
+        self.model.eval()
+        if self.device.selected == "mps":
+            torch.mps.synchronize()
+        self.load_ms = (time.monotonic() - started) * 1_000
+        self.actual_dtype = str(next(self.model.parameters()).dtype).removeprefix("torch.")
+        self.actual_device = str(next(self.model.parameters()).device)
+        self.loaded_memory = memory_snapshot(torch)
+
+    def metadata(self) -> dict[str, Any]:
+        return {
+            "device": self.device.to_dict(),
+            "actualDtype": self.actual_dtype,
+            "actualDevice": self.actual_device,
+            "modelLoadMs": self.load_ms,
+            "memoryAfterLoad": self.loaded_memory,
+        }
+
+    def render_prompt(
+        self,
+        source_text: str,
+        *,
+        source_language_code: str = "ja",
+        target_language_code: str = "vi",
+        target_language: str = TARGET_LANGUAGE_NAME,
+    ) -> dict[str, Any]:
+        del target_language
+        input_ids = tokenize_chat(
+            self.processor,
+            source_text,
+            prompt_style="translategemma",
+            source_language_code=source_language_code,
+            target_language_code=target_language_code,
+        )
+        return {
+            "rendered": self.processor.tokenizer.decode(input_ids[0], skip_special_tokens=False),
+            "inputTokens": int(input_ids.shape[1]),
+        }
+
+    def translate(
+        self,
+        source_text: str,
+        *,
+        source_language_code: str = "ja",
+        target_language_code: str = "vi",
+        target_language: str = TARGET_LANGUAGE_NAME,
+        generation_mode: str,
+        max_new_tokens: int = MAX_NEW_TOKENS,
+        timeout_seconds: float | None = None,
+        seed: int = 0,
+        cancellation: Event | None = None,
+    ) -> TranslationResult:
+        del target_language
+        _validate_generate_args(generation_mode, max_new_tokens)
+
+        input_ids = tokenize_chat(
+            self.processor,
+            source_text,
+            prompt_style="translategemma",
+            source_language_code=source_language_code,
+            target_language_code=target_language_code,
+        ).to(self.device.selected)
+        input_tokens = int(input_ids.shape[1])
+        generation, deadline_criteria = _generation_kwargs(
+            self.processor.tokenizer.pad_token_id,
+            generation_mode,
+            max_new_tokens,
+            timeout_seconds,
+            cancellation,
+        )
+
+        torch.manual_seed(seed)
+        started = time.monotonic()
+        with torch.inference_mode():
+            generated = self.model.generate(input_ids, **generation)
+        if self.device.selected == "mps":
+            torch.mps.synchronize()
+        latency_ms = (time.monotonic() - started) * 1_000
+        return _result(
+            generated,
+            input_tokens,
+            self.processor.tokenizer,
+            latency_ms,
+            generation_mode,
+            deadline_criteria,
+        )
+
+
+def build_runner(model_dir: Path, spec: Any, *, requested_device: str = "mps") -> Any:
+    """Create the runner matching the model registry entry's prompt style."""
+    if spec.prompt_style == "translategemma":
+        return TranslateGemmaRunner(model_dir, requested_device=requested_device)
+    return HyMtRunner(model_dir, requested_device=requested_device)

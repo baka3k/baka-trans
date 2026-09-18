@@ -11,7 +11,7 @@ import threading
 from pathlib import Path
 from typing import Any, BinaryIO, TextIO
 
-from .constants import DEFAULT_TRANSLATE_TIMEOUT_SECONDS, MODEL_ID, MODEL_REVISION, PROTOCOL_VERSION, RUNTIME_IDENTITY, RUNTIME_VERSION, TRUST_REMOTE_CODE
+from .constants import DEFAULT_MODEL_KEY, DEFAULT_TRANSLATE_TIMEOUT_SECONDS, HY_MT2_SPEC, MODEL_SPECS, MODEL_ID, MODEL_REVISION, PROTOCOL_VERSION, RUNTIME_IDENTITY, RUNTIME_VERSION, TRUST_REMOTE_CODE, ModelSpec, get_model_spec
 from .lifecycle import LifecycleError, active_path, install, status, validate_model
 from .protocol import ProtocolError, emit, parse_line, validate_cancel, validate_translate
 
@@ -42,9 +42,10 @@ def hardened_environment() -> None:
 
 
 class ServeLoop:
-    def __init__(self, runner: HyMtRunner, output: TextIO) -> None:
+    def __init__(self, runner: HyMtRunner, output: TextIO, spec: ModelSpec = HY_MT2_SPEC) -> None:
         self.runner = runner
         self.output = output
+        self.spec = spec
         self.messages: queue.Queue[dict[str, Any] | None] = queue.Queue()
         self.active_id: str | None = None
         self.cancel_event = threading.Event()
@@ -60,8 +61,8 @@ class ServeLoop:
             "type": "ready",
             "protocolVersion": PROTOCOL_VERSION,
             "runtimeVersion": RUNTIME_VERSION,
-            "modelId": MODEL_ID,
-            "revision": MODEL_REVISION,
+            "modelId": self.spec.model_id,
+            "revision": self.spec.revision,
             "trustRemoteCode": TRUST_REMOTE_CODE,
             "device": metadata["actualDevice"],
             "dtype": metadata["actualDtype"],
@@ -138,17 +139,17 @@ class ServeLoop:
                 self.cancel_event.clear()
 
 
-def run_serve(model_root: Path, device: str, stdin: BinaryIO, stdout: TextIO) -> int:
+def run_serve(model_root: Path, spec: ModelSpec, device: str, stdin: BinaryIO, stdout: TextIO) -> int:
     hardened_environment()
     # Imported only after hardening: importing the runner pins offline mode in
     # the environment before torch/transformers and the Hub client load, and
     # the install command must never import it for exactly that reason.
-    from .runner import HyMtRunner
+    from .runner import build_runner
 
-    model_dir = active_path(model_root)
-    validate_model(model_dir)
-    runner = HyMtRunner(model_dir, requested_device=device)
-    loop = ServeLoop(runner, stdout)
+    model_dir = active_path(model_root, spec)
+    validate_model(model_dir, spec)
+    runner = build_runner(model_dir, spec, requested_device=device)
+    loop = ServeLoop(runner, stdout, spec)
     reader = threading.Thread(target=loop.receive, args=(stdin,), name="hy-mt-stdin", daemon=True)
     reader.start()
     loop.ready()
@@ -157,13 +158,15 @@ def run_serve(model_root: Path, device: str, stdin: BinaryIO, stdout: TextIO) ->
 
 
 def parser() -> argparse.ArgumentParser:
-    result = argparse.ArgumentParser(description="Managed HY-MT translation sidecar")
+    result = argparse.ArgumentParser(description="Managed offline translation sidecar")
     commands = result.add_subparsers(dest="command", required=True)
     for name in ("install", "check"):
         command = commands.add_parser(name)
         command.add_argument("--model-root", type=Path, required=True)
+        command.add_argument("--model", choices=sorted(MODEL_SPECS), default=DEFAULT_MODEL_KEY)
     serve = commands.add_parser("serve")
     serve.add_argument("--model-root", type=Path, required=True)
+    serve.add_argument("--model", choices=sorted(MODEL_SPECS), default=DEFAULT_MODEL_KEY)
     serve.add_argument("--device", choices=("mps", "cpu"), default="mps")
     return result
 
@@ -171,6 +174,7 @@ def parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = parser().parse_args()
     try:
+        spec = get_model_spec(args.model)
         if args.command == "install":
             # Install is the only online lifecycle step. The Hub client freezes
             # HF_HUB_OFFLINE at import time, so drop offline flags (including
@@ -180,12 +184,12 @@ def main() -> None:
             def progress(payload: dict[str, Any]) -> None:
                 emit(sys.stdout, payload)
             emit(sys.stdout, {"type": "status", "state": "downloading"})
-            install(args.model_root, progress)
+            install(args.model_root, progress, spec)
             return
         if args.command == "check":
-            emit(sys.stdout, {"type": "status", **status(args.model_root)})
+            emit(sys.stdout, {"type": "status", **status(args.model_root, spec)})
             return
-        raise SystemExit(run_serve(args.model_root, args.device, sys.stdin.buffer, sys.stdout))
+        raise SystemExit(run_serve(args.model_root, spec, args.device, sys.stdin.buffer, sys.stdout))
     except (LifecycleError, OSError):
         # Lifecycle errors are deliberately fixed text; never expose a path,
         # token, exception trace, or user meeting text to the protocol.

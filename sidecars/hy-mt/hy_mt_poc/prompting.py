@@ -64,10 +64,17 @@ def official_prompt(
 def chat_messages(
     source_text: str,
     *,
+    prompt_style: str = "hy_mt",
     source_language_code: str = "ja",
     target_language_code: str = "vi",
     target_language: str = TARGET_LANGUAGE_NAME,
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
+    if prompt_style == "translategemma":
+        return translategemma_messages(
+            source_text,
+            source_language_code=source_language_code,
+            target_language_code=target_language_code,
+        )
     return [{"role": "user", "content": official_prompt(
         source_text,
         source_language_code=source_language_code,
@@ -76,10 +83,31 @@ def chat_messages(
     )}]
 
 
+def translategemma_messages(
+    source_text: str,
+    *,
+    source_language_code: str = "ja",
+    target_language_code: str = "vi",
+) -> list[dict[str, Any]]:
+    """TranslateGemma chat format: the user content must be a single typed
+    entry carrying the language codes; the repo chat template builds the
+    final instruction prompt from them."""
+    return [{
+        "role": "user",
+        "content": [{
+            "type": "text",
+            "source_lang_code": source_language_code,
+            "target_lang_code": target_language_code,
+            "text": validate_source_text(source_text),
+        }],
+    }]
+
+
 def tokenize_chat(
     tokenizer: Any,
     source_text: str,
     *,
+    prompt_style: str = "hy_mt",
     source_language_code: str = "ja",
     target_language_code: str = "vi",
     target_language: str = TARGET_LANGUAGE_NAME,
@@ -87,6 +115,7 @@ def tokenize_chat(
     tokenized = tokenizer.apply_chat_template(
         chat_messages(
             source_text,
+            prompt_style=prompt_style,
             source_language_code=source_language_code,
             target_language_code=target_language_code,
             target_language=target_language,
@@ -98,4 +127,6 @@ def tokenize_chat(
     # Transformers 5 may return a BatchEncoding whereas the 4.x API returned
     # the input-id tensor directly. The runner deliberately needs only input
     # ids, so normalize both supported return shapes here.
+    if isinstance(tokenized, dict):
+        return tokenized["input_ids"]
     return getattr(tokenized, "input_ids", tokenized)

@@ -7,7 +7,8 @@ use crate::models::{
     LocalTranslationConfigDraft, LocalTranslationTestResult, LocalTtsProvider, LocalVoice,
     LookHelpConfig, LookHelpStatus, ManualBoundaryRequest, MeetingSummaryConfig,
     MeetingSummaryResult, MeetingSummaryStatus, MeetingSummaryStatusEvent, OverlayConfig,
-    OverlayGeometry, OverlayStatus, SessionConfig, TranscriptItem, TranslationCredentialStatus,
+    OfflineTranslationModel, OverlayGeometry, OverlayStatus, SessionConfig, TranscriptItem,
+    TranslationCredentialStatus,
     TranslationEngineTestResult, TranslationProvider, VieNeuRuntimeStatus, WhisperModelOption,
 };
 use crate::session::AppState;
@@ -231,21 +232,38 @@ pub async fn get_vieneu_runtime_status(
 pub async fn get_hy_mt_model_status(
     app: AppHandle,
     manager: State<'_, hy_mt::HyMtManager>,
+    model: OfflineTranslationModel,
 ) -> AppResult<HyMtModelStatus> {
-    manager.status(&app).await
+    manager.status(&app, model).await
 }
 
 #[tauri::command]
 pub async fn install_hy_mt_model(
     app: AppHandle,
     manager: State<'_, hy_mt::HyMtManager>,
+    model: OfflineTranslationModel,
 ) -> AppResult<HyMtModelStatus> {
-    manager.install(app).await
+    manager.install(app, model).await
 }
 
 #[tauri::command]
 pub fn cancel_hy_mt_model_install(manager: State<'_, hy_mt::HyMtManager>) {
     manager.cancel_install();
+}
+
+#[tauri::command]
+pub async fn get_huggingface_token_status() -> AppResult<LocalCredentialStatus> {
+    run_blocking(local_translation::api_key::huggingface_token_status).await
+}
+
+#[tauri::command]
+pub async fn save_huggingface_token(token: String) -> AppResult<()> {
+    run_blocking(move || local_translation::api_key::save_huggingface_token(&token)).await
+}
+
+#[tauri::command]
+pub async fn clear_huggingface_token() -> AppResult<()> {
+    run_blocking(local_translation::api_key::delete_huggingface_token).await
 }
 
 #[tauri::command]

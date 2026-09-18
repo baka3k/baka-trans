@@ -45,7 +45,7 @@ export function ModeChooser({ onSelect }: ModeChooserProps) {
             </span>
             <span className="mode-option-copy">
               <strong>Local Whisper</strong>
-              <span>Whisper speech-to-text, Gemma translation, then a local system voice.</span>
+              <span>Whisper speech-to-text, a managed offline translation model (Hy-MT2 or TranslateGemma), then a local system voice.</span>
               <small>
                 <LockClosedRegular fontSize={13} /> Audio and translation stay on this computer
               </small>

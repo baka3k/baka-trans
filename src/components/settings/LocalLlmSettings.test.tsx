@@ -311,6 +311,7 @@ describe("LocalLlmSettings", () => {
   });
 
   it("offers a managed Hy-MT2 download with progress and pause", async () => {
+    // Fixtures below carry model: "hy_mt2" so the card mirrors the selected model.
     const user = userEvent.setup();
     const onInstall = vi.fn();
     const onCancel = vi.fn();
@@ -339,6 +340,7 @@ describe("LocalLlmSettings", () => {
       <LocalLlmSettings
         {...baseProps}
         hyMtModel={{
+          model: "hy_mt2",
           phase: "not_installed",
           runtimeAvailable: true,
           modelInstalled: false,
@@ -353,13 +355,14 @@ describe("LocalLlmSettings", () => {
     );
 
     expect(screen.getByText("Managed Hy-MT2 1.8B")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Install Hy-MT2 model" }));
+    await user.click(screen.getByRole("button", { name: "Install Hy-MT2 1.8B" }));
     expect(onInstall).toHaveBeenCalledTimes(1);
 
     rerender(
       <LocalLlmSettings
         {...baseProps}
         hyMtModel={{
+          model: "hy_mt2",
           phase: "not_installed",
           runtimeAvailable: true,
           modelInstalled: false,
@@ -369,6 +372,7 @@ describe("LocalLlmSettings", () => {
           message: "Downloading the verified Hy-MT2 model…",
         }}
         hyMtProgress={{
+          model: "hy_mt2",
           phase: "downloading",
           downloadedBytes: 2043398383,
           totalBytes: 4086796766,
@@ -378,7 +382,7 @@ describe("LocalLlmSettings", () => {
         hyMtBusy
       />,
     );
-    expect(screen.getByRole("progressbar", { name: "Hy-MT2 model setup progress" })).toHaveValue(50);
+    expect(screen.getByRole("progressbar", { name: "Offline model setup progress" })).toHaveValue(50);
     await user.click(screen.getByRole("button", { name: "Pause download" }));
     expect(onCancel).toHaveBeenCalledTimes(1);
 
@@ -386,6 +390,7 @@ describe("LocalLlmSettings", () => {
       <LocalLlmSettings
         {...baseProps}
         hyMtModel={{
+          model: "hy_mt2",
           phase: "installed",
           runtimeAvailable: true,
           modelInstalled: true,
@@ -400,8 +405,71 @@ describe("LocalLlmSettings", () => {
     );
     expect(screen.getByText(/verified · 9a341cd/)).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Install Hy-MT2 model" }),
+      screen.queryByRole("button", { name: "Install Hy-MT2 1.8B" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("lets the user pick between the managed offline models and gates TranslateGemma behind a token", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const baseProps = {
+      draft: { ...defaultLocalTranslationConfig, voiceId: "vi-voice" },
+      dirty: false,
+      saving: false,
+      testing: false,
+      testResult: null,
+      onChange,
+      onSave: () => undefined,
+      onTest: () => undefined,
+      voices: [],
+      previewing: false,
+      onPreview: () => undefined,
+      whisperModels,
+      selectedWhisperModelId: "small-q5_1",
+      whisperDownload: null,
+      whisperDownloading: false,
+      onWhisperModelSelect: () => undefined,
+      onWhisperDownload: () => undefined,
+      onHyMtInstall: () => undefined,
+      onHyMtCancel: () => undefined,
+    };
+    const { container, unmount } = render(<LocalLlmSettings {...baseProps} />);
+
+    const modelSelect = screen.getByLabelText("Offline translation model");
+    expect(modelSelect).toHaveValue("hy_mt2");
+    expect(
+      screen.getByRole("option", { name: "Hy-MT2 1.8B (Tencent)" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("Hugging Face token"),
+    ).not.toBeInTheDocument();
+
+    await user.selectOptions(modelSelect, "translategemma_4b");
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ offlineModel: "translategemma_4b" }),
+    );
+    expect((await axe(container)).violations).toEqual([]);
+    unmount();
+
+    render(
+      <LocalLlmSettings
+        {...baseProps}
+        draft={{ ...defaultLocalTranslationConfig, offlineModel: "translategemma_4b" }}
+        hyMtModel={{
+          model: "translategemma_4b",
+          phase: "not_installed",
+          runtimeAvailable: true,
+          modelInstalled: false,
+          modelId: "google/translategemma-4b-it",
+          modelRevision: "10042cb0e6e7fdce748996a71dc3dc432a4e0c89",
+          totalBytes: 8639637704,
+          message: "Install TranslateGemma 4B to download the pinned offline translation model.",
+        }}
+      />,
+    );
+    expect(screen.getByText("Managed TranslateGemma 4B")).toBeInTheDocument();
+    expect(screen.getByLabelText("Hugging Face token")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Install TranslateGemma 4B" })).toBeInTheDocument();
   });
 
   describe("OpenAI-compatible API key management", () => {
