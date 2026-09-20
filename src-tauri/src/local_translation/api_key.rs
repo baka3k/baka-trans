@@ -8,6 +8,8 @@ const LOCAL_TRANSLATION_KEY_USER: &str = "local-translation-api-key";
 const ENV_VAR_NAME: &str = "BAKA_TRANS_LOCAL_API_KEY";
 const HUGGINGFACE_TOKEN_USER: &str = "huggingface-token";
 const HF_ENV_VAR_NAME: &str = "BAKA_TRANS_HF_TOKEN";
+const HF_TOKEN_ENV: &str = "HF_TOKEN";
+const HUGGINGFACE_TOKEN_ENV: &str = "HUGGINGFACE_TOKEN";
 const MAX_KEY_CHARS: usize = 4096;
 
 static CACHED_KEY: OnceLock<Mutex<Option<String>>> = OnceLock::new();
@@ -106,10 +108,19 @@ fn huggingface_entry() -> AppResult<Entry> {
 }
 
 fn hf_env_token() -> Option<String> {
-    std::env::var(HF_ENV_VAR_NAME)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+    // App-specific override wins, then the canonical Hugging Face variable
+    // names so `huggingface_hub`'s default token resolution and any tooling
+    // that follows the same convention continue to work without extra setup.
+    for name in [HF_ENV_VAR_NAME, HF_TOKEN_ENV, HUGGINGFACE_TOKEN_ENV] {
+        if let Some(value) = std::env::var(name)
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+        {
+            return Some(value);
+        }
+    }
+    None
 }
 
 pub fn save_local_translation_api_key(key: &str) -> AppResult<()> {
@@ -338,5 +349,90 @@ mod tests {
         let status = credential_status_from_parts(false, false, false);
         assert!(!status.has_key);
         assert_eq!(status.source, None);
+    }
+
+    /// Env var access in `hf_env_token` is process-global, so these tests run
+    /// serially under a single mutex and restore the previous value of every
+    /// variable they touch. The fake values use clearly-synthetic shapes so
+    /// they cannot accidentally be mistaken for a real user token if a test
+    /// ever leaks through a panic.
+    #[test]
+    fn hf_env_token_prefers_app_specific_then_canonical_hf_names() {
+        let _guard = env_lock().lock().unwrap();
+        let snapshot = EnvSnapshot::capture();
+
+        std::env::set_var(HF_ENV_VAR_NAME, "hf-fake-app-override");
+        std::env::set_var(HF_TOKEN_ENV, "hf-fake-canonical");
+        std::env::set_var(HUGGINGFACE_TOKEN_ENV, "hf-fake-alias");
+        assert_eq!(hf_env_token().as_deref(), Some("hf-fake-app-override"));
+
+        std::env::remove_var(HF_ENV_VAR_NAME);
+        assert_eq!(hf_env_token().as_deref(), Some("hf-fake-canonical"));
+
+        std::env::remove_var(HF_TOKEN_ENV);
+        assert_eq!(hf_env_token().as_deref(), Some("hf-fake-alias"));
+
+        std::env::remove_var(HUGGINGFACE_TOKEN_ENV);
+        assert_eq!(hf_env_token(), None);
+
+        snapshot.restore();
+    }
+
+    #[test]
+    fn hf_env_token_treats_whitespace_only_values_as_absent() {
+        let _guard = env_lock().lock().unwrap();
+        let snapshot = EnvSnapshot::capture();
+
+        std::env::set_var(HF_TOKEN_ENV, "   \t\n ");
+        assert_eq!(hf_env_token(), None);
+
+        snapshot.restore();
+    }
+
+    #[test]
+    fn load_huggingface_token_picks_up_canonical_hf_token_env() {
+        let _guard = env_lock().lock().unwrap();
+        let snapshot = EnvSnapshot::capture();
+
+        std::env::set_var(HF_TOKEN_ENV, "hf-fake-load-canonical");
+        let resolved = load_huggingface_token().unwrap();
+        assert_eq!(resolved.as_deref(), Some("hf-fake-load-canonical"));
+
+        snapshot.restore();
+    }
+
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct EnvSnapshot {
+        values: Vec<(&'static str, Option<String>)>,
+        guard: MutexGuard<'static, ()>,
+    }
+
+    impl EnvSnapshot {
+        fn capture() -> Self {
+            // Hold the env lock for the duration of the snapshot so the
+            // restore happens under the same guard as the test body.
+            let guard = env_lock().lock().unwrap();
+            let values = [HF_ENV_VAR_NAME, HF_TOKEN_ENV, HUGGINGFACE_TOKEN_ENV]
+                .into_iter()
+                .map(|name| (name, std::env::var(name).ok()))
+                .collect();
+            Self { values, guard }
+        }
+
+        fn restore(self) {
+            for (name, value) in self.values {
+                match value {
+                    Some(v) => std::env::set_var(name, v),
+                    None => std::env::remove_var(name),
+                }
+            }
+            drop(self.guard);
+        }
     }
 }

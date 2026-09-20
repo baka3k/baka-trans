@@ -45,7 +45,7 @@ pub const HY_MT2_SPEC: OfflineModelSpec = OfflineModelSpec {
 // the LFS sha256 digests are not public, so the sidecar verifies the small
 // files against git blob ids and the weights against exact sizes.
 pub const TRANSLATEGEMMA_4B_SPEC: OfflineModelSpec = OfflineModelSpec {
-    model: OfflineTranslationModel::TranslateGemma4B,
+    model: OfflineTranslationModel::Translategemma4B,
     key: "translategemma-4b",
     display_name: "TranslateGemma 4B",
     model_id: "google/translategemma-4b-it",
@@ -57,7 +57,7 @@ pub const TRANSLATEGEMMA_4B_SPEC: OfflineModelSpec = OfflineModelSpec {
 pub fn offline_model_spec(model: OfflineTranslationModel) -> &'static OfflineModelSpec {
     match model {
         OfflineTranslationModel::HyMt2 => &HY_MT2_SPEC,
-        OfflineTranslationModel::TranslateGemma4B => &TRANSLATEGEMMA_4B_SPEC,
+        OfflineTranslationModel::Translategemma4B => &TRANSLATEGEMMA_4B_SPEC,
     }
 }
 
@@ -155,6 +155,38 @@ impl HyMtManager {
         self.install_cancelled.store(false, Ordering::Release);
         let repair_requested = self.last_error.lock().map_err(lock_error)?.is_some();
         *self.last_error.lock().map_err(lock_error)? = None;
+
+        // For gated models, the sidecar cannot succeed without a token. Fail
+        // fast with a precise message instead of spawning a child that will
+        // hit a 401/403 and hide the reason behind a generic lifecycle error.
+        if spec.gated {
+            match crate::local_translation::api_key::load_huggingface_token() {
+                Ok(Some(_)) => {}
+                Ok(None) => {
+                    let error = AppError::new(
+                        "hy_mt_huggingface_token_missing",
+                        format!(
+                            "{} is a gated repository. Add a Hugging Face token that has accepted the Gemma license in Settings → Local translation.",
+                            spec.display_name
+                        ),
+                    );
+                    self.remember_error(&error);
+                    return Err(error);
+                }
+                Err(err) => {
+                    let error = AppError::new(
+                        "hy_mt_huggingface_token_unreadable",
+                        format!(
+                            "{} is gated and the saved Hugging Face token could not be read: {}",
+                            spec.display_name,
+                            err.message
+                        ),
+                    );
+                    self.remember_error(&error);
+                    return Err(error);
+                }
+            }
+        }
 
         let paths = ManagedPaths::resolve_for(spec)?;
         if paths.manifest_path().is_file() && !repair_requested {
@@ -321,13 +353,30 @@ fn run_install_process(
         .arg(&model_root)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
     // Gated repositories (TranslateGemma) refuse anonymous downloads. The
-    // token is passed only to this one-shot install child; serve mode rejects
-    // hub credentials inside the sidecar itself.
+    // caller has already verified that a token is reachable for `offline.gated`
+    // models, so `load_huggingface_token` is allowed to fail here only as a
+    // defence-in-depth check; serve mode still rejects hub credentials inside
+    // the sidecar itself.
     if offline.gated {
-        if let Ok(Some(token)) = crate::local_translation::api_key::load_huggingface_token() {
-            command.env("HF_TOKEN", token);
+        match crate::local_translation::api_key::load_huggingface_token() {
+            Ok(Some(token)) => {
+                command.env("HF_TOKEN", token);
+            }
+            Ok(None) | Err(_) => {
+                // Caller pre-check should have rejected this; treat as an
+                // unexpected state so the failure is observable rather than
+                // surfaced later as an opaque HTTP error from the Hub client.
+                let error = AppError::new(
+                    "hy_mt_huggingface_token_missing",
+                    format!(
+                        "{} is a gated repository and no Hugging Face token was available when the installer started.",
+                        offline.display_name
+                    ),
+                );
+                return Err(error);
+            }
         }
     }
     hide_child_window(&mut command);
@@ -340,6 +389,12 @@ fn run_install_process(
             ),
         )
     })?;
+    // Capture stderr so the real failure reason (HTTP 401, gated repo error,
+    // traceback, etc.) is reported to the user instead of being discarded.
+    let stderr_lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    if let Some(stderr) = child.stderr.take() {
+        spawn_stderr_reader(stderr, stderr_lines.clone());
+    }
     let receiver = spawn_line_reader(child.stdout.take().ok_or_else(|| {
         AppError::new(
             "hy_mt_install_output_error",
@@ -443,12 +498,22 @@ fn run_install_process(
             if status.success() {
                 return Ok(InstallExit::Completed);
             }
+            let stderr_tail = stderr_tail_string(&stderr_lines);
             return Err(AppError::new(
                 "hy_mt_install_failed",
-                format!(
-                    "{} setup failed. Resume to retry the verified download.",
-                    offline.display_name
-                ),
+                match stderr_tail {
+                    Some(tail) => format!(
+                        "{} installer exited with status {}: {}",
+                        offline.display_name,
+                        status,
+                        tail
+                    ),
+                    None => format!(
+                        "{} installer exited with status {}. No stderr was produced.",
+                        offline.display_name,
+                        status
+                    ),
+                },
             ));
         }
         thread::sleep(PROCESS_POLL_INTERVAL);
@@ -592,6 +657,44 @@ fn spawn_line_reader(stdout: impl std::io::Read + Send + 'static) -> std_mpsc::R
         }
     });
     receiver
+}
+
+/// Drain a child process's stderr into the shared buffer so the parent's
+/// failure path can surface the real reason (HTTP 401, gated repo, traceback)
+/// instead of a generic placeholder. Bounded by `STDERR_BUFFER_LINES` so a
+/// runaway log cannot grow unbounded.
+fn spawn_stderr_reader(stderr: impl std::io::Read + Send + 'static, sink: Arc<Mutex<Vec<String>>>) {
+    thread::spawn(move || {
+        for line in BufReader::new(stderr).lines() {
+            let Ok(line) = line else { break };
+            if let Ok(mut buf) = sink.lock() {
+                if buf.len() >= STDERR_BUFFER_LINES {
+                    buf.remove(0);
+                }
+                buf.push(line);
+            }
+        }
+    });
+}
+
+const STDERR_BUFFER_LINES: usize = 200;
+const STDERR_TAIL_LINES: usize = 30;
+
+fn stderr_tail_string(buffer: &Arc<Mutex<Vec<String>>>) -> Option<String> {
+    let buf = buffer.lock().ok()?;
+    if buf.is_empty() {
+        return None;
+    }
+    let start = buf.len().saturating_sub(STDERR_TAIL_LINES);
+    let tail: Vec<&str> = buf[start..].iter().map(String::as_str).collect();
+    let joined = tail.join("\n");
+    // Trim to a reasonable size so the UI message stays compact.
+    if joined.chars().count() > 4000 {
+        let trimmed: String = joined.chars().take(4000).collect();
+        Some(format!("{trimmed}…"))
+    } else {
+        Some(joined)
+    }
 }
 
 #[derive(Debug)]
@@ -1062,7 +1165,7 @@ mod tests {
 
     #[test]
     fn translategemma_spec_is_pinned_and_gated() {
-        let spec = offline_model_spec(OfflineTranslationModel::TranslateGemma4B);
+        let spec = offline_model_spec(OfflineTranslationModel::Translategemma4B);
         assert_eq!(spec.key, "translategemma-4b");
         assert_eq!(spec.model_id, "google/translategemma-4b-it");
         assert_eq!(spec.revision, "10042cb0e6e7fdce748996a71dc3dc432a4e0c89");

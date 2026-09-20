@@ -4,10 +4,9 @@
     "code": "bakatrans",
     "name": "bakatrans"
   },
-  "storage_backend": "local",
+  "storage_backend": "remote",
   "code": {
     "env": {
-      "CORTEX_STORAGE_INSTANCE": "bakatrans",
       "GRAPH_PROVIDER": "falkordb",
       "CODE_GRAPH_PROVIDER": "falkordb",
       "FALKORDB_GRAPH": "bakatrans",
@@ -30,10 +29,10 @@
   },
   "doc": {
     "env": {
-      "CORTEX_STORAGE_INSTANCE": "bakatrans",
       "GRAPH_PROVIDER": "falkordb",
       "DOC_GRAPH_PROVIDER": "falkordb",
       "FALKORDB_GRAPH": "bakatrans-doc",
+      "QDRANT_COLLECTION_DOC": "bakatrans_doc",
       "EMBEDDING_MODEL": "BAAI/bge-m3",
       "BATCH_SIZE": "1",
       "MAX_EMBED_CHARS": "500",
@@ -49,5 +48,10 @@
         }
       ]
     }
+  },
+  "remote": {
+    "qdrant_url": "http://localhost:6333",
+    "falkordb_uri": "localhost:6379",
+    "falkordb_ssl": false
   }
 }

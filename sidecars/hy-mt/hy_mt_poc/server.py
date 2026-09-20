@@ -190,11 +190,61 @@ def main() -> None:
             emit(sys.stdout, {"type": "status", **status(args.model_root, spec)})
             return
         raise SystemExit(run_serve(args.model_root, spec, args.device, sys.stdin.buffer, sys.stdout))
-    except (LifecycleError, OSError):
+    except (LifecycleError, OSError) as exc:
         # Lifecycle errors are deliberately fixed text; never expose a path,
         # token, exception trace, or user meeting text to the protocol.
         emit(sys.stdout, {"type": "error", "code": "lifecycle_failed", "message": "Model lifecycle operation failed.", "retryable": False})
         raise SystemExit(2)
+    except Exception as exc:
+        # Install-time failures from the Hub client (gated repo, unauthorized
+        # token, network errors, missing artifact) bubble up here. The host
+        # parent process pipes our stderr back to the user-facing log, so we
+        # still keep the full traceback there for engineers, but the protocol
+        # frame carries a scrubbed, human-readable summary so the UI can show
+        # the real reason (e.g. "Access to model ... is restricted") instead
+        # of a generic lifecycle_failed placeholder. Absolute filesystem paths
+        # and anything that looks like an HF token are stripped from the
+        # protocol message — those still appear in the stderr traceback.
+        import traceback
+
+        traceback.print_exc()
+        message = _scrub_error_message(str(exc) or exc.__class__.__name__)
+        code = _classify_install_error(exc)
+        emit(
+            sys.stdout,
+            {"type": "error", "code": code, "message": message, "retryable": True},
+        )
+        raise SystemExit(3)
+
+
+_HF_TOKEN_PATTERN = __import__("re").compile(r"hf_[A-Za-z0-9]{20,}")
+_PATH_PATTERN = __import__("re").compile(r"/(?:Users|home|var|tmp|private)/[^\s\"']+")
+
+
+def _scrub_error_message(message: str) -> str:
+    scrubbed = _HF_TOKEN_PATTERN.sub("hf_***", message)
+    scrubbed = _PATH_PATTERN.sub("<path>", scrubbed)
+    # Cap the length so a verbose requests traceback cannot flood the UI.
+    return scrubbed[:512] if len(scrubbed) > 512 else scrubbed
+
+
+def _classify_install_error(exc: BaseException) -> str:
+    name = exc.__class__.__name__
+    if "GatedRepo" in name:
+        return "huggingface_gated_repo"
+    if "RepositoryNotFound" in name:
+        return "huggingface_repo_not_found"
+    if "RevisionNotFound" in name:
+        return "huggingface_revision_not_found"
+    if "EntryNotFound" in name:
+        return "huggingface_entry_not_found"
+    if "HfHubHTTPError" in name or "HTTPError" in name:
+        return "huggingface_http_error"
+    if isinstance(exc, ConnectionError):
+        return "network_unreachable"
+    if "Timeout" in name:
+        return "network_timeout"
+    return "installer_unexpected"
 
 
 if __name__ == "__main__":

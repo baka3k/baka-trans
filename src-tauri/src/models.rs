@@ -695,7 +695,8 @@ impl From<LocalTranslationConfig> for LocalTranslationConfigDraft {
 pub enum OfflineTranslationModel {
     #[default]
     HyMt2,
-    TranslateGemma4B,
+    #[serde(rename = "translategemma_4b")]
+    Translategemma4B,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -1120,5 +1121,24 @@ mod tests {
                 .code,
             "unsupported_target_language"
         );
+    }
+
+    #[test]
+    fn offline_translation_model_wire_format_matches_frontend_contract() {
+        // Frontend (`src/types.ts`) and the Python sidecar registry agree the
+        // wire-format is `translategemma_4b` (kebab `translategemma-4b` with
+        // the hyphen replaced by an underscore). serde's automatic
+        // `rename_all = "snake_case"` would render the Rust variant
+        // `Translategemma4B` as `translategemma4_b` (underscore before the
+        // trailing capital), so the variant pins its rename explicitly to
+        // stay aligned with the frontend contract.
+        let json = serde_json::to_string(&OfflineTranslationModel::Translategemma4B).unwrap();
+        assert_eq!(json, "\"translategemma_4b\"");
+
+        let json = serde_json::to_string(&OfflineTranslationModel::HyMt2).unwrap();
+        assert_eq!(json, "\"hy_mt2\"");
+
+        let parsed: OfflineTranslationModel = serde_json::from_str("\"translategemma_4b\"").unwrap();
+        assert_eq!(parsed, OfflineTranslationModel::Translategemma4B);
     }
 }
