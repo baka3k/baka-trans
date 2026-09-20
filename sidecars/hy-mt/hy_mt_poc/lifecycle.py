@@ -50,13 +50,18 @@ def _managed_root(root: Path) -> Path:
 def model_base(root: Path, spec: ModelSpec) -> Path:
     """Per-model directory under the shared cache root.
 
-    The Hy-MT2 model keeps the original unscoped layout so existing verified
-    installs stay valid without migration; every later model nests under its
-    registry key.
+    The host passes ``root`` as the per-model directory (the Hy-MT2 cache
+    root or the nested directory named after ``spec.key`` for later
+    models). The Hy-MT2 model keeps the original unscoped layout so
+    existing verified installs stay valid without migration.
     """
     if spec.key == HY_MT2_SPEC.key:
         return _managed_root(root)
-    base = root.expanduser().absolute() / spec.key
+    # Newer models: the host already passes the per-model directory, so we
+    # must not append ``spec.key`` again or we would create a doubly-nested
+    # layout (``translategemma-4b/translategemma-4b/...``) that nothing
+    # else can locate.
+    base = root.expanduser().absolute()
     if base.exists() and base.is_symlink():
         raise LifecycleError("Managed model directory cannot be a symbolic link.")
     base.mkdir(parents=True, exist_ok=True)
