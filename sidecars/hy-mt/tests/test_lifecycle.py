@@ -101,14 +101,17 @@ def test_update_reserves_two_model_copies(tmp_path: Path) -> None:
     assert lifecycle.required_free_bytes(root, spec) == 2000 + 512 * 1024 * 1024
 
 
-def test_hy_mt2_model_base_keeps_legacy_layout_and_other_models_nest(tmp_path: Path) -> None:
+def test_hy_mt2_model_base_keeps_legacy_layout_and_later_models_use_root_as_is(tmp_path: Path) -> None:
     hy_mt2_base = lifecycle.model_base(tmp_path, HY_MT2_SPEC)
     assert hy_mt2_base == tmp_path.resolve()
-    nested_base = lifecycle.model_base(tmp_path, synthetic_spec(ModelArtifact("m", 1)))
-    assert nested_base == (tmp_path / "synthetic").resolve()
+    # The host passes the per-model directory itself (the registry key is
+    # already part of the path), so model_base must not append spec.key
+    # again or the active tree would be doubly nested and unreachable.
+    later_base = lifecycle.model_base(tmp_path, synthetic_spec(ModelArtifact("m", 1)))
+    assert later_base == tmp_path.resolve()
     assert lifecycle.active_path(tmp_path, HY_MT2_SPEC) == (tmp_path / "active").resolve()
     assert lifecycle.active_path(tmp_path, synthetic_spec(ModelArtifact("m", 1))) == (
-        tmp_path / "synthetic" / "active"
+        tmp_path / "active"
     ).resolve()
 
 
