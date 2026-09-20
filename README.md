@@ -231,6 +231,14 @@ npm run tauri -- dev
 
 This starts the Vite dev server on `http://localhost:1111` and launches the Tauri app with hot-reload.
 
+> **Important:** `tauri dev` does **not** rebuild the PyInstaller sidecars (`sidecars/hy-mt/`, `sidecars/vieneu-tts/`). It only copies the prebuilt `bundle/` output, so after changing sidecar code you must rebuild before testing in dev — otherwise the app keeps running the stale bundled binary:
+>
+> ```bash
+> bash scripts/build-hy-mt-sidecar.sh   # or scripts/build-vieneu-sidecar.sh
+> ```
+>
+> A stale Hy-MT sidecar can fail only one model while the other still works (e.g. Hy-MT2 kept working while TranslateGemma reported "Model lifecycle operation failed." after the cache-layout change). `make build` always rebuilds both sidecars before the Tauri release build, so release builds are not affected.
+
 Build only the frontend assets (without Tauri):
 
 ```bash

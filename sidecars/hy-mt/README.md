@@ -87,6 +87,12 @@ uv run --frozen pyinstaller --noconfirm --clean hy-mt-poc.spec
 dist/hy-mt-sidecar/hy-mt-sidecar check --model-root /absolute/app-data/hy-mt
 ```
 
+The desktop app resolves the runtime from the Tauri resource copy of
+`bundle/`, not from `dist/` or this venv. After any sidecar source change, run
+`scripts/build-hy-mt-sidecar.sh` (rebuilds `dist/` and refreshes `bundle/`)
+before testing through the app — `tauri dev` only copies the existing
+`bundle/`, so a skipped rebuild leaves the app on the previous binary.
+
 The final evidence records the nested native libraries and `codesign` result.
 Production signing/notarization remains Phase 14 work.
 
