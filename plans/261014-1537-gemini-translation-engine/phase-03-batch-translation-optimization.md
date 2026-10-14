@@ -1,6 +1,6 @@
 # Phase 03 — Batch translation worker + docs + regression
 
-Status: planned
+Status: implemented (2026-10-14, commit b8217a4)
 Parent: [plan.md](plan.md)
 Blocked by: phases 01-02
 Test scope: Rust unit tests (`src-tauri/src/ai/local_worker.rs` inline tests) + docs; full regression gates. Expected size: **M**.

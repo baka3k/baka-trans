@@ -1,6 +1,6 @@
 # Phase 01 — Gemini engine backend (schema v5, client, gate, engine test)
 
-Status: planned
+Status: implemented (2026-10-14, commit b8217a4)
 Parent: [plan.md](plan.md)
 Test scope: Rust unit tests (inline `#[cfg(test)]`), mapped acceptance criteria below. Expected size: **M**.
 

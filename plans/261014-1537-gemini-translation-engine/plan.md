@@ -1,6 +1,6 @@
 # Gemini Translation Engine + Batch Translation Optimization
 
-Status: planned
+Status: implemented (2026-10-14, commit b8217a4)
 Created: 2026-10-14
 Mode: `hi-plan --full`
 Blocked by: none (phase 16.2/16.3 of the parent plan are implemented)

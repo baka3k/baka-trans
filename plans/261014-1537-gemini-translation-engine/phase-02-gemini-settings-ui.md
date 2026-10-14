@@ -1,6 +1,6 @@
 # Phase 02 — Gemini settings UI + frontend contracts
 
-Status: planned
+Status: implemented (2026-10-14, commit b8217a4)
 Parent: [plan.md](plan.md)
 Blocked by: phase 01
 Test scope: Vitest + Testing Library (`src/components/settings/LocalLlmSettings.test.tsx`, `src/App.test.tsx` if wiring touches it). Expected size: **S**.
