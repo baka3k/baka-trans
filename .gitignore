@@ -24,3 +24,4 @@ sidecars/hy-mt/**/*.pyc
 .qwen/tmp/**
 .cortext-harness/config/dev.json
 .cortext-harness/sync-state/sync-code.lock
+compile_commands.json
