@@ -198,6 +198,7 @@ export interface LocalTranslationConfig {
   schemaVersion: number;
   translationEngine: LocalTranslationEngine;
   offlineModel: OfflineTranslationModel;
+  geminiModel: string;
   openaiBaseUrl: string;
   openaiModel: string;
   openaiTimeoutSeconds: number;
@@ -222,7 +223,10 @@ export interface LocalTranslationConfig {
   ttsOutputSampleRateHz: 24000;
 }
 
-export type LocalTranslationEngine = "huggingface_offline" | "openai_compatible";
+export type LocalTranslationEngine =
+  | "huggingface_offline"
+  | "openai_compatible"
+  | "gemini";
 
 export type LocalTtsProvider = "system" | "vieneu";
 export type VieNeuReadingStyle = "tu_nhien" | "tin_tuc" | "doc_truyen";

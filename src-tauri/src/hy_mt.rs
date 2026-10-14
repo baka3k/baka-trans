@@ -96,7 +96,11 @@ impl HyMtManager {
         }
     }
 
-    pub async fn status(&self, app: &AppHandle, model: OfflineTranslationModel) -> AppResult<HyMtModelStatus> {
+    pub async fn status(
+        &self,
+        app: &AppHandle,
+        model: OfflineTranslationModel,
+    ) -> AppResult<HyMtModelStatus> {
         let spec = offline_model_spec(model);
         let paths = ManagedPaths::resolve_for(spec)?;
         let runtime_available = resolve_command(app).is_ok();
@@ -108,7 +112,10 @@ impl HyMtManager {
         let (phase, message) = if !runtime_available {
             (
                 HyMtModelPhase::Unsupported,
-                format!("This build does not include the managed {} runtime.", spec.display_name),
+                format!(
+                    "This build does not include the managed {} runtime.",
+                    spec.display_name
+                ),
             )
         } else if installing {
             (
@@ -149,7 +156,11 @@ impl HyMtManager {
         })
     }
 
-    pub async fn install(&self, app: AppHandle, model: OfflineTranslationModel) -> AppResult<HyMtModelStatus> {
+    pub async fn install(
+        &self,
+        app: AppHandle,
+        model: OfflineTranslationModel,
+    ) -> AppResult<HyMtModelStatus> {
         let spec = offline_model_spec(model);
         let guard = InstallGuard::acquire(self)?;
         self.install_cancelled.store(false, Ordering::Release);
@@ -178,8 +189,7 @@ impl HyMtManager {
                         "hy_mt_huggingface_token_unreadable",
                         format!(
                             "{} is gated and the saved Hugging Face token could not be read: {}",
-                            spec.display_name,
-                            err.message
+                            spec.display_name, err.message
                         ),
                     );
                     self.remember_error(&error);
@@ -199,7 +209,14 @@ impl HyMtManager {
         let model_root = paths.model_root.clone();
         let progress_app = app.clone();
         let exit_status = match tauri::async_runtime::spawn_blocking(move || {
-            run_install_process(command_spec, spec, model_root, staging_dir, progress_app, cancelled)
+            run_install_process(
+                command_spec,
+                spec,
+                model_root,
+                staging_dir,
+                progress_app,
+                cancelled,
+            )
         })
         .await
         {
@@ -428,7 +445,10 @@ fn run_install_process(
                     .min(offline.total_bytes),
                 offline.total_bytes,
                 None,
-                &format!("{} setup was paused. Resume when ready.", offline.display_name),
+                &format!(
+                    "{} setup was paused. Resume when ready.",
+                    offline.display_name
+                ),
             );
             return Ok(InstallExit::Paused);
         }
@@ -504,14 +524,11 @@ fn run_install_process(
                 match stderr_tail {
                     Some(tail) => format!(
                         "{} installer exited with status {}: {}",
-                        offline.display_name,
-                        status,
-                        tail
+                        offline.display_name, status, tail
                     ),
                     None => format!(
                         "{} installer exited with status {}. No stderr was produced.",
-                        offline.display_name,
-                        status
+                        offline.display_name, status
                     ),
                 },
             ));
@@ -522,9 +539,13 @@ fn run_install_process(
 
 fn default_progress_message(spec: &OfflineModelSpec, phase: HyMtModelPhase) -> String {
     match phase {
-        HyMtModelPhase::Downloading => format!("Downloading the verified {} model…", spec.display_name),
+        HyMtModelPhase::Downloading => {
+            format!("Downloading the verified {} model…", spec.display_name)
+        }
         HyMtModelPhase::Verifying => format!("Verifying {} model files…", spec.display_name),
-        HyMtModelPhase::Installed => format!("{} model is installed and verified.", spec.display_name),
+        HyMtModelPhase::Installed => {
+            format!("{} model is installed and verified.", spec.display_name)
+        }
         _ => format!("{} setup is running…", spec.display_name),
     }
 }
@@ -1160,7 +1181,10 @@ mod tests {
             HY_MT_TOTAL_BYTES,
             1777 + 11629 + 14763 + 654 + 1348 + 221 + 4077072784 + 488 + 9527287 + 165815
         );
-        assert_eq!(offline_model_spec(OfflineTranslationModel::HyMt2).key, "hy-mt2");
+        assert_eq!(
+            offline_model_spec(OfflineTranslationModel::HyMt2).key,
+            "hy-mt2"
+        );
     }
 
     #[test]
@@ -1172,7 +1196,7 @@ mod tests {
         assert_eq!(spec.revision.len(), 40);
         assert_eq!(spec.total_bytes, 8_639_637_704);
         assert!(spec.gated);
-        assert!(!HY_MT2_SPEC.gated);
+        const { assert!(!HY_MT2_SPEC.gated) };
         assert_ne!(HY_MT2_SPEC.revision, spec.revision);
     }
 
@@ -1370,7 +1394,13 @@ mod tests {
             program: sidecar,
             prefix_args: Vec::new(),
         };
-        let probe = run_serve_probe(&spec, &paths.model_root, preferred_serve_device(), &HY_MT2_SPEC).unwrap();
+        let probe = run_serve_probe(
+            &spec,
+            &paths.model_root,
+            preferred_serve_device(),
+            &HY_MT2_SPEC,
+        )
+        .unwrap();
         assert!(probe.reachable);
         assert!(probe.accepted);
         assert!(probe.error.is_none());
@@ -1397,9 +1427,11 @@ mod tests {
             .ends_with(Path::new(".staging").join(HY_MT_MODEL_REVISION)));
 
         let gemma = ManagedPaths::resolve_for(&TRANSLATEGEMMA_4B_SPEC).unwrap();
-        assert!(gemma
-            .model_root
-            .ends_with(Path::new(".bakatrans").join("hy-mt").join("translategemma-4b")));
+        assert!(gemma.model_root.ends_with(
+            Path::new(".bakatrans")
+                .join("hy-mt")
+                .join("translategemma-4b")
+        ));
         assert!(gemma
             .staging_dir
             .ends_with(Path::new(".staging").join(TRANSLATEGEMMA_4B_SPEC.revision)));

@@ -58,6 +58,7 @@ export const OFFLINE_TRANSLATION_MODELS: Record<
 export const defaultLocalTranslationConfig: LocalTranslationConfigDraft = {
   translationEngine: "huggingface_offline",
   offlineModel: "hy_mt2",
+  geminiModel: "gemini-2.5-flash-lite",
   openaiBaseUrl: "",
   openaiModel: "",
   openaiTimeoutSeconds: 30,
@@ -155,6 +156,7 @@ interface LocalLlmSettingsProps {
   engineTesting?: boolean;
   engineTest?: TranslationEngineTestResult | null;
   credentialStatus?: LocalTranslationCredentialStatus | null;
+  googleCredentialStatus?: LocalTranslationCredentialStatus | null;
   voices: LocalVoice[];
   voicesLoading?: boolean;
   previewing: boolean;
@@ -178,6 +180,8 @@ interface LocalLlmSettingsProps {
   onTestEngine?: () => void;
   onSaveKey?: (key: string) => Promise<void>;
   onClearKey?: () => Promise<void>;
+  onSaveGoogleKey?: (key: string) => Promise<void>;
+  onClearGoogleKey?: () => Promise<void>;
   onPreview: () => void;
   onRefreshVoices?: () => void;
   onWhisperModelSelect: (modelId: string) => void;
@@ -199,6 +203,12 @@ export function validateLocalTranslationDraft(
   }
   if (draft.translationEngine === "openai_compatible" && !(draft.openaiModel ?? "").trim()) {
     errors.push("Enter an OpenAI-compatible model name.");
+  }
+  // Mirrors the Rust normalize (trim, strip "models/", empty → pinned
+  // default): an untouched field is fine, but typing only whitespace is
+  // almost certainly a mistake, so reject it with a message.
+  if (draft.translationEngine === "gemini" && (draft.geminiModel ?? "").length > 0 && !(draft.geminiModel ?? "").trim()) {
+    errors.push("Enter a Gemini model name, or clear the field to use the default.");
   }
   if (draft.ttsProvider === "vieneu" && vieneuRuntime && !vieneuRuntime.modelInstalled) {
     errors.push("Install VieNeu-TTS before choosing a neural voice.");
@@ -244,6 +254,7 @@ export function LocalLlmSettings({
   engineTesting = false,
   engineTest = null,
   credentialStatus = null,
+  googleCredentialStatus = null,
   voices,
   voicesLoading = false,
   previewing,
@@ -267,6 +278,8 @@ export function LocalLlmSettings({
   onTestEngine = () => undefined,
   onSaveKey,
   onClearKey,
+  onSaveGoogleKey,
+  onClearGoogleKey,
   onPreview,
   onRefreshVoices = () => undefined,
   onWhisperModelSelect,
@@ -315,6 +328,7 @@ export function LocalLlmSettings({
           >
             <option value="huggingface_offline">Offline model (managed)</option>
             <option value="openai_compatible">OpenAI-compatible API</option>
+            <option value="gemini">Gemini (Google AI)</option>
           </select>
         </label>
         {draft.translationEngine === "huggingface_offline" ? (
@@ -348,6 +362,29 @@ export function LocalLlmSettings({
               onCancel={onHyMtCancel}
             />
             <p className="local-text-only-note">Managed offline models run from verified local files. Live translation uses the same engine once “Test translation engine” reports reachable + accepted.</p>
+          </>
+        ) : draft.translationEngine === "gemini" ? (
+          <>
+            <label className="field">
+              <span>Gemini model</span>
+              <input
+                aria-label="Gemini model"
+                value={draft.geminiModel}
+                placeholder="gemini-2.5-flash-lite"
+                onChange={(event) => update({ geminiModel: event.currentTarget.value })}
+              />
+              <small>Sentences are batched so the model keeps context across fragments. Leave empty to use the default model.</small>
+            </label>
+            <p className="local-text-only-note" role="note">
+              This engine sends your meeting transcript to Google's Generative Language API for translation.
+            </p>
+            <ApiKeyRow
+              label="Google AI API key"
+              envVarName="GEMINI_API_KEY"
+              status={googleCredentialStatus}
+              onSaveKey={onSaveGoogleKey}
+              onClearKey={onClearGoogleKey}
+            />
           </>
         ) : <>
         <label className="field">
@@ -926,18 +963,23 @@ function HfTokenRow({
   );
 }
 
-// Presentational key row for the OpenAI-compatible engine. The typed key
-// lives only in this local state; saving and clearing go through the parent
-// callbacks (api.ts invokes) and the refreshed presence/source status arrives
-// as a prop. The key itself is never rendered back.
+// Presentational key row. The typed key lives only in this local state;
+// saving and clearing go through the parent callbacks (api.ts invokes) and
+// the refreshed presence/source status arrives as a prop. The key itself is
+// never rendered back. The OpenAI-compatible engine and the Gemini engine
+// share it with their own label and env-override name.
 function ApiKeyRow({
   status,
   onSaveKey,
   onClearKey,
+  label = "API key",
+  envVarName = "BAKA_TRANS_LOCAL_API_KEY",
 }: {
   status: LocalTranslationCredentialStatus | null;
   onSaveKey?: (key: string) => Promise<void>;
   onClearKey?: () => Promise<void>;
+  label?: string;
+  envVarName?: string;
 }) {
   const [keyDraft, setKeyDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -973,11 +1015,11 @@ function ApiKeyRow({
   return (
     <div className="field api-key-row">
       <label className="field">
-        <span>API key</span>
+        <span>{label}</span>
         <input
           type="password"
           autoComplete="new-password"
-          aria-label="API key"
+          aria-label={label}
           value={keyDraft}
           placeholder={status?.hasKey ? "Key saved — paste a new key to replace it" : "Paste an API key"}
           onChange={(event) => setKeyDraft(event.currentTarget.value)}
@@ -1005,7 +1047,7 @@ function ApiKeyRow({
       </p>
       {status?.source === "environment" ? (
         <p className="local-text-only-note" role="note">
-          A BAKA_TRANS_LOCAL_API_KEY environment variable currently overrides the keychain entry.
+          A {envVarName} environment variable currently overrides the keychain entry.
           Clearing the key here will not change the key in use until that variable is removed.
         </p>
       ) : null}

@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::{timeout, Duration};
@@ -67,8 +67,8 @@ struct WhisperWorker {
 /// snapshots are emitted in the same order the pending snapshots appeared.
 /// Translation latency does not block Whisper because the bounded queue absorbs
 /// the difference between the two streams.
-struct SentenceTranslator {
-    app: AppHandle,
+struct SentenceTranslator<R: Runtime> {
+    app: AppHandle<R>,
     client: TranslationClient,
     transcript_store: Arc<Mutex<Vec<TranscriptItem>>>,
     generation: u64,
@@ -451,8 +451,8 @@ fn spawn_whisper_worker(
     })
 }
 
-fn spawn_translation_worker(
-    translator: SentenceTranslator,
+fn spawn_translation_worker<R: Runtime>(
+    translator: SentenceTranslator<R>,
     mut translation_rx: mpsc::Receiver<TranslationJob>,
 ) -> JoinHandle<AppResult<()>> {
     tokio::spawn(async move {
@@ -466,94 +466,337 @@ fn spawn_translation_worker(
             activity,
             tts_tx,
         } = translator;
-        while let Some(job) = translation_rx.recv().await {
-            if !is_worker_active(generation, &active_generation, &cancellation) {
-                break;
+        match client.batch_window() {
+            Some((window_size, max_wait)) => {
+                run_batched_translation_loop(
+                    &app,
+                    &client,
+                    &transcript_store,
+                    generation,
+                    &active_generation,
+                    &cancellation,
+                    &activity,
+                    &tts_tx,
+                    &mut translation_rx,
+                    window_size,
+                    max_wait,
+                )
+                .await
             }
-            activity
-                .translation_stage
-                .store(TRANSLATION_TRANSLATING, Ordering::SeqCst);
-            settle_pipeline_activity(&app, generation, &activity)?;
+            None => {
+                run_single_translation_loop(
+                    &app,
+                    &client,
+                    &transcript_store,
+                    generation,
+                    &active_generation,
+                    &cancellation,
+                    &activity,
+                    &tts_tx,
+                    &mut translation_rx,
+                )
+                .await
+            }
+        }
+    })
+}
 
+/// Per-sentence loop for engines without a batch window. Preserved from the
+/// pre-batching worker so Hy-MT2 and OpenAI-compatible engines keep today's
+/// latency and snapshot behavior exactly.
+#[allow(clippy::too_many_arguments)]
+async fn run_single_translation_loop<R: Runtime>(
+    app: &AppHandle<R>,
+    client: &TranslationClient,
+    transcript_store: &Arc<Mutex<Vec<TranscriptItem>>>,
+    generation: u64,
+    active_generation: &Arc<AtomicU64>,
+    cancellation: &Arc<AtomicBool>,
+    activity: &Arc<PipelineActivity>,
+    tts_tx: &mpsc::Sender<TtsRequest>,
+    translation_rx: &mut mpsc::Receiver<TranslationJob>,
+) -> AppResult<()> {
+    while let Some(job) = translation_rx.recv().await {
+        if !is_worker_active(generation, active_generation, cancellation) {
+            break;
+        }
+        activity
+            .translation_stage
+            .store(TRANSLATION_TRANSLATING, Ordering::SeqCst);
+        settle_pipeline_activity(app, generation, activity)?;
+
+        let TranslationJob {
+            utterance_id,
+            pending_item,
+            started,
+        } = job;
+        let sentence_text = pending_item.source_text.clone();
+        let translation = client.translate(&sentence_text).await;
+        if !is_worker_active(generation, active_generation, cancellation) {
+            break;
+        }
+        match translation {
+            Ok((translated_text, _translation_latency_ms)) => {
+                emit_snapshot(
+                    app,
+                    transcript_store,
+                    generation,
+                    active_generation,
+                    TranscriptItem {
+                        translated_text: translated_text.clone(),
+                        status: TranscriptStatus::Final,
+                        latency_ms: Some(elapsed_ms(started)),
+                        revision: 2,
+                        ..pending_item
+                    },
+                )?;
+                enqueue_tts_request(
+                    app,
+                    tts_tx,
+                    generation,
+                    active_generation,
+                    cancellation,
+                    utterance_id,
+                    translated_text,
+                );
+            }
+            Err(error) => {
+                emit_snapshot(
+                    app,
+                    transcript_store,
+                    generation,
+                    active_generation,
+                    TranscriptItem {
+                        status: TranscriptStatus::Error,
+                        latency_ms: Some(elapsed_ms(started)),
+                        revision: 2,
+                        error_message: Some(error.message),
+                        ..pending_item
+                    },
+                )?;
+            }
+        }
+        activity
+            .translation_stage
+            .store(ACTIVITY_INACTIVE, Ordering::SeqCst);
+        settle_pipeline_activity(app, generation, activity)?;
+    }
+    activity
+        .translation_stage
+        .store(ACTIVITY_INACTIVE, Ordering::SeqCst);
+    Ok(())
+}
+
+/// Sliding-window batch loop for engines with a batch window (Gemini).
+/// Collects up to `window_size` jobs — draining what is already queued
+/// immediately, then waiting at most `max_wait` for stragglers — sends one
+/// batch request, and emits per-item Final/Error snapshots in arrival order.
+/// A batch failure marks every job in the window; there is no retry and no
+/// engine fallback.
+#[allow(clippy::too_many_arguments)]
+async fn run_batched_translation_loop<R: Runtime>(
+    app: &AppHandle<R>,
+    client: &TranslationClient,
+    transcript_store: &Arc<Mutex<Vec<TranscriptItem>>>,
+    generation: u64,
+    active_generation: &Arc<AtomicU64>,
+    cancellation: &Arc<AtomicBool>,
+    activity: &Arc<PipelineActivity>,
+    tts_tx: &mpsc::Sender<TtsRequest>,
+    translation_rx: &mut mpsc::Receiver<TranslationJob>,
+    window_size: usize,
+    max_wait: Duration,
+) -> AppResult<()> {
+    while let Some(first) = translation_rx.recv().await {
+        if !is_worker_active(generation, active_generation, cancellation) {
+            break;
+        }
+        let jobs = collect_batch_window(translation_rx, first, window_size, max_wait, || {
+            is_worker_active(generation, active_generation, cancellation)
+        })
+        .await;
+        if jobs.is_empty() {
+            // The session was cancelled while waiting out the window: never
+            // fire the paid request for it.
+            break;
+        }
+        activity
+            .translation_stage
+            .store(TRANSLATION_TRANSLATING, Ordering::SeqCst);
+        settle_pipeline_activity(app, generation, activity)?;
+
+        let sentences: Vec<String> = jobs
+            .iter()
+            .map(|job| job.pending_item.source_text.clone())
+            .collect();
+        if !is_worker_active(generation, active_generation, cancellation) {
+            break;
+        }
+        let outcomes = client.translate_batch(&sentences).await;
+        if !is_worker_active(generation, active_generation, cancellation) {
+            break;
+        }
+        for (job, outcome) in jobs.into_iter().zip(outcomes) {
             let TranslationJob {
                 utterance_id,
                 pending_item,
                 started,
             } = job;
-            let sentence_text = pending_item.source_text.clone();
-            let translation = client.translate(&sentence_text).await;
-            if !is_worker_active(generation, &active_generation, &cancellation) {
+            let snapshot = batch_snapshot_item(pending_item, started, &outcome);
+            emit_snapshot(
+                app,
+                transcript_store,
+                generation,
+                active_generation,
+                snapshot,
+            )?;
+            if let Ok((translated_text, _)) = outcome {
+                enqueue_tts_request(
+                    app,
+                    tts_tx,
+                    generation,
+                    active_generation,
+                    cancellation,
+                    utterance_id,
+                    translated_text,
+                );
+            }
+            if !is_worker_active(generation, active_generation, cancellation) {
                 break;
             }
-            match translation {
-                Ok((translated_text, _translation_latency_ms)) => {
-                    let speech_text = translated_text.clone();
-                    emit_snapshot(
-                        &app,
-                        &transcript_store,
-                        generation,
-                        &active_generation,
-                        TranscriptItem {
-                            translated_text,
-                            status: TranscriptStatus::Final,
-                            latency_ms: Some(elapsed_ms(started)),
-                            revision: 2,
-                            ..pending_item
-                        },
-                    )?;
-                    match tts_tx.try_send(TtsRequest {
-                        utterance_id,
-                        translated_text: speech_text,
-                    }) {
-                        Ok(()) => {}
-                        Err(mpsc::error::TrySendError::Full(_)) => {
-                            let _ = app.emit(
-                                "app-error",
-                                AppError::new(
-                                    "local_tts_backlog_full",
-                                    "Local speech is falling behind. The translated text was kept, but this sentence will not be spoken.",
-                                ),
-                            );
-                        }
-                        Err(mpsc::error::TrySendError::Closed(_)) => {
-                            if is_worker_active(generation, &active_generation, &cancellation) {
-                                let _ = app.emit(
-                                    "app-error",
-                                    AppError::new(
-                                        "local_tts_worker_closed",
-                                        "The local speech worker stopped unexpectedly.",
-                                    ),
-                                );
-                            }
-                        }
-                    }
-                }
-                Err(error) => {
-                    emit_snapshot(
-                        &app,
-                        &transcript_store,
-                        generation,
-                        &active_generation,
-                        TranscriptItem {
-                            status: TranscriptStatus::Error,
-                            latency_ms: Some(elapsed_ms(started)),
-                            revision: 2,
-                            error_message: Some(error.message),
-                            ..pending_item
-                        },
-                    )?;
-                }
-            }
-            activity
-                .translation_stage
-                .store(ACTIVITY_INACTIVE, Ordering::SeqCst);
-            settle_pipeline_activity(&app, generation, &activity)?;
         }
         activity
             .translation_stage
             .store(ACTIVITY_INACTIVE, Ordering::SeqCst);
-        Ok(())
-    })
+        settle_pipeline_activity(app, generation, activity)?;
+    }
+    activity
+        .translation_stage
+        .store(ACTIVITY_INACTIVE, Ordering::SeqCst);
+    Ok(())
+}
+
+/// Per-item snapshot for one batch outcome: Final with the job's own started
+/// latency on success, Error with the failure message otherwise — the
+/// batch-loop twin of the single-flight match arms.
+fn batch_snapshot_item(
+    pending_item: TranscriptItem,
+    started: Instant,
+    outcome: &AppResult<(String, u64)>,
+) -> TranscriptItem {
+    match outcome {
+        Ok((translated_text, _)) => TranscriptItem {
+            translated_text: translated_text.clone(),
+            status: TranscriptStatus::Final,
+            latency_ms: Some(elapsed_ms(started)),
+            revision: 2,
+            ..pending_item
+        },
+        Err(error) => TranscriptItem {
+            status: TranscriptStatus::Error,
+            latency_ms: Some(elapsed_ms(started)),
+            revision: 2,
+            error_message: Some(error.message.clone()),
+            ..pending_item
+        },
+    }
+}
+
+/// TTS enqueue shared by both translation loops. The bound channel keeps
+/// back-pressure: a full backlog keeps the translated text in the transcript
+/// but skips speaking it, and a closed worker is only reported while the
+/// session is still live.
+fn enqueue_tts_request<R: Runtime>(
+    app: &AppHandle<R>,
+    tts_tx: &mpsc::Sender<TtsRequest>,
+    generation: u64,
+    active_generation: &Arc<AtomicU64>,
+    cancellation: &Arc<AtomicBool>,
+    utterance_id: String,
+    translated_text: String,
+) {
+    match tts_tx.try_send(TtsRequest {
+        utterance_id,
+        translated_text,
+    }) {
+        Ok(()) => {}
+        Err(mpsc::error::TrySendError::Full(_)) => {
+            let _ = app.emit(
+                "app-error",
+                AppError::new(
+                    "local_tts_backlog_full",
+                    "Local speech is falling behind. The translated text was kept, but this sentence will not be spoken.",
+                ),
+            );
+        }
+        Err(mpsc::error::TrySendError::Closed(_)) => {
+            if is_worker_active(generation, active_generation, cancellation) {
+                let _ = app.emit(
+                    "app-error",
+                    AppError::new(
+                        "local_tts_worker_closed",
+                        "The local speech worker stopped unexpectedly.",
+                    ),
+                );
+            }
+        }
+    }
+}
+
+/// How long the batched worker polls cancellation while waiting out the
+/// max-wait window. Bounds how long a stopped session can hold a window
+/// before it is discarded without a request.
+const BATCH_WAIT_POLL_TICK: Duration = Duration::from_millis(25);
+
+/// Drain jobs that are already queued without blocking, then — while the
+/// window is not full and the producer is still connected — wait out the
+/// remaining max-wait for stragglers. The wait polls cancellation in short
+/// ticks so a stopped or superseded session never fires a paid request for a
+/// cancelled window (empty result). A disconnect flushes what is held.
+async fn collect_batch_window(
+    translation_rx: &mut mpsc::Receiver<TranslationJob>,
+    first: TranslationJob,
+    window_size: usize,
+    max_wait: Duration,
+    is_active: impl Fn() -> bool,
+) -> Vec<TranslationJob> {
+    let mut jobs = vec![first];
+    while jobs.len() < window_size {
+        match translation_rx.try_recv() {
+            Ok(job) => jobs.push(job),
+            Err(mpsc::error::TryRecvError::Empty) => break,
+            Err(mpsc::error::TryRecvError::Disconnected) => return jobs,
+        }
+    }
+    if jobs.len() >= window_size {
+        return jobs;
+    }
+
+    let deadline = tokio::time::Instant::now() + max_wait;
+    loop {
+        if !is_active() {
+            return Vec::new();
+        }
+        let Some(remaining) = deadline.checked_duration_since(tokio::time::Instant::now()) else {
+            return jobs;
+        };
+        let tick = remaining.min(BATCH_WAIT_POLL_TICK);
+        tokio::select! {
+            maybe_job = translation_rx.recv() => {
+                match maybe_job {
+                    Some(job) => {
+                        jobs.push(job);
+                        if jobs.len() >= window_size {
+                            return jobs;
+                        }
+                    }
+                    // Producer hung up: flush the window we already hold.
+                    None => return jobs,
+                }
+            }
+            _ = tokio::time::sleep(tick) => {}
+        }
+    }
 }
 
 fn spawn_tts_worker(
@@ -651,8 +894,8 @@ fn spawn_tts_worker(
     })
 }
 
-fn settle_pipeline_activity(
-    app: &AppHandle,
+fn settle_pipeline_activity<R: Runtime>(
+    app: &AppHandle<R>,
     generation: u64,
     activity: &PipelineActivity,
 ) -> AppResult<()> {
@@ -698,7 +941,7 @@ fn translated_audio_level(samples: &[i16]) -> TranslatedAudioLevelEvent {
     }
 }
 
-fn emit_local_pipeline_stage(app: &AppHandle, stage: &'static str) -> AppResult<()> {
+fn emit_local_pipeline_stage<R: Runtime>(app: &AppHandle<R>, stage: &'static str) -> AppResult<()> {
     app.emit("local-pipeline-stage", stage)
         .map_err(|err| AppError::new("event_emit_error", err.to_string()))
 }
@@ -750,8 +993,8 @@ fn enqueue_segment(
     }
 }
 
-fn emit_snapshot(
-    app: &AppHandle,
+fn emit_snapshot<R: Runtime>(
+    app: &AppHandle<R>,
     transcript_store: &Arc<Mutex<Vec<TranscriptItem>>>,
     generation: u64,
     active_generation: &Arc<AtomicU64>,
@@ -1580,5 +1823,395 @@ mod tests {
 
         assert!(worker.is_none());
         assert!(cancellation.load(Ordering::SeqCst));
+    }
+
+    // --- Batched translation loop (Gemini) ---
+
+    mod batch {
+        use super::*;
+        use crate::local_translation::gemini::GeminiClient;
+        use crate::local_translation::test_http::spawn_capture_server;
+        use crate::local_translation::GEMINI_BATCH_MAX_WAIT;
+
+        struct BatchHarness {
+            cancellation: Arc<AtomicBool>,
+            transcript_store: Arc<Mutex<Vec<TranscriptItem>>>,
+            tts_rx: mpsc::Receiver<TtsRequest>,
+            translation_tx: mpsc::Sender<TranslationJob>,
+            worker: JoinHandle<AppResult<()>>,
+        }
+
+        fn pending_item(id: &str, sentence: &str) -> TranscriptItem {
+            TranscriptItem {
+                id: id.to_string(),
+                timestamp_ms: 1,
+                source_text: sentence.to_string(),
+                translated_text: String::new(),
+                status: TranscriptStatus::Partial,
+                latency_ms: None,
+                revision: 1,
+                update_mode: TranscriptUpdateMode::Snapshot,
+                error_message: None,
+            }
+        }
+
+        async fn spawn_batch_harness(client: TranslationClient) -> BatchHarness {
+            let app = tauri::test::mock_app();
+            app.manage(AppState::new());
+            let transcript_store = Arc::new(Mutex::new(Vec::new()));
+            let (translation_tx, translation_rx) = mpsc::channel(TRANSLATION_QUEUE_CAPACITY);
+            let (tts_tx, tts_rx) = mpsc::channel(TTS_QUEUE_CAPACITY);
+            let cancellation = Arc::new(AtomicBool::new(false));
+            let worker = spawn_translation_worker(
+                SentenceTranslator {
+                    app: app.handle().clone(),
+                    client,
+                    transcript_store: transcript_store.clone(),
+                    generation: 7,
+                    active_generation: Arc::new(AtomicU64::new(7)),
+                    cancellation: cancellation.clone(),
+                    activity: Arc::new(PipelineActivity::default()),
+                    tts_tx,
+                },
+                translation_rx,
+            );
+            BatchHarness {
+                cancellation,
+                transcript_store,
+                tts_rx,
+                translation_tx,
+                worker,
+            }
+        }
+
+        fn gemini_harness_client(api_base: String) -> TranslationClient {
+            TranslationClient::Gemini(
+                GeminiClient::new(
+                    "gemini-2.5-flash-lite",
+                    "test-key".to_string(),
+                    Language::Ja,
+                    Language::Vi,
+                )
+                .unwrap()
+                .with_api_base(api_base),
+            )
+        }
+
+        async fn send_job(tx: &mpsc::Sender<TranslationJob>, id: &str, sentence: &str) {
+            tx.send(TranslationJob {
+                utterance_id: format!("utt-{id}"),
+                pending_item: pending_item(id, sentence),
+                started: Instant::now(),
+            })
+            .await
+            .expect("translation channel accepts jobs");
+        }
+
+        fn final_items(store: &[TranscriptItem]) -> Vec<&TranscriptItem> {
+            store
+                .iter()
+                .filter(|item| item.status == TranscriptStatus::Final)
+                .collect()
+        }
+
+        fn error_items(store: &[TranscriptItem]) -> Vec<&TranscriptItem> {
+            store
+                .iter()
+                .filter(|item| item.status == TranscriptStatus::Error)
+                .collect()
+        }
+
+        #[tokio::test]
+        async fn full_window_makes_one_batch_call_and_finals_in_arrival_order() {
+            let body = r#"{"candidates":[{"content":{"parts":[{"text":"[\"Một\",\"Hai\",\"Ba\",\"Bốn\",\"Năm\"]"}]}}]}"#;
+            let (addr, server) = spawn_capture_server("HTTP/1.1 200 OK", body).await;
+            let harness =
+                spawn_batch_harness(gemini_harness_client(format!("http://{addr}/v1beta"))).await;
+            for (id, sentence) in [
+                ("s1", "一"),
+                ("s2", "二"),
+                ("s3", "三"),
+                ("s4", "四"),
+                ("s5", "五"),
+            ] {
+                send_job(&harness.translation_tx, id, sentence).await;
+            }
+            drop(harness.translation_tx);
+            harness.worker.await.unwrap().unwrap();
+            let request = server.await.unwrap();
+            assert!(
+                request.head().contains(":generateContent"),
+                "the window must ride one generateContent call"
+            );
+
+            let store = harness.transcript_store.lock().unwrap();
+            let finals = final_items(&store);
+            assert_eq!(finals.len(), 5, "exactly one batch of five finals");
+            let ordered: Vec<(&str, &str)> = finals
+                .iter()
+                .map(|item| (item.id.as_str(), item.translated_text.as_str()))
+                .collect();
+            assert_eq!(
+                ordered,
+                vec![
+                    ("s1", "Một"),
+                    ("s2", "Hai"),
+                    ("s3", "Ba"),
+                    ("s4", "Bốn"),
+                    ("s5", "Năm"),
+                ]
+            );
+            assert!(finals.iter().all(|item| item.revision == 2));
+        }
+
+        #[tokio::test]
+        async fn single_job_flushes_at_max_wait_not_sooner() {
+            let body = r#"{"candidates":[{"content":{"parts":[{"text":"[\"Một\"]"}]}}]}"#;
+            let (addr, server) = spawn_capture_server("HTTP/1.1 200 OK", body).await;
+            let harness =
+                spawn_batch_harness(gemini_harness_client(format!("http://{addr}/v1beta"))).await;
+            send_job(&harness.translation_tx, "s1", "一").await;
+
+            // The producer stays connected, like slow live speech: the lone
+            // job must wait out the max-wait deadline instead of flushing on
+            // the empty queue drain (a disconnect flushes immediately, so the
+            // channel is only dropped after the Final appears).
+            let started = tokio::time::Instant::now();
+            let flush_deadline = started + Duration::from_secs(5);
+            let waited = loop {
+                let flushed = {
+                    let store = harness.transcript_store.lock().unwrap();
+                    !final_items(&store).is_empty()
+                };
+                if flushed {
+                    break tokio::time::Instant::now() - started;
+                }
+                assert!(
+                    tokio::time::Instant::now() < flush_deadline,
+                    "the lone job never flushed"
+                );
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            };
+            drop(harness.translation_tx);
+            harness.worker.await.unwrap().unwrap();
+            let request = server.await.unwrap();
+            assert!(request.head().contains(":generateContent"));
+
+            let store = harness.transcript_store.lock().unwrap();
+            let finals = final_items(&store);
+            assert_eq!(finals.len(), 1);
+            assert_eq!(finals[0].translated_text, "Một");
+            assert!(
+                waited >= GEMINI_BATCH_MAX_WAIT,
+                "flushed too early: {waited:?}"
+            );
+            assert!(
+                waited < GEMINI_BATCH_MAX_WAIT * 4,
+                "waited far beyond the deadline: {waited:?}"
+            );
+        }
+
+        #[tokio::test]
+        async fn batch_error_marks_every_window_item_without_retry() {
+            let (addr, server) = spawn_capture_server(
+                "HTTP/1.1 500 Internal Server Error",
+                r#"{"error":{"message":"model overloaded"}}"#,
+            )
+            .await;
+            let harness =
+                spawn_batch_harness(gemini_harness_client(format!("http://{addr}/v1beta"))).await;
+            for (id, sentence) in [("s1", "一"), ("s2", "二"), ("s3", "三")] {
+                send_job(&harness.translation_tx, id, sentence).await;
+            }
+            drop(harness.translation_tx);
+            harness.worker.await.unwrap().unwrap();
+            server.await.unwrap();
+
+            let store = harness.transcript_store.lock().unwrap();
+            let errors = error_items(&store);
+            assert_eq!(errors.len(), 3, "every window job gets an error snapshot");
+            assert!(errors.iter().all(|item| item
+                .error_message
+                .as_deref()
+                .is_some_and(|message| message.contains("model overloaded"))));
+            assert!(final_items(&store).is_empty(), "no retry, no fallback");
+        }
+
+        #[tokio::test]
+        async fn length_mismatch_maps_missing_and_truncates_extras() {
+            // Short: only the mapped index finals; missing indexes error.
+            let short_body = r#"{"candidates":[{"content":{"parts":[{"text":"[\"Một\"]"}]}}]}"#;
+            let (short_addr, short_server) =
+                spawn_capture_server("HTTP/1.1 200 OK", short_body).await;
+            let harness =
+                spawn_batch_harness(gemini_harness_client(format!("http://{short_addr}/v1beta")))
+                    .await;
+            for (id, sentence) in [("s1", "一"), ("s2", "二"), ("s3", "三")] {
+                send_job(&harness.translation_tx, id, sentence).await;
+            }
+            drop(harness.translation_tx);
+            harness.worker.await.unwrap().unwrap();
+            short_server.await.unwrap();
+
+            {
+                let store = harness.transcript_store.lock().unwrap();
+                let finals = final_items(&store);
+                let errors = error_items(&store);
+                assert_eq!(finals.len(), 1);
+                assert_eq!(finals[0].id, "s1");
+                assert_eq!(errors.len(), 2);
+                assert!(
+                    errors
+                        .iter()
+                        .all(|item| item.error_message.as_deref().is_some_and(
+                            |message| message.contains("1 translations for 3 sentences")
+                        )),
+                    "missing indexes must carry the mismatch error, got: {:?}",
+                    errors
+                        .iter()
+                        .map(|item| item.error_message.clone())
+                        .collect::<Vec<_>>()
+                );
+            }
+
+            // Long: extras are truncated to the window length.
+            let long_body =
+                r#"{"candidates":[{"content":{"parts":[{"text":"[\"Một\",\"Hai\",\"Ba\"]"}]}}]}"#;
+            let (long_addr, long_server) = spawn_capture_server("HTTP/1.1 200 OK", long_body).await;
+            let harness =
+                spawn_batch_harness(gemini_harness_client(format!("http://{long_addr}/v1beta")))
+                    .await;
+            send_job(&harness.translation_tx, "t1", "一").await;
+            send_job(&harness.translation_tx, "t2", "二").await;
+            drop(harness.translation_tx);
+            harness.worker.await.unwrap().unwrap();
+            long_server.await.unwrap();
+
+            let store = harness.transcript_store.lock().unwrap();
+            assert_eq!(store.len(), 2, "extra results must be truncated");
+            assert_eq!(final_items(&store).len(), 2);
+        }
+
+        #[tokio::test]
+        async fn cancellation_mid_window_stops_without_late_emissions() {
+            let body = r#"{"candidates":[{"content":{"parts":[{"text":"[\"Một\"]"}]}}]}"#;
+            // The request may or may not be raced before cancellation lands;
+            // the server exists so either interleaving completes cleanly.
+            let (addr, _server) = spawn_capture_server("HTTP/1.1 200 OK", body).await;
+            let harness =
+                spawn_batch_harness(gemini_harness_client(format!("http://{addr}/v1beta"))).await;
+            send_job(&harness.translation_tx, "s1", "一").await;
+            harness.cancellation.store(true, Ordering::SeqCst);
+            drop(harness.translation_tx);
+            harness.worker.await.unwrap().unwrap();
+            let store = harness.transcript_store.lock().unwrap();
+            assert!(
+                store.is_empty(),
+                "cancelled window must not emit: {store:?}"
+            );
+        }
+
+        #[tokio::test]
+        async fn cancelled_wait_never_returns_jobs_for_a_paid_request() {
+            let (tx, mut rx) = mpsc::channel(4);
+            tx.send(TranslationJob {
+                utterance_id: "u1".to_string(),
+                pending_item: pending_item("s1", "一"),
+                started: Instant::now(),
+            })
+            .await
+            .unwrap();
+
+            let collected = collect_batch_window(
+                &mut rx,
+                {
+                    TranslationJob {
+                        utterance_id: "u2".to_string(),
+                        pending_item: pending_item("s2", "二"),
+                        started: Instant::now(),
+                    }
+                },
+                5,
+                GEMINI_BATCH_MAX_WAIT,
+                || false,
+            )
+            .await;
+
+            assert!(collected.is_empty());
+        }
+
+        #[tokio::test]
+        async fn batch_tts_backlog_drops_overflow_and_keeps_transcript_text() {
+            let app = tauri::test::mock_app();
+            app.manage(AppState::new());
+            let generation = 7_u64;
+            let active_generation = Arc::new(AtomicU64::new(7));
+            let cancellation = Arc::new(AtomicBool::new(false));
+            let (tts_tx, mut tts_rx) = mpsc::channel::<TtsRequest>(1);
+            tts_tx
+                .try_send(TtsRequest {
+                    utterance_id: "u1".to_string(),
+                    translated_text: "first".to_string(),
+                })
+                .unwrap();
+
+            // The backlog holds one request; the next one hits the Full path
+            // and is dropped (its translated text stays in the transcript —
+            // asserted by the Final snapshots in the batch tests above).
+            enqueue_tts_request(
+                app.handle(),
+                &tts_tx,
+                generation,
+                &active_generation,
+                &cancellation,
+                "u2".to_string(),
+                "second".to_string(),
+            );
+            drop(tts_tx);
+
+            let first = tts_rx.recv().await.unwrap();
+            assert_eq!(first.utterance_id, "u1");
+            assert!(
+                tts_rx.recv().await.is_none(),
+                "the overflowing sentence must not be spoken"
+            );
+        }
+
+        #[tokio::test]
+        async fn single_flight_engine_keeps_per_sentence_behavior() {
+            let body = r#"{"choices":[{"message":{"content":"Xin chào"}}]}"#;
+            let (addr, server) = spawn_capture_server("HTTP/1.1 200 OK", body).await;
+            let openai = crate::local_translation::openai_compatible::OpenAiCompatibleClient::new(
+                &format!("http://{addr}"),
+                "test-model",
+                5,
+                0.0,
+                256,
+                None,
+                Language::Ja,
+                Language::Vi,
+            )
+            .unwrap();
+            let client = TranslationClient::OpenAiCompatible(openai);
+            assert!(
+                client.batch_window().is_none(),
+                "OpenAI-compatible has no batch window"
+            );
+            let mut harness = spawn_batch_harness(client).await;
+            send_job(&harness.translation_tx, "s1", "こんにちは").await;
+            drop(harness.translation_tx);
+            harness.worker.await.unwrap().unwrap();
+            server.await.unwrap();
+
+            {
+                let store = harness.transcript_store.lock().unwrap();
+                let finals = final_items(&store);
+                assert_eq!(finals.len(), 1);
+                assert_eq!(finals[0].translated_text, "Xin chào");
+            }
+
+            let spoken = harness.tts_rx.recv().await.unwrap();
+            assert_eq!(spoken.translated_text, "Xin chào");
+        }
     }
 }

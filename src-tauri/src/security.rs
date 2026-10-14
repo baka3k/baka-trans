@@ -34,6 +34,24 @@ pub fn save_translation_api_key(provider: TranslationProvider, api_key: &str) ->
     Ok(())
 }
 
+pub fn delete_translation_api_key(provider: TranslationProvider) -> AppResult<()> {
+    if !provider.requires_api_key() {
+        return Err(AppError::new(
+            "local_provider_has_no_api_key",
+            "Local Whisper does not use a cloud translation API key.",
+        ));
+    }
+    let entry = keyring::Entry::new(SERVICE, keychain_user(provider))
+        .map_err(|err| AppError::new("keychain_error", err.to_string()))?;
+    match entry.delete_credential() {
+        Ok(()) => {}
+        Err(keyring::Error::NoEntry) => {}
+        Err(err) => return Err(AppError::new("keychain_error", err.to_string())),
+    }
+    *api_key_cache(provider).lock().map_err(cache_lock_error)? = None;
+    Ok(())
+}
+
 pub fn load_translation_api_key(provider: TranslationProvider) -> AppResult<String> {
     load_translation_api_key_info(provider).map(|info| info.key)
 }

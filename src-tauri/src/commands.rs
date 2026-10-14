@@ -6,10 +6,10 @@ use crate::models::{
     LlmProviderTestResult, LocalCredentialStatus, LocalTranslationConfig,
     LocalTranslationConfigDraft, LocalTranslationTestResult, LocalTtsProvider, LocalVoice,
     LookHelpConfig, LookHelpStatus, ManualBoundaryRequest, MeetingSummaryConfig,
-    MeetingSummaryResult, MeetingSummaryStatus, MeetingSummaryStatusEvent, OverlayConfig,
-    OfflineTranslationModel, OverlayGeometry, OverlayStatus, SessionConfig, TranscriptItem,
-    TranslationCredentialStatus,
-    TranslationEngineTestResult, TranslationProvider, VieNeuRuntimeStatus, WhisperModelOption,
+    MeetingSummaryResult, MeetingSummaryStatus, MeetingSummaryStatusEvent, OfflineTranslationModel,
+    OverlayConfig, OverlayGeometry, OverlayStatus, SessionConfig, TranscriptItem,
+    TranslationCredentialStatus, TranslationEngineTestResult, TranslationProvider,
+    VieNeuRuntimeStatus, WhisperModelOption,
 };
 use crate::session::AppState;
 use crate::{
@@ -96,6 +96,11 @@ pub async fn save_translation_api_key(
     api_key: String,
 ) -> AppResult<()> {
     run_blocking(move || security::save_translation_api_key(provider, &api_key)).await
+}
+
+#[tauri::command]
+pub async fn delete_translation_api_key(provider: TranslationProvider) -> AppResult<()> {
+    run_blocking(move || security::delete_translation_api_key(provider)).await
 }
 
 #[tauri::command]

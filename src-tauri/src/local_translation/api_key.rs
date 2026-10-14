@@ -68,7 +68,11 @@ pub fn huggingface_token_status() -> AppResult<LocalCredentialStatus> {
             Err(err) => return Err(keychain_error(err)),
         }
     };
-    Ok(credential_status_from_parts(env_present, cached_present, keychain_present))
+    Ok(credential_status_from_parts(
+        env_present,
+        cached_present,
+        keychain_present,
+    ))
 }
 
 /// Resolve the token handed to gated installs: the environment variable wins,
@@ -99,7 +103,10 @@ pub fn load_huggingface_token() -> AppResult<Option<String>> {
             Ok(Some(secret))
         }
         Err(keyring::Error::NoEntry) => Ok(None),
-        Err(err) => Err(crate::error::AppError::new("keychain_error", err.to_string())),
+        Err(err) => Err(crate::error::AppError::new(
+            "keychain_error",
+            err.to_string(),
+        )),
     }
 }
 
@@ -358,7 +365,8 @@ mod tests {
     /// ever leaks through a panic.
     #[test]
     fn hf_env_token_prefers_app_specific_then_canonical_hf_names() {
-        let _guard = env_lock().lock().unwrap();
+        // The snapshot holds the env lock for the whole body — do not take it
+        // again here: std Mutex is not reentrant and relocking deadlocks.
         let snapshot = EnvSnapshot::capture();
 
         std::env::set_var(HF_ENV_VAR_NAME, "hf-fake-app-override");
@@ -380,7 +388,6 @@ mod tests {
 
     #[test]
     fn hf_env_token_treats_whitespace_only_values_as_absent() {
-        let _guard = env_lock().lock().unwrap();
         let snapshot = EnvSnapshot::capture();
 
         std::env::set_var(HF_TOKEN_ENV, "   \t\n ");
@@ -391,7 +398,6 @@ mod tests {
 
     #[test]
     fn load_huggingface_token_picks_up_canonical_hf_token_env() {
-        let _guard = env_lock().lock().unwrap();
         let snapshot = EnvSnapshot::capture();
 
         std::env::set_var(HF_TOKEN_ENV, "hf-fake-load-canonical");

@@ -727,4 +727,180 @@ describe("LocalLlmSettings", () => {
       ).not.toBeInTheDocument();
     });
   });
+
+  describe("Gemini engine", () => {
+    const geminiBase = {
+      draft: {
+        ...defaultLocalTranslationConfig,
+        translationEngine: "gemini" as const,
+        modelPath: "C:\\models\\ggml-small.bin",
+        voiceId: "vi-voice",
+      },
+      dirty: false,
+      saving: false,
+      testing: false,
+      testResult: null,
+      voices: [{ id: "vi-voice", name: "Vietnamese", language: "vi-VN" }],
+      previewing: false,
+      onPreview: () => undefined,
+      whisperModels,
+      selectedWhisperModelId: "small-q5_1",
+      whisperDownload: null,
+      whisperDownloading: false,
+      onChange: () => undefined,
+      onSave: () => undefined,
+      onTest: () => undefined,
+      onWhisperModelSelect: () => undefined,
+      onWhisperDownload: () => undefined,
+    };
+
+    it("offers exactly three engine options", () => {
+      render(<LocalLlmSettings {...geminiBase} />);
+      const select = screen.getByDisplayValue("Gemini (Google AI)") as HTMLSelectElement;
+      const options = Array.from(select.options, (option) => option.value);
+      expect(options).toEqual(["huggingface_offline", "openai_compatible", "gemini"]);
+    });
+
+    it("shows the Gemini field group only for the gemini engine", () => {
+      const visible = (query: () => HTMLElement | null, present: boolean) => {
+        if (present) {
+          expect(query()).not.toBeNull();
+        } else {
+          expect(query()).toBeNull();
+        }
+      };
+      const cases = [
+        {
+          engine: "gemini" as const,
+          modelField: true,
+          keyRow: true,
+          egressNote: true,
+          openaiFields: false,
+        },
+        {
+          engine: "huggingface_offline" as const,
+          modelField: false,
+          keyRow: false,
+          egressNote: false,
+          openaiFields: false,
+        },
+        {
+          engine: "openai_compatible" as const,
+          modelField: false,
+          keyRow: false,
+          egressNote: false,
+          openaiFields: true,
+        },
+      ];
+      for (const testCase of cases) {
+        const { unmount } = render(
+          <LocalLlmSettings
+            {...geminiBase}
+            draft={{
+              ...geminiBase.draft,
+              translationEngine: testCase.engine,
+              openaiBaseUrl:
+                testCase.engine === "openai_compatible" ? "https://api.example.com/v1" : "",
+              openaiModel: testCase.engine === "openai_compatible" ? "gpt-4o-mini" : "",
+            }}
+            googleCredentialStatus={{ hasKey: true, source: "keychain" }}
+          />,
+        );
+        visible(() => screen.queryByLabelText("Gemini model"), testCase.modelField);
+        visible(() => screen.queryByLabelText("Google AI API key"), testCase.keyRow);
+        visible(
+          () => screen.queryByText(/Google's Generative Language API/),
+          testCase.egressNote,
+        );
+        visible(() => screen.queryByLabelText("Provider preset"), testCase.openaiFields);
+        unmount();
+      }
+    });
+
+    it("reports the Google key status and never echoes the key", async () => {
+      const user = userEvent.setup();
+      const onSaveGoogleKey = vi.fn().mockResolvedValue(undefined);
+      const onClearGoogleKey = vi.fn().mockResolvedValue(undefined);
+      render(
+        <LocalLlmSettings
+          {...geminiBase}
+          googleCredentialStatus={{ hasKey: true, source: "environment" }}
+          onSaveGoogleKey={onSaveGoogleKey}
+          onClearGoogleKey={onClearGoogleKey}
+        />,
+      );
+
+      expect(screen.getByText("Key: Environment variable")).toBeInTheDocument();
+      expect(screen.queryByText("test-google-key")).not.toBeInTheDocument();
+
+      const keyInput = screen.getByLabelText("Google AI API key");
+      await user.type(keyInput, "test-google-key");
+      await user.click(screen.getByRole("button", { name: "Save key" }));
+      expect(onSaveGoogleKey).toHaveBeenCalledWith("test-google-key");
+      // The typed key is cleared after a successful save.
+      expect(screen.getByLabelText("Google AI API key")).toHaveValue("");
+
+      await user.click(screen.getByRole("button", { name: "Clear key" }));
+      expect(onClearGoogleKey).toHaveBeenCalledTimes(1);
+    });
+
+    it("validates the Gemini model like the Rust normalizer", () => {
+      // The geminiBase draft already carries a voice and Whisper model, so a
+      // valid Gemini model leaves no validation errors.
+      const validDraft = [
+        { geminiModel: "gemini-2.5-flash" },
+        { geminiModel: "models/gemini-2.5-flash" },
+        { geminiModel: "" },
+      ];
+      for (const patch of validDraft) {
+        expect(validateLocalTranslationDraft({ ...geminiBase.draft, ...patch })).toEqual([]);
+      }
+      // Whitespace-only input is rejected with a message.
+      expect(
+        validateLocalTranslationDraft({
+          ...geminiBase.draft,
+          geminiModel: "   ",
+        }),
+      ).toContain("Enter a Gemini model name, or clear the field to use the default.");
+    });
+
+    it("renders the engine test result row for gemini", async () => {
+      const user = userEvent.setup();
+      const onTestEngine = vi.fn();
+      const { rerender } = render(
+        <LocalLlmSettings
+          {...geminiBase}
+          engineTesting={false}
+          engineTest={null}
+          onTestEngine={onTestEngine}
+        />,
+      );
+
+      await user.click(screen.getByRole("button", { name: "Test translation engine" }));
+      expect(onTestEngine).toHaveBeenCalledTimes(1);
+
+      rerender(
+        <LocalLlmSettings
+          {...geminiBase}
+          engineTesting={false}
+          engineTest={{
+            engine: "gemini",
+            model: "gemini-2.5-flash-lite",
+            endpoint:
+              "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent",
+            reachable: true,
+            accepted: true,
+            message: "Google AI accepted the credential for model gemini-2.5-flash-lite.",
+          }}
+          onTestEngine={onTestEngine}
+        />,
+      );
+      expect(
+        screen.getByText(/Google AI accepted the credential/),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText("Translation engine reachable and accepted").closest("div"),
+      ).toHaveClass("ok");
+    });
+  });
 });

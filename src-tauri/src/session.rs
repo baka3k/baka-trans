@@ -515,9 +515,9 @@ impl AppState {
         Ok(())
     }
 
-    pub(crate) fn set_pipeline_status_if_active(
+    pub(crate) fn set_pipeline_status_if_active<R: tauri::Runtime>(
         &self,
-        app: &AppHandle,
+        app: &AppHandle<R>,
         generation: u64,
         next_status: SessionStatus,
     ) -> AppResult<()> {

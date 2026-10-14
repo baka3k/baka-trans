@@ -78,6 +78,10 @@ export function saveTranslationApiKey(provider: TranslationProvider, apiKey: str
   return invoke<void>("save_translation_api_key", { provider, apiKey });
 }
 
+export function deleteTranslationApiKey(provider: TranslationProvider) {
+  return invoke<void>("delete_translation_api_key", { provider });
+}
+
 export function hasApiKey() {
   return invoke<boolean>("has_api_key");
 }

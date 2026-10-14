@@ -236,8 +236,15 @@ CPAL capture 16 kHz
 | 16.3 | [phase-16-03-rust-dispatcher-and-session.md](phase-16-03-rust-dispatcher-and-session.md) | blocked by 16.1-16.2 | Managed sidecar process and ordered local-worker dispatcher |
 | 16.4 | [phase-16-04-settings-and-cutover.md](phase-16-04-settings-and-cutover.md) | blocked by 16.2-16.3 | Accessible settings UX, retirement of Ollama, and regression/cutover evidence |
 | 16.5 | [../../260906-2137-openai-compatible-provider-completion/plan.md](../260906-2137-openai-compatible-provider-completion/plan.md) | delegated plan (completed 2026-09-06, [log](../../docs/logs/2026-09-06-openai-compatible-provider-completion.md)) | Residual phase-16.2 promise: in-app keychain save/delete/status for the local translation key, DeepSeek provider preset, start-time `local_openai_api_key_missing` gate, egress warning (advisory text; the acknowledged-egress prerequisite is intentionally deferred), docs |
+| 16.6 | [../../261014-1537-gemini-translation-engine/plan.md](../261014-1537-gemini-translation-engine/plan.md) | delegated plan (planned 2026-10-14) | Third translation engine: Gemini (Google `generateContent`, JSON-array batch with cabin-interpretation prompt), reusing the Google credential, schema v4→v5, batch window in the ordered translation worker; Hy-MT2/OpenAI behavior unchanged |
 
 ## Dependencies and Cross-Plan Coordination
+
+- `plans/261014-1537-gemini-translation-engine` (phase 16.6 above) adds a third
+  `LocalTranslationEngine` variant and a batch translation window inside this plan's
+  ordered worker; it reuses the phase-16.2 config/schema/migration conventions and the
+  existing Google credential rather than introducing a new keyring entry. It changes no
+  Hy-MT2 sidecar or OpenAI-compatible runtime behavior owned here.
 
 - `plans/260906-2137-openai-compatible-provider-completion` (phase 16.5 above)
   completes the residual of this plan's phase 16: the 16.2 log claimed keychain

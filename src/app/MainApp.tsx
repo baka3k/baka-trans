@@ -71,6 +71,7 @@ import {
   getHyMtModelStatus,
   installHyMtModel,
   cancelHyMtModelInstall,
+  deleteTranslationApiKey,
   getHuggingFaceTokenStatus,
   saveHuggingFaceToken,
   clearHuggingFaceToken,
@@ -375,6 +376,10 @@ export default function MainApp({
   const [localConfigTesting, setLocalConfigTesting] = useState(false);
   const [localConfigTest, setLocalConfigTest] = useState<LocalTranslationTestResult | null>(null);
   const [localCredentialStatus, setLocalCredentialStatus] =
+    useState<LocalTranslationCredentialStatus | null>(null);
+  // Shared Google credential (Cloud panel, OCR overlay, and the Gemini local
+  // engine all use it) — status-only; the key itself is never echoed.
+  const [googleCredentialStatus, setGoogleCredentialStatus] =
     useState<LocalTranslationCredentialStatus | null>(null);
   const [engineTesting, setEngineTesting] = useState(false);
   const [engineTest, setEngineTest] = useState<TranslationEngineTestResult | null>(null);
@@ -826,7 +831,7 @@ export default function MainApp({
   async function hydrate() {
     setBusy(true);
     try {
-      const [deviceList, appStatus, transcriptSnapshot, profiles, localConfig, credentialStatus, hfToken, models, runtime, whisperModelDir] =
+      const [deviceList, appStatus, transcriptSnapshot, profiles, localConfig, credentialStatus, hfToken, models, runtime, whisperModelDir, googleCredential] =
         await Promise.all([
         listAudioDevices(),
         getAppStatus(),
@@ -838,6 +843,9 @@ export default function MainApp({
         experience === "local" ? listWhisperModels() : Promise.resolve([]),
         experience === "local" ? getVieNeuRuntimeStatus() : Promise.resolve(null),
         experience === "local" ? safeGetWhisperModelDir() : Promise.resolve(""),
+        experience === "local"
+          ? translationCredentialStatus("google_live_translate").catch(() => null)
+          : Promise.resolve(null),
       ]);
       // The managed offline model status depends on which model the saved
       // config selects, so it resolves after the config itself.
@@ -888,6 +896,14 @@ export default function MainApp({
       setLocalConfigTest(null);
       setEngineTest(null);
       setLocalCredentialStatus(credentialStatus ?? null);
+      setGoogleCredentialStatus(
+        googleCredential
+          ? {
+              hasKey: googleCredential.hasApiKey,
+              source: googleCredential.apiKeySource ?? null,
+            }
+          : null,
+      );
       setHfTokenStatus(hfToken ?? null);
       setKeyTestMessage("");
       const storedRouting = readRoutingProfile();
@@ -1045,6 +1061,36 @@ export default function MainApp({
     try {
       await deleteLocalTranslationApiKey();
       setLocalCredentialStatus((await getLocalTranslationCredentialStatus()) ?? null);
+    } catch (cause) {
+      setError(normalizeError(cause));
+      throw cause;
+    }
+  }
+
+  async function refreshGoogleCredentialStatus() {
+    const credential = await translationCredentialStatus("google_live_translate");
+    setGoogleCredentialStatus({
+      hasKey: credential.hasApiKey,
+      source: credential.apiKeySource ?? null,
+    });
+  }
+
+  async function saveGoogleApiKey(key: string) {
+    setError(null);
+    try {
+      await saveTranslationApiKey("google_live_translate", key);
+      await refreshGoogleCredentialStatus();
+    } catch (cause) {
+      setError(normalizeError(cause));
+      throw cause;
+    }
+  }
+
+  async function clearGoogleApiKey() {
+    setError(null);
+    try {
+      await deleteTranslationApiKey("google_live_translate");
+      await refreshGoogleCredentialStatus();
     } catch (cause) {
       setError(normalizeError(cause));
       throw cause;
@@ -2093,6 +2139,7 @@ export default function MainApp({
               engineTesting={engineTesting}
               engineTest={engineTest}
               credentialStatus={localCredentialStatus}
+              googleCredentialStatus={googleCredentialStatus}
               voices={localVoices}
               voicesLoading={localVoicesLoading}
               previewing={localVoicePreviewing}
@@ -2126,6 +2173,8 @@ export default function MainApp({
               onTestEngine={() => void testLocalEngine()}
               onSaveKey={(key) => saveLocalApiKey(key)}
               onClearKey={() => clearLocalApiKey()}
+              onSaveGoogleKey={(key) => saveGoogleApiKey(key)}
+              onClearGoogleKey={() => clearGoogleApiKey()}
               onPreview={() => void previewLocalVoice()}
               onRefreshVoices={() => void refreshLocalVoices()}
               onWhisperModelSelect={setSelectedWhisperModelId}

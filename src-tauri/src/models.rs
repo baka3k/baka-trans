@@ -606,6 +606,7 @@ pub struct LocalTranslationConfig {
     pub schema_version: u32,
     pub translation_engine: LocalTranslationEngine,
     pub offline_model: OfflineTranslationModel,
+    pub gemini_model: String,
     pub openai_base_url: String,
     pub openai_model: String,
     pub openai_timeout_seconds: u64,
@@ -635,6 +636,7 @@ pub struct LocalTranslationConfig {
 pub struct LocalTranslationConfigDraft {
     pub translation_engine: LocalTranslationEngine,
     pub offline_model: OfflineTranslationModel,
+    pub gemini_model: String,
     pub openai_base_url: String,
     pub openai_model: String,
     pub openai_timeout_seconds: u64,
@@ -664,6 +666,7 @@ impl From<LocalTranslationConfig> for LocalTranslationConfigDraft {
         Self {
             translation_engine: value.translation_engine,
             offline_model: value.offline_model,
+            gemini_model: value.gemini_model,
             openai_base_url: value.openai_base_url,
             openai_model: value.openai_model,
             openai_timeout_seconds: value.openai_timeout_seconds,
@@ -705,6 +708,7 @@ pub enum LocalTranslationEngine {
     #[default]
     HuggingfaceOffline,
     OpenaiCompatible,
+    Gemini,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -1138,7 +1142,8 @@ mod tests {
         let json = serde_json::to_string(&OfflineTranslationModel::HyMt2).unwrap();
         assert_eq!(json, "\"hy_mt2\"");
 
-        let parsed: OfflineTranslationModel = serde_json::from_str("\"translategemma_4b\"").unwrap();
+        let parsed: OfflineTranslationModel =
+            serde_json::from_str("\"translategemma_4b\"").unwrap();
         assert_eq!(parsed, OfflineTranslationModel::Translategemma4B);
     }
 }

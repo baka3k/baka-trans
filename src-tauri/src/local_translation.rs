@@ -1,13 +1,18 @@
 pub mod api_key;
+pub mod gemini;
 pub mod openai_compatible;
+#[cfg(test)]
+pub(crate) mod test_http;
 
 use crate::error::{AppError, AppResult};
 use crate::local_translation::openai_compatible::normalize_openai_chat_completions_url;
 use crate::models::{
     Language, LocalTranslationConfig, LocalTranslationConfigDraft, LocalTranslationEngine,
     LocalTranslationTestResult, LocalTtsProvider, OfflineTranslationModel,
-    TranslationEngineTestResult, WhisperModelDownloadProgress, WhisperModelOption,
+    TranslationEngineTestResult, TranslationProvider, WhisperModelDownloadProgress,
+    WhisperModelOption,
 };
+use crate::security;
 use futures_util::StreamExt;
 use reqwest::Client;
 use std::path::{Path, PathBuf};
@@ -17,13 +22,19 @@ use tauri::{AppHandle, Emitter};
 use tokio::io::AsyncWriteExt;
 use whisper_rs::{get_lang_id, WhisperContext, WhisperContextParameters};
 
-const CONFIG_SCHEMA_VERSION: u32 = 4;
+const CONFIG_SCHEMA_VERSION: u32 = 5;
 const CONFIG_DIR_NAME: &str = "dev.baka3k.baka-trans";
 const CONFIG_FILE_NAME: &str = "local-translation-config.json";
 const MODEL_CACHE_DIR_NAME: &str = ".bakatrans";
 const WHISPER_CACHE_SUBDIR: &str = "whisper";
 const WHISPER_MODEL_SOURCE: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
 static WHISPER_DOWNLOAD_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// Gemini-only sliding batch window: five sentences give the model enough
+/// context to stitch ASR fragments, and the 500 ms max wait keeps the added
+/// first-window latency well inside the 1-3 s end-to-end promise in README.
+pub(crate) const GEMINI_BATCH_WINDOW_SIZE: usize = 5;
+pub(crate) const GEMINI_BATCH_MAX_WAIT: Duration = Duration::from_millis(500);
 
 #[derive(Clone, Copy, Debug)]
 struct WhisperModelSpec {
@@ -315,6 +326,7 @@ impl Default for LocalTranslationConfig {
             schema_version: CONFIG_SCHEMA_VERSION,
             translation_engine: LocalTranslationEngine::HuggingfaceOffline,
             offline_model: OfflineTranslationModel::default(),
+            gemini_model: gemini::DEFAULT_MODEL.to_string(),
             openai_base_url: String::new(),
             openai_model: String::new(),
             openai_timeout_seconds: 30,
@@ -353,6 +365,7 @@ impl Default for LocalTranslationConfigDraft {
 pub enum TranslationClient {
     OpenAiCompatible(openai_compatible::OpenAiCompatibleClient),
     HyMt(HyMtClient),
+    Gemini(gemini::GeminiClient),
 }
 
 impl std::fmt::Debug for TranslationClient {
@@ -366,6 +379,11 @@ impl std::fmt::Debug for TranslationClient {
                 .debug_struct("HyMt")
                 .field("source_language", &client.source_language)
                 .field("target_language", &client.target_language)
+                .finish(),
+            // The Gemini client's Debug never carries the API key.
+            Self::Gemini(client) => formatter
+                .debug_tuple("Gemini")
+                .field(&client.model())
                 .finish(),
         }
     }
@@ -421,7 +439,12 @@ impl HyMtClient {
         let source = source_language.realtime_code().to_string();
         let target = target_language.realtime_code().to_string();
         let join_result = tauri::async_runtime::spawn_blocking(move || {
-            crate::hy_mt::HyMtSession::start_with_spec(&spec, std::path::Path::new("."), "cpu", offline_spec)
+            crate::hy_mt::HyMtSession::start_with_spec(
+                &spec,
+                std::path::Path::new("."),
+                "cpu",
+                offline_spec,
+            )
         })
         .await
         .map_err(|error| {
@@ -490,6 +513,18 @@ impl TranslationClient {
                     )?,
                 ))
             }
+            LocalTranslationEngine::Gemini => {
+                // The Google credential is shared with the Cloud panel and the
+                // OCR overlay: one key for all Google usage.
+                let api_key =
+                    security::load_translation_api_key(TranslationProvider::GoogleLiveTranslate)?;
+                Ok(Self::Gemini(gemini::GeminiClient::new(
+                    &config.gemini_model,
+                    api_key,
+                    source_language,
+                    target_language,
+                )?))
+            }
         }
     }
 
@@ -497,6 +532,40 @@ impl TranslationClient {
         match self {
             Self::OpenAiCompatible(client) => client.translate(source_text).await,
             Self::HyMt(client) => client.translate(source_text).await,
+            Self::Gemini(client) => client.translate(source_text).await,
+        }
+    }
+
+    /// Translate a window of sentences, returning one outcome per input in
+    /// arrival order. Engines without a batch window keep today's
+    /// per-sentence loop (and per-item error semantics) exactly.
+    pub async fn translate_batch(&self, texts: &[String]) -> Vec<AppResult<(String, u64)>> {
+        match self {
+            Self::Gemini(client) => client.translate_batch(texts).await,
+            Self::OpenAiCompatible(client) => {
+                let mut results = Vec::with_capacity(texts.len());
+                for text in texts {
+                    results.push(client.translate(text).await);
+                }
+                results
+            }
+            Self::HyMt(client) => {
+                let mut results = Vec::with_capacity(texts.len());
+                for text in texts {
+                    results.push(client.translate(text).await);
+                }
+                results
+            }
+        }
+    }
+
+    /// Engines that translate a sliding window of sentences in one request
+    /// return `Some((window_size, max_wait))`; the translation worker then
+    /// collects jobs across that window instead of one sentence at a time.
+    pub fn batch_window(&self) -> Option<(usize, Duration)> {
+        match self {
+            Self::Gemini(_) => Some((GEMINI_BATCH_WINDOW_SIZE, GEMINI_BATCH_MAX_WAIT)),
+            Self::OpenAiCompatible(_) | Self::HyMt(_) => None,
         }
     }
 }
@@ -518,15 +587,22 @@ pub fn validated_runtime_config() -> AppResult<LocalTranslationConfig> {
     Ok(normalized)
 }
 
-/// Start-time gate for the OpenAI-compatible engine: hosted (non-loopback)
-/// endpoints fail before capture begins when no API key is reachable. The
-/// offline Hy-MT2 engine never reaches the gate.
+/// Start-time gate for the keyed engines: hosted (non-loopback)
+/// OpenAI-compatible endpoints and the always-hosted Gemini engine fail
+/// before capture begins when no API key is reachable. The offline Hy-MT2
+/// engine never reaches the gate.
 fn enforce_runtime_key_gate(config: &LocalTranslationConfig) -> AppResult<()> {
-    if config.translation_engine != LocalTranslationEngine::OpenaiCompatible {
-        return Ok(());
+    match config.translation_engine {
+        LocalTranslationEngine::HuggingfaceOffline => Ok(()),
+        LocalTranslationEngine::OpenaiCompatible => {
+            let key = api_key::load_local_translation_api_key()?.map(|info| info.key);
+            ensure_openai_key_available(&config.openai_base_url, key.as_deref())
+        }
+        LocalTranslationEngine::Gemini => {
+            let key = security::load_translation_api_key(TranslationProvider::GoogleLiveTranslate);
+            ensure_gemini_key_available(key.ok().as_deref())
+        }
     }
-    let key = api_key::load_local_translation_api_key()?.map(|info| info.key);
-    ensure_openai_key_available(&config.openai_base_url, key.as_deref())
 }
 
 /// Pure decision shared by session start and the engine-test probes: a
@@ -541,6 +617,20 @@ fn ensure_openai_key_available(endpoint: &str, key: Option<&str>) -> AppResult<(
     Err(AppError::new(
         "local_openai_api_key_missing",
         "This endpoint is hosted outside this computer, so an API key is required. Save a key under Local LLM settings or set the BAKA_TRANS_LOCAL_API_KEY environment variable.",
+    ))
+}
+
+/// Gemini always talks to Google's hosted API, so a key is required
+/// unconditionally. The message names both fixes so a key cleared in the
+/// Cloud panel does not leave local users guessing.
+pub(crate) fn ensure_gemini_key_available(key: Option<&str>) -> AppResult<()> {
+    let has_key = key.is_some_and(|key| !key.trim().is_empty());
+    if has_key {
+        return Ok(());
+    }
+    Err(AppError::new(
+        "local_gemini_api_key_missing",
+        gemini::gemini_key_missing_message(),
     ))
 }
 
@@ -654,32 +744,56 @@ pub async fn test_config(
             })
         }
         LocalTranslationEngine::OpenaiCompatible => test_openai_compatible_engine(&config).await,
+        LocalTranslationEngine::Gemini => test_gemini_engine_pipeline(&config).await,
     }
 }
 
 fn effective_model(draft: &LocalTranslationConfigDraft) -> String {
-    draft.openai_model.trim().to_string()
+    match draft.translation_engine {
+        LocalTranslationEngine::Gemini => gemini::normalize_gemini_model(&draft.gemini_model),
+        _ => draft.openai_model.trim().to_string(),
+    }
 }
 
 fn effective_endpoint(draft: &LocalTranslationConfigDraft) -> String {
-    let url = draft.openai_base_url.trim();
-    if !url.is_empty() {
-        return openai_compatible::normalize_openai_chat_completions_url(url)
-            .unwrap_or_else(|_| url.to_string());
+    match draft.translation_engine {
+        LocalTranslationEngine::Gemini => gemini::generate_content_endpoint(
+            gemini::API_BASE,
+            &gemini::normalize_gemini_model(&draft.gemini_model),
+        ),
+        _ => {
+            let url = draft.openai_base_url.trim();
+            if !url.is_empty() {
+                return openai_compatible::normalize_openai_chat_completions_url(url)
+                    .unwrap_or_else(|_| url.to_string());
+            }
+            String::new()
+        }
     }
-    String::new()
 }
 
 fn effective_model_from_config(config: &LocalTranslationConfig) -> String {
-    config.openai_model.clone()
+    match config.translation_engine {
+        LocalTranslationEngine::Gemini => config.gemini_model.clone(),
+        _ => config.openai_model.clone(),
+    }
 }
 
 fn effective_endpoint_from_config(config: &LocalTranslationConfig) -> String {
-    if !config.openai_base_url.is_empty() {
-        return openai_compatible::normalize_openai_chat_completions_url(&config.openai_base_url)
-            .unwrap_or_else(|_| config.openai_base_url.clone());
+    match config.translation_engine {
+        LocalTranslationEngine::Gemini => {
+            gemini::generate_content_endpoint(gemini::API_BASE, &config.gemini_model)
+        }
+        _ => {
+            if !config.openai_base_url.is_empty() {
+                return openai_compatible::normalize_openai_chat_completions_url(
+                    &config.openai_base_url,
+                )
+                .unwrap_or_else(|_| config.openai_base_url.clone());
+            }
+            String::new()
+        }
     }
-    String::new()
 }
 
 async fn test_openai_compatible_engine(
@@ -723,6 +837,49 @@ async fn test_openai_compatible_engine(
     })
 }
 
+/// Full-pipeline probe for the Gemini engine: one real single-sentence
+/// translation (the batch contract with one element), mirroring what the
+/// OpenAI-compatible probe pays for.
+async fn test_gemini_engine_pipeline(
+    config: &LocalTranslationConfig,
+) -> AppResult<LocalTranslationTestResult> {
+    let probe = async {
+        let api_key = security::load_translation_api_key(TranslationProvider::GoogleLiveTranslate)?;
+        let client =
+            gemini::GeminiClient::new(&config.gemini_model, api_key, Language::Ja, Language::Vi)?;
+        let endpoint = client.endpoint();
+        let (translated, _latency) = client.translate("こんにちは").await?;
+        AppResult::Ok((endpoint, translated.chars().count()))
+    }
+    .await;
+    match probe {
+        Ok((endpoint, probe_characters)) => Ok(LocalTranslationTestResult {
+            ok: true,
+            message: format!(
+                "Whisper, the Gemini engine, and the selected voice are ready. Probe translation: {probe_characters} characters."
+            ),
+            model: config.gemini_model.clone(),
+            endpoint,
+            whisper_model_readable: true,
+            whisper_model_loaded: true,
+            engine_reachable: true,
+            engine_accepted: true,
+            tts_voice_available: true,
+        }),
+        Err(error) => Ok(failed_test_result(
+            config.gemini_model.clone(),
+            gemini::generate_content_endpoint(gemini::API_BASE, &config.gemini_model),
+            error,
+            LocalTestHealth {
+                whisper_model_readable: true,
+                whisper_model_loaded: true,
+                tts_voice_available: true,
+                ..LocalTestHealth::default()
+            },
+        )),
+    }
+}
+
 pub async fn test_engine(
     app: &tauri::AppHandle,
     draft: LocalTranslationConfigDraft,
@@ -733,6 +890,7 @@ pub async fn test_engine(
             Ok(offline_engine_test_result(probe, draft.offline_model))
         }
         LocalTranslationEngine::OpenaiCompatible => test_engine_openai_compatible(draft).await,
+        LocalTranslationEngine::Gemini => Ok(test_engine_gemini(draft).await),
     }
 }
 
@@ -805,6 +963,59 @@ struct EngineProbe {
     reachable: bool,
     accepted: bool,
     probe_characters: usize,
+}
+
+/// Engine-test button for Gemini: a free `GET /v1beta/models` key probe
+/// (header auth, prior art `ai/google_live.rs`), never a paid translation.
+/// The reported endpoint is the generateContent URL the engine will actually
+/// call.
+async fn test_engine_gemini(draft: LocalTranslationConfigDraft) -> TranslationEngineTestResult {
+    let model = gemini::normalize_gemini_model(&draft.gemini_model);
+    let endpoint = gemini::generate_content_endpoint(gemini::API_BASE, &model);
+    let outcome = async {
+        let api_key = security::load_translation_api_key(TranslationProvider::GoogleLiveTranslate)?;
+        gemini::probe_key(&api_key).await?;
+        AppResult::Ok(api_key)
+    }
+    .await;
+    match outcome {
+        Ok(_) => TranslationEngineTestResult {
+            engine: "gemini".to_string(),
+            // The probe validates the credential only (never the model —
+            // listing every model would need pagination); the session's first
+            // translation is what fails on an unknown model name.
+            message: format!(
+                "Google AI accepted the credential. The engine will use model {model}."
+            ),
+            model,
+            endpoint,
+            reachable: true,
+            accepted: true,
+        },
+        Err(error) => {
+            // A missing credential is the actionable case: replace the
+            // generic keychain error with the message naming both fixes.
+            let error = if error.code == "missing_api_key" || error.code == "keychain_error" {
+                ensure_gemini_key_available(None).unwrap_err()
+            } else {
+                error
+            };
+            // "Reachable" means a probe actually reached Google: a
+            // request-level failure or an untouched probe (no key) is not.
+            let reachable = !matches!(
+                error.code.as_str(),
+                "local_gemini_request_error" | "local_gemini_api_key_missing"
+            );
+            TranslationEngineTestResult {
+                engine: "gemini".to_string(),
+                model,
+                endpoint,
+                reachable,
+                accepted: false,
+                message: error.message,
+            }
+        }
+    }
 }
 
 async fn probe_openai_engine(
@@ -984,6 +1195,7 @@ pub fn normalize_and_validate(
     }
     let threads = draft.threads.clamp(1, maximum_thread_count());
     let vieneu_base_url = "managed://vieneu".to_string();
+    let gemini_model = gemini::normalize_gemini_model(&draft.gemini_model);
     let vieneu_style = draft.vieneu_style.trim();
     if !matches!(vieneu_style, "tu_nhien" | "tin_tuc" | "doc_truyen") {
         return Err(AppError::new(
@@ -996,6 +1208,7 @@ pub fn normalize_and_validate(
         schema_version: CONFIG_SCHEMA_VERSION,
         translation_engine: draft.translation_engine,
         offline_model: draft.offline_model,
+        gemini_model,
         openai_base_url: openai_endpoint,
         openai_model,
         openai_timeout_seconds: draft.openai_timeout_seconds.clamp(5, 300),
@@ -1103,8 +1316,11 @@ fn read_config_from_path(path: &Path) -> AppResult<LocalTranslationConfig> {
         if version < 3 {
             return migrate_legacy_config(path, &raw, version);
         }
-        if version < CONFIG_SCHEMA_VERSION {
+        if version < 4 {
             return migrate_gpu_default_config(path, &raw);
+        }
+        if version < CONFIG_SCHEMA_VERSION {
+            return migrate_v4_gemini_model_config(path, &raw);
         }
     }
 
@@ -1147,6 +1363,22 @@ fn migrate_gpu_default_config(path: &Path, raw: &str) -> AppResult<LocalTranslat
     })?;
     config.schema_version = CONFIG_SCHEMA_VERSION;
     config.use_gpu = cfg!(target_os = "macos");
+    write_config_to_path(path, &config)?;
+    Ok(config)
+}
+
+/// v4 → v5: the only contract change is the new `geminiModel` field. Serde's
+/// per-field default fills it in; every stored value (including `useGpu`,
+/// which the v3→v4 migration already settled) passes through untouched.
+fn migrate_v4_gemini_model_config(path: &Path, raw: &str) -> AppResult<LocalTranslationConfig> {
+    let mut config: LocalTranslationConfig = serde_json::from_str(raw).map_err(|err| {
+        AppError::new(
+            "local_config_parse_error",
+            format!("Could not parse {}: {err}", path.display()),
+        )
+    })?;
+    config.schema_version = CONFIG_SCHEMA_VERSION;
+    config.gemini_model = gemini::normalize_gemini_model(&config.gemini_model);
     write_config_to_path(path, &config)?;
     Ok(config)
 }
@@ -1369,6 +1601,7 @@ mod tests {
         assert_eq!(config.tts_provider, LocalTtsProvider::System);
         assert_eq!(config.vieneu_base_url, "http://127.0.0.1:23334");
         assert_eq!(config.vieneu_style, "tu_nhien");
+        assert_eq!(config.gemini_model, gemini::DEFAULT_MODEL);
     }
 
     #[test]
@@ -1734,9 +1967,14 @@ mod tests {
             prefix_args: Vec::new(),
             working_dir: directory.clone(),
         };
-        let client = HyMtClient::start_with_spec(spec, OfflineTranslationModel::HyMt2, Language::Ja, Language::Vi)
-            .await
-            .unwrap();
+        let client = HyMtClient::start_with_spec(
+            spec,
+            OfflineTranslationModel::HyMt2,
+            Language::Ja,
+            Language::Vi,
+        )
+        .await
+        .unwrap();
         let (text, _latency) = client.translate("こんにちは").await.unwrap();
         assert_eq!(text, "Xin chào");
         let _ = std::fs::remove_dir_all(directory);
@@ -1761,14 +1999,14 @@ mod tests {
     fn offline_engine_test_result_reports_probe_translation() {
         let result = offline_engine_test_result(
             crate::hy_mt::HyMtEngineProbe {
-            device: "mps".to_string(),
-            load_ms: 1234.5,
-            translated_text: Some("Xin chào".to_string()),
-            latency_ms: Some(56.5),
-            reachable: true,
-            accepted: true,
-            error: None,
-        },
+                device: "mps".to_string(),
+                load_ms: 1234.5,
+                translated_text: Some("Xin chào".to_string()),
+                latency_ms: Some(56.5),
+                reachable: true,
+                accepted: true,
+                error: None,
+            },
             OfflineTranslationModel::HyMt2,
         );
 
@@ -1784,17 +2022,17 @@ mod tests {
     fn offline_engine_test_result_surfaces_probe_errors() {
         let result = offline_engine_test_result(
             crate::hy_mt::HyMtEngineProbe {
-            device: String::new(),
-            load_ms: 0.0,
-            translated_text: None,
-            latency_ms: None,
-            reachable: false,
-            accepted: false,
-            error: Some(AppError::new(
-                "hy_mt_model_missing",
-                "The Hy-MT2 model is not installed yet.",
-            )),
-        },
+                device: String::new(),
+                load_ms: 0.0,
+                translated_text: None,
+                latency_ms: None,
+                reachable: false,
+                accepted: false,
+                error: Some(AppError::new(
+                    "hy_mt_model_missing",
+                    "The Hy-MT2 model is not installed yet.",
+                )),
+            },
             OfflineTranslationModel::HyMt2,
         );
 
@@ -1906,5 +2144,118 @@ mod tests {
             probe.error.map(|error| error.code),
             Some("local_openai_api_key_missing".to_string())
         );
+    }
+
+    #[test]
+    fn migrates_v4_config_with_default_gemini_model() {
+        let directory = std::env::temp_dir().join(format!("baka-trans-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join(CONFIG_FILE_NAME);
+
+        let v4_json = serde_json::json!({
+            "schemaVersion": 4,
+            "translationEngine": "openai_compatible",
+            "openaiBaseUrl": "https://api.deepseek.com",
+            "openaiModel": "deepseek-v4-flash",
+            "modelPath": "/models/whisper.bin",
+            "language": "ja",
+            "useGpu": false,
+            "voiceId": "kept-voice"
+        });
+        std::fs::write(&path, serde_json::to_string_pretty(&v4_json).unwrap()).unwrap();
+
+        let migrated = read_config_from_path(&path).unwrap();
+
+        assert_eq!(migrated.schema_version, CONFIG_SCHEMA_VERSION);
+        assert_eq!(migrated.gemini_model, gemini::DEFAULT_MODEL);
+        assert_eq!(migrated.openai_model, "deepseek-v4-flash");
+        assert_eq!(migrated.voice_id, "kept-voice");
+        // v4 configs already settled their GPU choice; unlike the v3→v4
+        // migration it passes through untouched.
+        assert!(!migrated.use_gpu);
+
+        let persisted: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(persisted["schemaVersion"], CONFIG_SCHEMA_VERSION);
+        assert_eq!(persisted["geminiModel"], gemini::DEFAULT_MODEL);
+
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn batch_window_only_applies_to_gemini() {
+        let gemini = TranslationClient::Gemini(
+            gemini::GeminiClient::new("gemini", "k".to_string(), Language::Ja, Language::Vi)
+                .unwrap(),
+        );
+        assert_eq!(
+            gemini.batch_window(),
+            Some((GEMINI_BATCH_WINDOW_SIZE, GEMINI_BATCH_MAX_WAIT))
+        );
+
+        let openai = openai_compatible::OpenAiCompatibleClient::new(
+            "http://127.0.0.1:8080",
+            "test-model",
+            30,
+            0.0,
+            256,
+            None,
+            Language::Ja,
+            Language::Vi,
+        )
+        .unwrap();
+        assert_eq!(
+            TranslationClient::OpenAiCompatible(openai).batch_window(),
+            None
+        );
+    }
+
+    #[test]
+    fn gemini_engine_serializes_snake_case_with_default_model() {
+        let config = LocalTranslationConfig {
+            translation_engine: LocalTranslationEngine::Gemini,
+            ..LocalTranslationConfig::default()
+        };
+        let value = serde_json::to_value(&config).unwrap();
+        assert_eq!(value["translationEngine"], "gemini");
+        assert_eq!(value["geminiModel"], gemini::DEFAULT_MODEL);
+
+        let round_tripped: LocalTranslationConfig = serde_json::from_value(value).unwrap();
+        assert_eq!(
+            round_tripped.translation_engine,
+            LocalTranslationEngine::Gemini
+        );
+        assert_eq!(round_tripped.gemini_model, gemini::DEFAULT_MODEL);
+    }
+
+    /// Proves the Gemini engine reaches the runtime gate (it is not skipped
+    /// like the offline engine). With no env key the gate must pass only via a
+    /// saved keychain credential — on machines that have one, the env-removed
+    /// leg legitimately succeeds, so only the outcome pairing is asserted.
+    /// The missing-key message shape is covered by the pure gate truth table.
+    #[test]
+    fn runtime_key_gate_requires_google_key_for_gemini() {
+        const GEMINI_ENV_VAR: &str = "GEMINI_API_KEY";
+        let config = LocalTranslationConfig {
+            translation_engine: LocalTranslationEngine::Gemini,
+            ..LocalTranslationConfig::default()
+        };
+
+        let previous = std::env::var(GEMINI_ENV_VAR).ok();
+        std::env::remove_var(GEMINI_ENV_VAR);
+        let gate_without_env_key = enforce_runtime_key_gate(&config);
+        std::env::set_var(GEMINI_ENV_VAR, "test-gemini-key");
+        let gate_with_env_key = enforce_runtime_key_gate(&config);
+        match previous {
+            Some(value) => std::env::set_var(GEMINI_ENV_VAR, value),
+            None => std::env::remove_var(GEMINI_ENV_VAR),
+        }
+
+        match gate_without_env_key {
+            // A saved keychain credential satisfies the gate without env help.
+            Ok(()) => {}
+            Err(error) => assert_eq!(error.code, "local_gemini_api_key_missing"),
+        }
+        assert!(gate_with_env_key.is_ok());
     }
 }

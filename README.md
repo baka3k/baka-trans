@@ -47,7 +47,7 @@ Capture live meeting audio, transcribe speech, translate it, synthesize translat
 | Mode | Description |
 |---|---|
 | **Cloud API** | Uses Google Gemini Live or OpenAI Realtime APIs for transcription, translation, and text-to-speech. High quality, requires API key and internet. |
-| **Local Whisper** | Runs whisper.cpp on-device for Japanese transcription, then translates via a managed offline model (Hy-MT2 1.8B or Google TranslateGemma 4B) or an OpenAI-compatible API (e.g. Ollama). No cloud translation key required. |
+| **Local Whisper** | Runs whisper.cpp on-device for Japanese transcription, then translates via a managed offline model (Hy-MT2 1.8B or Google TranslateGemma 4B), an OpenAI-compatible API (e.g. Ollama), or Google's Gemini API. Offline models need no cloud key; Gemini and hosted OpenAI-compatible endpoints require one. |
 
 ### Speech Engines
 
@@ -384,7 +384,7 @@ Uses Google Gemini Live or OpenAI Realtime APIs for the full pipeline (transcrip
 
 ### Local Whisper Mode
 
-Runs whisper.cpp locally for Japanese transcription, then translates via a managed offline model — Hy-MT2 1.8B or Google TranslateGemma 4B (both offline) — or an OpenAI-compatible API. Does **not** require a cloud translation key.
+Runs whisper.cpp locally for Japanese transcription, then translates via a managed offline model — Hy-MT2 1.8B or Google TranslateGemma 4B (both offline) — an OpenAI-compatible API, or Google's Gemini API. Offline models do not require a cloud translation key; Gemini reuses the Cloud panel's Google key.
 
 1. Choose **Local Whisper** → open **Local LLM**.
 2. Select a translation engine:
@@ -394,6 +394,8 @@ Runs whisper.cpp locally for Japanese transcription, then translates via a manag
      - Paste the provider's API key → **Save key**. The key is stored in the OS keychain (service `dev.baka3k.baka-trans`), never in the config file; only its presence and source are shown. **Clear key** removes it.
      - Hosted endpoints (anything outside this computer, e.g. DeepSeek) require a key: starting a session and **Test translation engine** fail fast with `local_openai_api_key_missing` until one is saved. Loopback servers (Ollama, LM Studio) work without a key.
      - `BAKA_TRANS_LOCAL_API_KEY` overrides the keychain entry while it is set.
+   - **Gemini (Google AI)** — cloud translation that batches Whisper sentences (windows of 5, ≤500 ms wait) so the model keeps context across fragments. Transcripts are sent to Google's Generative Language API.
+     - Reuses the Cloud panel's Google AI key (`google-gemini-api-key`, env override `GEMINI_API_KEY`); save or clear it in either place. Without a key, starting a session and **Test translation engine** fail fast with `local_gemini_api_key_missing`.
 3. Select a Whisper model → **Download model** (stored in app data folder).
 4. Choose a speech engine:
    - **System TTS** — install a Vietnamese voice in system settings.
@@ -412,6 +414,7 @@ Runs whisper.cpp locally for Japanese transcription, then translates via a manag
 | `local_openai_request_error` | Check the OpenAI-compatible endpoint URL and network. |
 | `local_openai_provider_error` | Verify model name and API key, then retry. |
 | `local_openai_api_key_missing` | Save the provider key under Local LLM → **API key**, or set `BAKA_TRANS_LOCAL_API_KEY`. Required for non-local endpoints. |
+| `local_gemini_api_key_missing` | Save a Google AI key in the Cloud settings panel or set `GEMINI_API_KEY`. Required for the Gemini engine. |
 | `credential_input_invalid` | The key field was empty or longer than 4096 characters; paste a valid API key. |
 | `local_hy_mt2_not_available` | Hy-MT2 not enabled for live sessions yet; use OpenAI-compatible engine. |
 | `local_translation_backlog_full` | Use shorter utterances, a smaller model, or more capable hardware. |
