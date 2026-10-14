@@ -45,6 +45,16 @@
 #     not writable by the current user. The unsigned local build carries no
 #     quarantine attribute, so it launches straight from /Applications
 #     without a Gatekeeper prompt.
+#   - Version bumping: `make build BUMP=1` increments the patch version
+#     before building; `make build VERSION=x.y.z` sets an exact one (same
+#     for `make bump`). Both sync package.json, package-lock.json,
+#     tauri.conf.json, Cargo.toml and Cargo.lock through
+#     scripts/set-version.mjs. Local bumps run with --force (skipping the
+#     "on main + clean tree" release guard); the guarded path for releases
+#     stays `npm run version:set <semver>`. The flags are honored from the
+#     command line only, so a stray VERSION in the environment cannot
+#     hijack a build. The DMG is named after the bumped version, e.g.
+#     `Baka Trans_0.4.1_aarch64.dmg`.
 #   - Stale hdiutil staging files (`rw.*.dmg`, left behind when a DMG build
 #     is interrupted) are removed at the start of `make build` — they can
 #     quietly pile up to gigabytes under bundle/macos/.
@@ -73,13 +83,21 @@ DMG_DIR := $(BUNDLE_ROOT)/dmg
 
 WRS_CLEAR_STAMP := .cargo/wrs-cleared
 
-.PHONY: help doctor build install
+# Version flags are read from the command line only (origin check) so a
+# stray VERSION/BUMP exported in the environment cannot hijack a build.
+BAKA_SET_VERSION := $(if $(findstring command,$(origin VERSION)),$(strip $(VERSION)),)
+BAKA_BUMP := $(if $(findstring command,$(origin BUMP)),$(strip $(BUMP)),)
+BUILD_VERSION_PREREQ := $(if $(strip $(BAKA_BUMP)$(BAKA_SET_VERSION)),bump,)
+
+.PHONY: help doctor build install bump
 
 help:
 	@printf 'Baka Trans — local build targets\n'
 	@printf '  make doctor    verify required toolchain and runtime deps\n'
 	@printf '  make build     sync deps and build the desktop app (.app + .dmg)\n'
+	@printf '                 BUMP=1 increments the version first; VERSION=x.y.z sets it\n'
 	@printf '  make install   build, then install the app into /Applications\n'
+	@printf '  make bump      increment the patch version (VERSION=x.y.z to set one)\n'
 
 doctor:
 	@printf '\n=== Baka Trans — environment check ===\n\n'
@@ -135,7 +153,24 @@ doctor:
 	fi; \
 	printf '✓ environment looks good\n\n'
 
-build: doctor
+# Local version bump: patch++ by default, VERSION=x.y.z for an exact one.
+# Runs set-version.mjs --force — local builds may run on a dirty tree or a
+# feature branch; the guarded release path stays `npm run version:set`.
+bump:
+	@if [ -n "$(BAKA_BUMP)" ] && [ -n "$(BAKA_SET_VERSION)" ]; then \
+		printf '✗ pass BUMP=1 or VERSION=x.y.z — not both\n'; \
+		exit 1; \
+	fi; \
+	OLD=$$(node -p "require('./package.json').version"); \
+	if [ -n "$(BAKA_SET_VERSION)" ]; then \
+		node scripts/set-version.mjs "$(BAKA_SET_VERSION)" --force; \
+	else \
+		node scripts/set-version.mjs --bump --force; \
+	fi; \
+	NEW=$$(node -p "require('./package.json').version"); \
+	printf '[ver] %s -> %s\n' "$$OLD" "$$NEW"
+
+build: doctor $(BUILD_VERSION_PREREQ)
 	@if [ "$$(uname -s)" = "Darwin" ]; then \
 		rm -f "$(BUNDLE_ROOT)/macos/"rw.*.dmg 2>/dev/null || true; \
 		WRS_CACHE=src-tauri/target/release/build/whisper-rs-sys-*/out/build/CMakeCache.txt; \

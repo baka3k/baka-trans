@@ -318,6 +318,19 @@ make build MACOSX_DEPLOYMENT_TARGET=11.0
 
 > **Note:** The whisper-rs-sys CMake cache does not automatically pick up `MACOSX_DEPLOYMENT_TARGET` changes. `make build` handles this by detecting stale caches and running `cargo clean -p whisper-rs-sys` when needed (one-time ~15s cost).
 
+#### Version bumping
+
+`make build` can bump the version before building — the DMG is then named after the new version (e.g. `Baka Trans_0.4.1_aarch64.dmg`):
+
+```bash
+make build BUMP=1          # increment the patch version (0.4.0 → 0.4.1), then build
+make build VERSION=0.5.0   # set an exact version, then build
+make bump                  # increment the patch version only
+make bump VERSION=0.5.0    # set an exact version only
+```
+
+The bump syncs package.json, package-lock.json, src-tauri/tauri.conf.json, src-tauri/Cargo.toml and src-tauri/Cargo.lock through `scripts/set-version.mjs`. Local bumps run with `--force`, skipping the "on main + clean tree" guard — the guarded release path is unchanged (`npm run version:set <semver>`). Flags are honored from the command line only, so a stray `VERSION` in the environment cannot hijack a build. `BUMP=1` and `VERSION=x.y.z` together is an error.
+
 After a successful build the artifacts are verified and their paths printed:
 
 - `src-tauri/target/release/bundle/macos/Baka Trans.app`
@@ -560,7 +573,7 @@ baka-trans/
 │   └── hy-mt/              # Hy-MT translation runtime
 ├── scripts/                # Build and release automation
 ├── docs/                   # Guides, release notes, design docs
-├── Makefile                # doctor + build + install targets
+├── Makefile                # doctor + build + bump + install targets
 ├── package.json            # Node.js dependencies and scripts
 └── vite.config.ts          # Vite bundler configuration
 ```
