@@ -318,6 +318,30 @@ make build MACOSX_DEPLOYMENT_TARGET=11.0
 
 > **Note:** The whisper-rs-sys CMake cache does not automatically pick up `MACOSX_DEPLOYMENT_TARGET` changes. `make build` handles this by detecting stale caches and running `cargo clean -p whisper-rs-sys` when needed (one-time ~15s cost).
 
+After a successful build the artifacts are verified and their paths printed:
+
+- `src-tauri/target/release/bundle/macos/Baka Trans.app`
+- `src-tauri/target/release/bundle/dmg/Baka Trans_<version>_<arch>.dmg`
+
+Stale hdiutil staging files (`rw.*.dmg`, left behind when a DMG build is interrupted) are removed at the start of each build.
+
+### `make install`
+
+Builds first (same pipeline as `make build`), then installs the fresh bundle straight into `/Applications` — no DMG drag-and-drop needed:
+
+```bash
+make install
+```
+
+Behavior:
+
+1. Quits a running instance of Baka Trans (graceful AppleScript quit, `pkill` as fallback) so a live bundle is never deleted.
+2. Replaces `/Applications/Baka Trans.app` with the freshly built bundle (`ditto`).
+3. Falls back to `sudo` only if `/Applications` is not writable by the current user.
+4. Verifies the copy and prints the launch command (`open -a "Baka Trans"`).
+
+The locally built app is unsigned but not quarantined, so it launches from /Applications without a Gatekeeper prompt.
+
 ---
 
 ## Building the Installer
@@ -536,7 +560,7 @@ baka-trans/
 │   └── hy-mt/              # Hy-MT translation runtime
 ├── scripts/                # Build and release automation
 ├── docs/                   # Guides, release notes, design docs
-├── Makefile                # doctor + build targets
+├── Makefile                # doctor + build + install targets
 ├── package.json            # Node.js dependencies and scripts
 └── vite.config.ts          # Vite bundler configuration
 ```

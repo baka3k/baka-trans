@@ -2,7 +2,8 @@
 #
 # Targets:
 #   make doctor   Verify required toolchain and runtime deps are present.
-#   make build    Sync deps and build the desktop app via Tauri.
+#   make build    Sync deps and build the desktop app via Tauri (.app + .dmg).
+#   make install  Build, then install the .app into /Applications (macOS).
 #
 # Notes:
 #   - The app reaches a translation model over HTTP via an OpenAI-compatible
@@ -38,6 +39,15 @@
 #     (`signingIdentity: null`) so `make build` produces an unsigned `.app`
 #     for local smoke-testing. Re-enable when the Apple Development cert is
 #     installed in your keychain.
+#   - `make install` depends on `build`, then copies the fresh bundle into
+#     /Applications/Baka Trans.app: it quits a running instance first,
+#     replaces the old bundle, and falls back to sudo when /Applications is
+#     not writable by the current user. The unsigned local build carries no
+#     quarantine attribute, so it launches straight from /Applications
+#     without a Gatekeeper prompt.
+#   - Stale hdiutil staging files (`rw.*.dmg`, left behind when a DMG build
+#     is interrupted) are removed at the start of `make build` — they can
+#     quietly pile up to gigabytes under bundle/macos/.
 
 SHELL := /bin/bash
 
@@ -52,16 +62,24 @@ else
     HYMT_SIDECAR = @printf 'skipped (non-Darwin: build via scripts/build-hy-mt-sidecar.ps1)\n'
 endif
 
+# Bundle paths (keep in sync with productName/identifier in src-tauri/tauri.conf.json).
+APP_NAME := Baka Trans
+BUNDLE_IDENTIFIER := dev.baka3k.baka-trans
+BUNDLE_ROOT := src-tauri/target/release/bundle
+APP_BUNDLE := $(BUNDLE_ROOT)/macos/$(APP_NAME).app
+DMG_DIR := $(BUNDLE_ROOT)/dmg
+
 .DEFAULT_GOAL := help
 
 WRS_CLEAR_STAMP := .cargo/wrs-cleared
 
-.PHONY: help doctor build
+.PHONY: help doctor build install
 
 help:
 	@printf 'Baka Trans — local build targets\n'
-	@printf '  make doctor   verify required toolchain and runtime deps\n'
-	@printf '  make build     sync deps and build the desktop app\n'
+	@printf '  make doctor    verify required toolchain and runtime deps\n'
+	@printf '  make build     sync deps and build the desktop app (.app + .dmg)\n'
+	@printf '  make install   build, then install the app into /Applications\n'
 
 doctor:
 	@printf '\n=== Baka Trans — environment check ===\n\n'
@@ -119,6 +137,7 @@ doctor:
 
 build: doctor
 	@if [ "$$(uname -s)" = "Darwin" ]; then \
+		rm -f "$(BUNDLE_ROOT)/macos/"rw.*.dmg 2>/dev/null || true; \
 		WRS_CACHE=src-tauri/target/release/build/whisper-rs-sys-*/out/build/CMakeCache.txt; \
 		CACHED_OSX=$$(grep -h '^CMAKE_OSX_DEPLOYMENT_TARGET:' $$WRS_CACHE 2>/dev/null | head -1 | cut -d= -f2); \
 		if [ ! -f $(WRS_CLEAR_STAMP) ] || [ .cargo/config.toml -nt $(WRS_CLEAR_STAMP) ] || [ "$$CACHED_OSX" != "$(MACOSX_DEPLOYMENT_TARGET)" ]; then \
@@ -145,4 +164,54 @@ build: doctor
 	$(BUILD_ENV) $(HYMT_SIDECAR)
 	@printf '\n[5/5] running tauri build\n'
 	$(BUILD_ENV) npm run tauri -- build
-	@printf '\n✓ build complete — see src-tauri/target/release/bundle/\n'
+	@if [ "$$(uname -s)" = "Darwin" ]; then \
+		if [ ! -d "$(APP_BUNDLE)" ]; then \
+			printf '✗ expected bundle missing after tauri build: %s\n' "$(APP_BUNDLE)"; \
+			exit 1; \
+		fi; \
+		DMG=$$(ls -t "$(DMG_DIR)"/*.dmg 2>/dev/null | head -n1); \
+		if [ -z "$$DMG" ]; then \
+			printf '✗ no .dmg produced in %s\n' "$(DMG_DIR)"; \
+			exit 1; \
+		fi; \
+		printf '\n✓ build complete\n'; \
+		printf '  app  %s (%s)\n' "$(APP_BUNDLE)" "$$(du -sh "$(APP_BUNDLE)" | cut -f1)"; \
+		printf '  dmg  %s (%s)\n' "$$DMG" "$$(du -sh "$$DMG" | cut -f1)"; \
+	else \
+		printf '\n✓ build complete — see src-tauri/target/release/bundle/\n'; \
+	fi
+
+# Install the freshly built bundle into /Applications (macOS only).
+# Replaces any previously installed copy; quits a running instance first so
+# we never delete a live bundle. sudo is only used when /Applications is not
+# writable by the current user.
+install: build
+	@if [ "$$(uname -s)" != "Darwin" ]; then \
+		printf 'make install is macOS-only — it copies the built .app into /Applications\n'; \
+		exit 1; \
+	fi
+	@if [ ! -d "$(APP_BUNDLE)" ]; then \
+		printf '✗ %s not found — run make build first\n' "$(APP_BUNDLE)"; \
+		exit 1; \
+	fi
+	@printf '\n=== Installing %s into /Applications ===\n' "$(APP_NAME).app"
+	@if pgrep -xq "$(APP_NAME)"; then \
+		printf '[pre] quitting running instance of %s\n' "$(APP_NAME)"; \
+		osascript -e 'tell application id "$(BUNDLE_IDENTIFIER)" to quit' >/dev/null 2>&1 || true; \
+		sleep 1; \
+		pkill -x "$(APP_NAME)" 2>/dev/null || true; \
+	fi
+	@if [ -w /Applications ]; then \
+		SUDO=; \
+	else \
+		SUDO=sudo; \
+		printf '[pre] /Applications is not writable by %s — falling back to sudo\n' "$$(whoami)"; \
+	fi; \
+	$$SUDO rm -rf "/Applications/$(APP_NAME).app"; \
+	$$SUDO ditto "$(APP_BUNDLE)" "/Applications/$(APP_NAME).app"; \
+	if [ ! -d "/Applications/$(APP_NAME).app" ]; then \
+		printf '✗ copy into /Applications failed\n'; \
+		exit 1; \
+	fi; \
+	printf '✓ installed /Applications/%s.app\n' "$(APP_NAME)"; \
+	printf '  launch it with: open -a "%s"\n' "$(APP_NAME)"
